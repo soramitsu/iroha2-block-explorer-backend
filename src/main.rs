@@ -82,17 +82,35 @@ mod args {
 
 mod web {
     use actix_web::{
-        error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder,
+        error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Scope,
     };
     use color_eyre::eyre::{eyre, WrapErr};
     use derive_more::Display;
     use iroha_client::client::Client as IrohaClient;
-    use std::sync::Mutex;
-
-    // type WebResult = Result<impl Responder, Into<std::error::Error>>;
+    use serde::Serialize;
+    use std::sync::{Mutex, MutexGuard};
 
     pub struct AppState {
         iroha_client: Mutex<IrohaClient>,
+    }
+
+    impl AppState {
+        pub fn lock_client(&self) -> color_eyre::Result<MutexGuard<IrohaClient>> {
+            Ok(self
+                .iroha_client
+                .lock()
+                .map_err(|_| eyre!("failed to lock iroha client mutex"))?)
+        }
+
+        pub fn with_client<F, T>(&self, op: F) -> color_eyre::Result<T>
+        where
+            F: Fn(&mut MutexGuard<IrohaClient>) -> T,
+            T: Sized,
+        {
+            let mut client = self.lock_client()?;
+            let res = op(&mut client);
+            Ok(res)
+        }
     }
 
     #[derive(Display, Debug)]
@@ -104,7 +122,9 @@ mod web {
         fn error_response(&self) -> HttpResponse {
             HttpResponse::build(self.status_code())
                 .insert_header(http::header::ContentType::html())
-                .body(self.to_string())
+                .body(match self {
+                    WebError::Internal(_) => "Internal Server Error",
+                })
         }
 
         fn status_code(&self) -> http::StatusCode {
@@ -118,18 +138,243 @@ mod web {
         }
     }
 
-    #[get("/status")]
-    async fn get_status(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let status = {
-            let lock = data
-                .iroha_client
-                .lock()
-                .map_err(|_| eyre!("mutex is poisoned"))?;
-            let status = lock.get_status().wrap_err("failed to get status")?;
-            status
-        };
+    mod status {
+        use super::*;
 
-        Ok(HttpResponse::Ok().body(format!("{:?}", status)))
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let status =
+                data.with_client(|client| client.get_status().wrap_err("failed to get status"))??;
+
+            Ok(web::Json(status))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/status").service(index)
+        }
+    }
+
+    mod accounts {
+        use super::{assets::AssetDTO, *};
+        use iroha_data_model::prelude::{Account, FindAllAccounts};
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        pub struct AccountDTO {
+            id: String,
+            assets: Vec<AssetDTO>,
+            // what else add here?
+        }
+
+        impl From<Account> for AccountDTO {
+            fn from(acc: Account) -> Self {
+                let assets: Vec<AssetDTO> = acc
+                    .assets
+                    .into_iter()
+                    .map(|(_, asset)| AssetDTO::from(asset))
+                    .collect();
+
+                Self {
+                    id: acc.id.to_string(),
+                    assets,
+                }
+            }
+        }
+
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let accounts: Vec<Account> =
+                data.with_client(|client| client.request(FindAllAccounts::new()))??;
+
+            let accounts: Vec<AccountDTO> =
+                accounts.into_iter().map(|x| AccountDTO::from(x)).collect();
+
+            Ok(web::Json(accounts))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/accounts").service(index)
+        }
+    }
+
+    mod domains {
+        use iroha_data_model::prelude::{Domain, FindAllDomains};
+        use serde::Serialize;
+
+        use super::{accounts::AccountDTO, *};
+
+        #[derive(Serialize)]
+        struct DomainDTO {
+            id: String,
+            accounts: Vec<AccountDTO>,
+        }
+
+        impl From<Domain> for DomainDTO {
+            fn from(domain: Domain) -> Self {
+                Self {
+                    id: domain.id.to_string(),
+                    accounts: domain
+                        .accounts
+                        .into_iter()
+                        .map(|(_, acc)| AccountDTO::from(acc))
+                        .collect(),
+                }
+            }
+        }
+
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let domains = data.with_client(|client| client.request(FindAllDomains::new()))??;
+            let domains: Vec<DomainDTO> = domains.into_iter().map(|x| x.into()).collect();
+            Ok(web::Json(domains))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/domains").service(index)
+        }
+    }
+
+    mod assets {
+        use super::*;
+        use iroha_data_model::prelude::{
+            Asset, AssetDefinition, AssetValue, AssetValueType, FindAllAssets,
+            FindAllAssetsDefinitions,
+        };
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        #[serde(tag = "t", content = "c")]
+        pub enum AssetValueDTO {
+            Quantity(u32),
+            BigQuantity(String),
+            Fixed(String),
+            Store, // no associated data?
+        }
+
+        impl From<AssetValue> for AssetValueDTO {
+            fn from(val: AssetValue) -> Self {
+                use AssetValue::*;
+
+                match val {
+                    Quantity(x) => Self::Quantity(x),
+                    BigQuantity(x) => Self::BigQuantity(x.to_string()),
+                    Fixed(x) => Self::Fixed(f64::from(x).to_string()),
+                    Store(_) => Self::Store,
+                }
+            }
+        }
+
+        #[derive(Serialize)]
+        pub struct AssetDTO {
+            account_id: String,
+            definition_id: String,
+            value: AssetValueDTO,
+        }
+
+        impl From<Asset> for AssetDTO {
+            fn from(val: Asset) -> Self {
+                Self {
+                    account_id: val.id.account_id.to_string(),
+                    definition_id: val.id.definition_id.to_string(),
+                    value: AssetValueDTO::from(val.value),
+                }
+            }
+        }
+
+        #[derive(Serialize)]
+        pub struct AssetDefinitionDTO {
+            id: String,
+            value_type: AssetValueTypeDTO,
+        }
+
+        impl From<AssetDefinition> for AssetDefinitionDTO {
+            fn from(val: AssetDefinition) -> Self {
+                Self {
+                    id: val.id.to_string(),
+                    value_type: AssetValueTypeDTO(val.value_type),
+                }
+            }
+        }
+
+        #[derive(Serialize)]
+        pub struct AssetValueTypeDTO(AssetValueType);
+
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let assets = data.with_client(|client| client.request(FindAllAssets::new()))??;
+            let assets: Vec<AssetDTO> = assets.into_iter().map(|x| x.into()).collect();
+            Ok(web::Json(assets))
+        }
+
+        #[get("/definitions")]
+        async fn definitions_index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let items =
+                data.with_client(|client| client.request(FindAllAssetsDefinitions::new()))??;
+            let items: Vec<AssetDefinitionDTO> = items.into_iter().map(|x| x.into()).collect();
+            Ok(web::Json(items))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/assets")
+                .service(index)
+                .service(definitions_index)
+        }
+    }
+
+    mod peers {
+        use super::*;
+        use iroha_data_model::prelude::{FindAllPeers, Peer, PeerId};
+
+        #[derive(Serialize)]
+        pub struct PeerDTO {
+            #[serde(flatten)]
+            peer_id: PeerId,
+        }
+
+        impl From<Peer> for PeerDTO {
+            fn from(val: Peer) -> Self {
+                Self { peer_id: val.id }
+            }
+        }
+
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let items = data.with_client(|client| client.request(FindAllPeers::new()))??;
+            let items: Vec<PeerDTO> = items.into_iter().map(|x| x.into()).collect();
+            Ok(web::Json(items))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/peers").service(index)
+        }
+    }
+
+    mod roles {
+        use super::*;
+        use iroha_data_model::prelude::{FindAllRoles, Role};
+
+        #[derive(Serialize)]
+        pub struct RoleDTO {
+            #[serde(flatten)]
+            inner: Role,
+        }
+
+        impl From<Role> for RoleDTO {
+            fn from(val: Role) -> Self {
+                Self { inner: val }
+            }
+        }
+
+        #[get("")]
+        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let items = data.with_client(|client| client.request(FindAllRoles {}))??;
+            let items: Vec<RoleDTO> = items.into_iter().map(|x| x.into()).collect();
+            Ok(web::Json(items))
+        }
+
+        pub fn service() -> Scope {
+            web::scope("/roles").service(index)
+        }
     }
 
     impl AppState {
@@ -147,7 +392,12 @@ mod web {
             App::new()
                 .app_data(state.clone())
                 .wrap(super::logger::TracingLogger::default())
-                .service(get_status)
+                .service(status::service())
+                .service(accounts::service())
+                .service(domains::service())
+                .service(assets::service())
+                .service(peers::service())
+                .service(roles::service())
         })
         .bind(("127.0.0.1", port))?
         .run();
