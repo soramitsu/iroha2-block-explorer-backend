@@ -82,7 +82,8 @@ mod args {
 
 mod web {
     use actix_web::{
-        error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Scope,
+        error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Result,
+        Scope,
     };
     use color_eyre::eyre::{eyre, WrapErr};
     use derive_more::Display;
@@ -138,45 +139,56 @@ mod web {
         }
     }
 
-    mod status {
-        use super::*;
-
-        #[get("")]
-        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-            let status =
-                data.with_client(|client| client.get_status().wrap_err("failed to get status"))??;
-
-            Ok(web::Json(status))
-        }
-
-        pub fn service() -> Scope {
-            web::scope("/status").service(index)
-        }
-    }
-
     mod accounts {
         use super::{assets::AssetDTO, *};
-        use iroha_data_model::prelude::{Account, FindAllAccounts};
+        use iroha_crypto::PublicKey;
+        use iroha_data_model::prelude::{
+            Account, FindAllAccounts, Metadata, PermissionToken, SignatureCheckCondition,
+        };
         use serde::Serialize;
 
         #[derive(Serialize)]
         pub struct AccountDTO {
             id: String,
             assets: Vec<AssetDTO>,
-            // what else add here?
+            signatories: Vec<PublicKey>,
+            signature_check_condition: SignatureCheckCondition,
+            metadata: Metadata,
+            permission_tokens: Vec<PermissionToken>,
+            roles: Vec<String>,
         }
 
         impl From<Account> for AccountDTO {
-            fn from(acc: Account) -> Self {
-                let assets: Vec<AssetDTO> = acc
-                    .assets
+            fn from(
+                Account {
+                    assets,
+                    id,
+                    metadata,
+                    roles,
+                    signatories,
+                    permission_tokens,
+                    signature_check_condition,
+                    ..
+                }: Account,
+            ) -> Self {
+                let assets: Vec<AssetDTO> = assets
                     .into_iter()
                     .map(|(_, asset)| AssetDTO::from(asset))
                     .collect();
 
+                let roles: Vec<String> = roles.into_iter().map(|x| x.to_string()).collect();
+                let signatories: Vec<PublicKey> = signatories.into_iter().collect();
+                let permission_tokens: Vec<PermissionToken> =
+                    permission_tokens.into_iter().collect();
+
                 Self {
-                    id: acc.id.to_string(),
+                    id: id.to_string(),
                     assets,
+                    metadata,
+                    roles,
+                    signatories,
+                    permission_tokens,
+                    signature_check_condition,
                 }
             }
         }
@@ -198,26 +210,39 @@ mod web {
     }
 
     mod domains {
-        use iroha_data_model::prelude::{Domain, FindAllDomains};
+        use iroha_data_model::prelude::{Domain, FindAllDomains, Metadata};
         use serde::Serialize;
 
-        use super::{accounts::AccountDTO, *};
+        use super::{accounts::AccountDTO, assets::AssetDefinitionDTO, *};
 
         #[derive(Serialize)]
         struct DomainDTO {
             id: String,
             accounts: Vec<AccountDTO>,
+            logo: Option<String>,
+            metadata: Metadata, // add metadata and asset definitions here?
+            asset_definitions: Vec<AssetDefinitionDTO>,
         }
 
         impl From<Domain> for DomainDTO {
-            fn from(domain: Domain) -> Self {
+            fn from(
+                Domain {
+                    id,
+                    accounts,
+                    logo,
+                    metadata,
+                    asset_definitions,
+                }: Domain,
+            ) -> Self {
                 Self {
-                    id: domain.id.to_string(),
-                    accounts: domain
-                        .accounts
+                    id: id.to_string(),
+                    accounts: accounts
                         .into_iter()
                         .map(|(_, acc)| AccountDTO::from(acc))
                         .collect(),
+                    logo: logo.map(|x| x.as_ref().to_owned()),
+                    metadata,
+                    asset_definitions: AssetDefinitionDTO::vec_from_map(asset_definitions),
                 }
             }
         }
@@ -236,9 +261,12 @@ mod web {
 
     mod assets {
         use super::*;
-        use iroha_data_model::prelude::{
-            Asset, AssetDefinition, AssetValue, AssetValueType, FindAllAssets,
-            FindAllAssetsDefinitions,
+        use iroha_data_model::{
+            asset::AssetDefinitionsMap,
+            prelude::{
+                Asset, AssetDefinition, AssetValue, AssetValueType, FindAllAssets,
+                FindAllAssetsDefinitions, Metadata,
+            },
         };
         use serde::Serialize;
 
@@ -248,7 +276,7 @@ mod web {
             Quantity(u32),
             BigQuantity(String),
             Fixed(String),
-            Store, // no associated data?
+            Store(Metadata), // no associated data?
         }
 
         impl From<AssetValue> for AssetValueDTO {
@@ -259,7 +287,7 @@ mod web {
                     Quantity(x) => Self::Quantity(x),
                     BigQuantity(x) => Self::BigQuantity(x.to_string()),
                     Fixed(x) => Self::Fixed(f64::from(x).to_string()),
-                    Store(_) => Self::Store,
+                    Store(x) => Self::Store(x),
                 }
             }
         }
@@ -285,13 +313,30 @@ mod web {
         pub struct AssetDefinitionDTO {
             id: String,
             value_type: AssetValueTypeDTO,
+            mintable: bool,
+        }
+
+        impl AssetDefinitionDTO {
+            pub fn vec_from_map(map: AssetDefinitionsMap) -> Vec<Self> {
+                map.into_iter()
+                    .map(|(_, def)| def.definition.into())
+                    .collect()
+            }
         }
 
         impl From<AssetDefinition> for AssetDefinitionDTO {
-            fn from(val: AssetDefinition) -> Self {
+            fn from(
+                AssetDefinition {
+                    value_type,
+                    id,
+                    mintable,
+                    ..
+                }: AssetDefinition,
+            ) -> Self {
                 Self {
-                    id: val.id.to_string(),
-                    value_type: AssetValueTypeDTO(val.value_type),
+                    id: id.to_string(),
+                    value_type: AssetValueTypeDTO(value_type),
+                    mintable,
                 }
             }
         }
@@ -321,31 +366,45 @@ mod web {
         }
     }
 
-    mod peers {
+    mod peer {
         use super::*;
         use iroha_data_model::prelude::{FindAllPeers, Peer, PeerId};
 
         #[derive(Serialize)]
-        pub struct PeerDTO {
-            #[serde(flatten)]
-            peer_id: PeerId,
-        }
+        pub struct PeerDTO(PeerId);
 
         impl From<Peer> for PeerDTO {
             fn from(val: Peer) -> Self {
-                Self { peer_id: val.id }
+                Self(val.id)
             }
         }
 
-        #[get("")]
-        async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+        #[get("/peers")]
+        async fn peers(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
             let items = data.with_client(|client| client.request(FindAllPeers::new()))??;
             let items: Vec<PeerDTO> = items.into_iter().map(|x| x.into()).collect();
             Ok(web::Json(items))
         }
 
+        // FindAllParameters is WIP for now
+        // https://github.com/hyperledger/iroha/issues/1966
+        // #[get("/parameters")]
+        // async fn parameters(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+        //     let items = data.with_client(|client| client.request(FindAllParameters::new()))??;
+        //     let items: Vec<PeerDTO> = items.into_iter().map(|x| x.into()).collect();
+        //     Ok(web::Json(items))
+        // }
+
+        #[get("/status")]
+        async fn status(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
+            let status =
+                data.with_client(|client| client.get_status().wrap_err("failed to get status"))??;
+
+            Ok(web::Json(status))
+        }
+
         pub fn service() -> Scope {
-            web::scope("/peers").service(index)
+            web::scope("/peer").service(peers).service(status)
         }
     }
 
@@ -354,14 +413,11 @@ mod web {
         use iroha_data_model::prelude::{FindAllRoles, Role};
 
         #[derive(Serialize)]
-        pub struct RoleDTO {
-            #[serde(flatten)]
-            inner: Role,
-        }
+        pub struct RoleDTO(Role);
 
         impl From<Role> for RoleDTO {
             fn from(val: Role) -> Self {
-                Self { inner: val }
+                Self(val)
             }
         }
 
@@ -385,6 +441,10 @@ mod web {
         }
     }
 
+    async fn default_route() -> impl Responder {
+        HttpResponse::NotFound().body("Not Found")
+    }
+
     pub fn server(state: AppState, port: u16) -> color_eyre::Result<actix_server::Server> {
         let state = web::Data::new(state);
 
@@ -392,12 +452,12 @@ mod web {
             App::new()
                 .app_data(state.clone())
                 .wrap(super::logger::TracingLogger::default())
-                .service(status::service())
                 .service(accounts::service())
                 .service(domains::service())
                 .service(assets::service())
-                .service(peers::service())
                 .service(roles::service())
+                .service(peer::service())
+                .default_service(web::route().to(default_route))
         })
         .bind(("127.0.0.1", port))?
         .run();

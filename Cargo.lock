@@ -1516,6 +1516,7 @@ dependencies = [
  "color-eyre",
  "derive_more",
  "iroha_client",
+ "iroha_crypto",
  "iroha_data_model",
  "serde",
  "serde_json",
