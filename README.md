@@ -24,5 +24,26 @@ Check:
 
 ```
 $ curl http://localhost:4000/status
-Status { peers: 0, blocks: 1, txs: 1, uptime: Uptime(107.296s) }%   
+Status { peers: 0, blocks: 1, txs: 1, uptime: Uptime(107.296s) }%
 ```
+
+## API
+
+DTOs are described at [api.ts](./api.ts).
+
+- `GET /accounts`
+  - Response: `Account[]`
+- `GET /assets`
+  - Response: `Asset[]`
+- `GET /assets/definitions`
+  - Response: `AssetDefinition[]`
+- `GET /domains`
+  - Response: `Domain[]`
+- `GET /peer/peers`
+  - Response: `Peer[]`
+- _TODO `GET /peer/parameters`_
+  - Reponse: ?
+- `GET /peer/status`
+  - Reponse: `Status`
+- `GET /roles`
+  - Response: `Role[]`
