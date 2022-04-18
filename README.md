@@ -35,7 +35,7 @@ curl http://localhost:4000/status
   cargo build --release
   ```
 
-- Prepare Iroha Client config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md))
+- Prepare Iroha Client config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md)). **Define target peer location here**.
 
 - Run web server:
 
