@@ -41,7 +41,7 @@ curl http://localhost:4000/status
 
   ```bash
   ./target/release/iroha2_explorer_web \
-      -c /path/to/client_config.json
+      -c /path/to/client_config.json \
       -p 8080 # may be env PORT, default is 4000
   ```
 
