@@ -22,8 +22,9 @@ OPTIONS:
 
 Check:
 
-```bash
-curl http://localhost:4000/peer/status
+```
+> curl http://localhost:4000
+Welcome to Iroha 2 Block Explorer!
 ```
 
 ## Deploy

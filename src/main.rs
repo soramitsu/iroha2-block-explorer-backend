@@ -285,7 +285,8 @@ mod web {
             let accounts: Vec<AccountDTO> =
                 accounts.into_iter().map(|x| AccountDTO::from(x)).collect();
 
-            Ok(web::Json(accounts))
+            let paginated = pagination::Paginated::from_the_whole_list(accounts)?;
+            Ok(web::Json(paginated))
         }
 
         pub fn service() -> Scope {
@@ -353,7 +354,9 @@ mod web {
         async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
             let domains = data.with_client(|client| client.request(FindAllDomains::new()))??;
             let domains: Vec<DomainDTO> = domains.into_iter().map(|x| x.into()).collect();
-            Ok(web::Json(domains))
+            Ok(web::Json(pagination::Paginated::from_the_whole_list(
+                domains,
+            )?))
         }
 
         pub fn service() -> Scope {
@@ -426,7 +429,8 @@ mod web {
         async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
             let assets = data.with_client(|client| client.request(FindAllAssets::new()))??;
             let assets: Vec<AssetDTO> = assets.into_iter().map(|x| x.into()).collect();
-            Ok(web::Json(assets))
+            let paginated = pagination::Paginated::from_the_whole_list(assets)?;
+            Ok(web::Json(paginated))
         }
 
         #[get("/{definition_id}/{account_id}")]
@@ -537,7 +541,9 @@ mod web {
             let items =
                 data.with_client(|client| client.request(FindAllAssetsDefinitions::new()))??;
             let items: Vec<AssetDefinitionDTO> = items.into_iter().map(|x| x.into()).collect();
-            Ok(web::Json(items))
+            Ok(web::Json(pagination::Paginated::from_the_whole_list(
+                items,
+            )?))
         }
 
         pub fn service() -> Scope {
