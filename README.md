@@ -27,25 +27,6 @@ Check:
 Welcome to Iroha 2 Block Explorer!
 ```
 
-## Deploy
-
-- [Install Rust](https://www.rust-lang.org/tools/install)
-- Build binary:
-
-  ```bash
-  cargo build --release
-  ```
-
-- Prepare Iroha Client config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md))
-
-- Run web server:
-
-  ```bash
-  ./target/release/iroha2_explorer_web \
-      -c /path/to/client_config.json
-      -p 8080 # may be env PORT, default is 4000
-  ```
-
 ## API
 
 DTOs are described at [api.ts](./api.ts).
