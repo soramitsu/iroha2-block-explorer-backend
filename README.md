@@ -50,6 +50,10 @@ Welcome to Iroha 2 Block Explorer!
 
 DTOs are described at [api.ts](./api.ts).
 
+> **Warning**
+>
+> Some DTOs (most of them) may contain bigints. If there are numbers greater than JavaScript's native `number` can fit (`f64`), then native `JSON` decoder will throw an error. You should decode DTOs with some special JSON-decoder than is fine with bigints, e.g. https://www.npmjs.com/package/json-bigint
+
 - `GET /` - web server health check. Returns 200 OK.
 
 - **TODO** `GET /blocks`
@@ -102,11 +106,12 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<Asset>`
 
-- `GET /assets/{id}`
+- `GET /assets/{definition_id}/{account_id}`
 
   - Params:
 
-    - `id` - string. The id of the asset.
+    - `definition_id` - string. The id of the asset definition.
+    - `account_id` - string. The id of the account the asset belongs to.
 
   - Response: `Asset` or 404
 
@@ -120,12 +125,11 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<AssetDefinition>`
 
-- `GET /asset-definitions/{definition_id}/{account_id}`
+- **TODO** `GET /asset-definitions/{id}`
 
   - Params:
 
-    - `definition_id` - string. The id of the asset definition.
-    - `account_id` - string. The id of the account the asset belongs to.
+    - `id` - string. The id of the asset definition.
 
   - Response: `AssetDefinition` or 404
 

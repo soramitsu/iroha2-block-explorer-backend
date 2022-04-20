@@ -31,6 +31,7 @@ mod logger {
     }
 }
 
+/// Module contains app CLI arguments specific logic
 mod args {
     use color_eyre::Help as _;
     use color_eyre::{eyre::Context as _, Report, Result};
@@ -80,6 +81,7 @@ mod args {
     }
 }
 
+/// Module contains web-specific logic - server initialization, endpoints, DTOs etc
 mod web {
     use actix_web::{
         error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Scope,
@@ -90,11 +92,17 @@ mod web {
     use serde::Serialize;
     use std::sync::{Mutex, MutexGuard};
 
+    /// Web app state that may be injected in runtime
     pub struct AppState {
+        /// Pre-initialized Iroha Client
         iroha_client: Mutex<IrohaClient>,
     }
 
     impl AppState {
+        /// Tries to lock the client's mutex
+        ///
+        /// # Errors
+        /// Fails if mutex lock fails
         pub fn lock_client(&self) -> color_eyre::Result<MutexGuard<IrohaClient>> {
             Ok(self
                 .iroha_client
@@ -102,6 +110,10 @@ mod web {
                 .map_err(|_| eyre!("failed to lock iroha client mutex"))?)
         }
 
+        /// Locks client mutex and passes it into the closure. Returns the closure output.
+        ///
+        /// # Errors
+        /// Fails if mutex lock fails
         pub fn with_client<F, T>(&self, op: F) -> color_eyre::Result<T>
         where
             F: FnOnce(&mut MutexGuard<IrohaClient>) -> T,
@@ -113,8 +125,11 @@ mod web {
         }
     }
 
+    /// General error for all endpoints
     #[derive(Display, Debug)]
     enum WebError {
+        /// Some error that should be logged, but shouldn't be returned to
+        /// a client. Server should return an empty 500 error instead.
         Internal(color_eyre::Report),
     }
 
@@ -141,7 +156,7 @@ mod web {
     mod pagination {
         use super::*;
 
-        pub const DEFAULT_PAGE_SIZE: u32 = 15;
+        // pub const DEFAULT_PAGE_SIZE: u32 = 15;
 
         /// Represents some items list with its pagination data
         #[derive(Serialize)]
@@ -151,10 +166,12 @@ mod web {
         }
 
         impl<T> Paginated<T> {
+            /// Wraps some items list with a provided pagination data
             pub fn wrap(items: Vec<T>, pagination: Pagination) -> Self {
                 Self { items, pagination }
             }
 
+            /// It is primarily to fake real pagination
             pub fn from_the_whole_list(items: Vec<T>) -> color_eyre::Result<Self> {
                 let len: u32 = items.len().try_into()?;
                 let new_self = Self::wrap(items, Pagination::new(1, len, 1));
@@ -165,8 +182,11 @@ mod web {
         /// Represents pagination data
         #[derive(Serialize)]
         pub struct Pagination {
+            /// Current page. Starts from 1
             page_number: u32,
+            /// Represents pagination scale
             page_size: u32,
+            /// Total count of data pages in according to [`Pagination::page_size`]
             pages: u32,
         }
 
@@ -183,7 +203,6 @@ mod web {
 
     mod accounts {
         use super::{assets::AssetDTO, *};
-        // use iroha_crypto::PublicKey;
         use iroha_data_model::prelude::{
             Account, AccountId, FindAccountById, FindAllAccounts, Metadata,
         };
@@ -194,10 +213,7 @@ mod web {
         pub struct AccountDTO {
             id: String,
             assets: Vec<AssetDTO>,
-            // signatories: Vec<PublicKey>,
-            // signature_check_condition: SignatureCheckCondition,
             metadata: Metadata,
-            // permission_tokens: Vec<PermissionToken>,
             roles: Vec<String>,
         }
 
@@ -208,9 +224,6 @@ mod web {
                     id,
                     metadata,
                     roles,
-                    // signatories,
-                    // permission_tokens,
-                    // signature_check_condition,
                     ..
                 }: Account,
             ) -> Self {
@@ -220,18 +233,12 @@ mod web {
                     .collect();
 
                 let roles: Vec<String> = roles.into_iter().map(|x| x.to_string()).collect();
-                // let signatories: Vec<PublicKey> = signatories.into_iter().collect();
-                // let permission_tokens: Vec<PermissionToken> =
-                //     permission_tokens.into_iter().collect();
 
                 Self {
                     id: id.to_string(),
                     assets,
                     metadata,
                     roles,
-                    // signatories,
-                    // permission_tokens,
-                    // signature_check_condition,
                 }
             }
         }
@@ -271,9 +278,9 @@ mod web {
             data: web::Data<AppState>,
             id: web::Path<AccountIdInPath>,
         ) -> Result<impl Responder, WebError> {
+            // TODO handle not found error
             let account = data
                 .with_client(|client| client.request(FindAccountById::new(id.into_inner().0)))??;
-
             Ok(web::Json(AccountDTO::from(account)))
         }
 
@@ -439,6 +446,7 @@ mod web {
             path: web::Path<AssetIdInPath>,
         ) -> Result<impl Responder, WebError> {
             let asset_id: AssetId = path.into_inner().into();
+            // TODO handle not found error
             let asset =
                 data.with_client(|client| client.request(FindAssetById::new(asset_id)))??;
             Ok(web::Json(AssetDTO::from(asset)))
@@ -627,6 +635,7 @@ mod web {
         HttpResponse::Ok().body("Welcome to Iroha 2 Block Explorer!")
     }
 
+    /// Initializes a server listening on `127.0.0.1:<port>`. It should be awaited to be actually started.
     pub fn server(state: AppState, port: u16) -> color_eyre::Result<actix_server::Server> {
         let state = web::Data::new(state);
 
