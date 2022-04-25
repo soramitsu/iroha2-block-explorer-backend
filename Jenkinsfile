@@ -3,8 +3,7 @@
 def pipeline = new org.docker.AppPipeline(steps: this,
     dockerImageName:              'iroha2-block-explorer-backend',
     dockerRegistryCred:           'bot-iroha2-rw',
-    dockerFileName:               "${env.GIT_BRANCH=='master'?'release':'debug'}/Dockerfile",
-    triggerCommonBuildExpression: (env.BRANCH_NAME in ['develop','master', 'feature/DOPS-1749/create-CI']),
+    triggerCommonBuildExpression: false,
     secretScannerExclusion:       '.*Cargo.toml',
-    nameCI:                       'iroha2-block-explorer-backend-CI')
+    nameCI:                       'iroha2-block-explorer-backend-CI'
 pipeline.runPipeline()
