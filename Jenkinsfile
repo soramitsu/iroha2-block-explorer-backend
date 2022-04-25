@@ -5,5 +5,5 @@ def pipeline = new org.docker.AppPipeline(steps: this,
     dockerRegistryCred:           'bot-iroha2-rw',
     triggerCommonBuildExpression: false,
     secretScannerExclusion:       '.*Cargo.toml',
-    nameCI:                       'iroha2-block-explorer-backend-CI'
+    nameCI:                       'iroha2-block-explorer-backend-CI')
 pipeline.runPipeline()
