@@ -2,22 +2,24 @@
 
 ```
 $ cargo run -- -h
-   Compiling iroha2_explorer_web v0.1.0 (/home/re/dev/iroha2-block-explorer-backend)
-    Finished dev [unoptimized + debuginfo] target(s) in 6.46s
-     Running `target/debug/iroha2_explorer_web -h`
 iroha2_explorer_web 0.1.0
 Iroha 2 Explorer Backend
 
 USAGE:
     iroha2_explorer_web [OPTIONS]
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
 OPTIONS:
-    -c, --client-config <client-config>    `iroha_client` JSON configuration path [default: client_config.json]
-    -p, --port <port>                       [env: PORT=]  [default: 4000]
+    -c, --client-config <CLIENT_CONFIG>
+            `iroha_client` JSON configuration path [default: client_config.json]
+
+    -h, --help
+            Print help information
+
+    -p, --port <PORT>
+            [env: PORT=] [default: 4000]
+
+    -V, --version
+            Print version information
 ```
 
 Check:

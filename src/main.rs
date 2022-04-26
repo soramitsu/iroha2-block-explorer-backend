@@ -9,8 +9,9 @@ mod logger {
 
     /// Compose multiple layers into a `tracing`'s subscriber.
     fn get_subscriber(name: String, env_filter: String) -> impl Subscriber + Send + Sync {
-        let env_filter = EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new(env_filter));
-        let bunyan_formatter = BunyanFormattingLayer::new(name.into(), std::io::stdout);
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(env_filter));
+        let bunyan_formatter = BunyanFormattingLayer::new(name, std::io::stdout);
         Registry::default()
             .with(env_filter)
             .with(JsonStorageLayer)
@@ -31,25 +32,31 @@ mod logger {
     }
 }
 
-/// Module contains app CLI arguments specific logic
+/// App CLI arguments specific logic
 mod args {
+    use clap::Parser;
     use color_eyre::{eyre::Context as _, Help as _, Result};
     use iroha_client::Configuration as IrohaClientConfiguration;
-    use structopt::StructOpt;
 
-    #[derive(Debug, StructOpt)]
-    #[structopt(about = "Iroha 2 Explorer Backend")]
+    #[derive(Debug, Parser)]
+    #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
     pub struct Args {
-        #[structopt(short, long, default_value = "4000", env)]
+        #[clap(short, long, default_value = "4000", env)]
         pub port: u16,
 
-        #[structopt(
-            short = "c",
+        #[clap(
+            short = 'c',
             long,
             default_value = "client_config.json",
             help = "`iroha_client` JSON configuration path"
         )]
         pub client_config: String,
+    }
+
+    impl Args {
+        pub fn parse() -> Self {
+            Parser::parse()
+        }
     }
 
     #[derive(Debug)]
@@ -73,14 +80,14 @@ mod args {
     }
 }
 
-/// Module contains web-specific logic - server initialization, endpoints, DTOs etc
+/// Web-specific logic - server initialization, endpoints, DTOs etc
 mod web;
 
 use color_eyre::{eyre::WrapErr, Result};
 
 #[actix_web::main]
 async fn main() -> Result<()> {
-    let args: args::Args = structopt::StructOpt::from_args();
+    let args = args::Args::parse();
     let client_config = args::ArgsClientConfig::load(&args)?;
 
     logger::setup();

@@ -19,10 +19,9 @@ impl AppState {
     /// # Errors
     /// Fails if mutex lock fails
     pub fn lock_client(&self) -> color_eyre::Result<MutexGuard<IrohaClient>> {
-        Ok(self
-            .iroha_client
+        self.iroha_client
             .lock()
-            .map_err(|_| eyre!("failed to lock iroha client mutex"))?)
+            .map_err(|_| eyre!("failed to lock iroha client mutex"))
     }
 
     /// Locks client mutex and passes it into the closure. Returns the closure output.
@@ -53,6 +52,8 @@ impl ResponseError for WebError {
         HttpResponse::build(self.status_code())
             .insert_header(http::header::ContentType::html())
             .body(match self {
+                // We don't want to expose internal errors to the client, so here it is omitted.
+                // `actix-web` will log it anyway.
                 WebError::Internal(_) => "Internal Server Error",
             })
     }
@@ -179,10 +180,8 @@ mod accounts {
                     E: de::Error,
                 {
                     AccountId::from_str(v)
-                        .map(|x| AccountIdInPath(x))
-                        .map_err(|_parse_error| {
-                            E::invalid_value(de::Unexpected::Str(&v), &self)
-                        })
+                        .map(AccountIdInPath)
+                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(v), &self))
                 }
             }
 
@@ -196,8 +195,8 @@ mod accounts {
         id: web::Path<AccountIdInPath>,
     ) -> Result<impl Responder, WebError> {
         // TODO handle not found error
-        let account = data
-            .with_client(|client| client.request(FindAccountById::new(id.into_inner().0)))??;
+        let account =
+            data.with_client(|client| client.request(FindAccountById::new(id.into_inner().0)))??;
         Ok(web::Json(AccountDTO::from(account)))
     }
 
@@ -206,8 +205,7 @@ mod accounts {
         let accounts: Vec<Account> =
             data.with_client(|client| client.request(FindAllAccounts::new()))??;
 
-        let accounts: Vec<AccountDTO> =
-            accounts.into_iter().map(|x| AccountDTO::from(x)).collect();
+        let accounts: Vec<AccountDTO> = accounts.into_iter().map(AccountDTO::from).collect();
 
         let paginated = pagination::Paginated::from_the_whole_list(accounts)?;
         Ok(web::Json(paginated))
@@ -220,9 +218,7 @@ mod accounts {
 
 mod domains {
     use super::{accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, *};
-    use iroha_data_model::prelude::{
-        Domain, DomainId, FindAllDomains, FindDomainById, Metadata,
-    };
+    use iroha_data_model::prelude::{Domain, DomainId, FindAllDomains, FindDomainById, Metadata};
 
     #[derive(Serialize)]
     struct DomainDTO {
@@ -343,9 +339,9 @@ mod assets {
         pub definition_id: AssetDefinitionIdInPath,
     }
 
-    impl Into<AssetId> for AssetIdInPath {
-        fn into(self) -> AssetId {
-            AssetId::new(self.definition_id.0, self.account_id.0)
+    impl From<AssetIdInPath> for AssetId {
+        fn from(val: AssetIdInPath) -> Self {
+            AssetId::new(val.definition_id.0, val.account_id.0)
         }
     }
 
@@ -364,8 +360,7 @@ mod assets {
     ) -> Result<impl Responder, WebError> {
         let asset_id: AssetId = path.into_inner().into();
         // TODO handle not found error
-        let asset =
-            data.with_client(|client| client.request(FindAssetById::new(asset_id)))??;
+        let asset = data.with_client(|client| client.request(FindAssetById::new(asset_id)))??;
         Ok(web::Json(AssetDTO::from(asset)))
     }
 
@@ -378,9 +373,7 @@ mod asset_definitions {
     use super::*;
     use iroha_data_model::{
         asset::AssetDefinitionsMap,
-        prelude::{
-            AssetDefinition, AssetDefinitionId, AssetValueType, FindAllAssetsDefinitions,
-        },
+        prelude::{AssetDefinition, AssetDefinitionId, AssetValueType, FindAllAssetsDefinitions},
     };
     use serde::de::{self, Deserialize, Deserializer, Visitor};
     use std::{fmt, str::FromStr};
@@ -438,10 +431,8 @@ mod asset_definitions {
                     E: de::Error,
                 {
                     AssetDefinitionId::from_str(v)
-                        .map(|x| AssetDefinitionIdInPath(x))
-                        .map_err(|_parse_error| {
-                            E::invalid_value(de::Unexpected::Str(&v), &self)
-                        })
+                        .map(AssetDefinitionIdInPath)
+                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(v), &self))
                 }
             }
 
@@ -453,6 +444,7 @@ mod asset_definitions {
     pub struct AssetValueTypeDTO(AssetValueType);
 
     // WIP iroha does not support FindAssetDefinitionById yet
+    // https://github.com/hyperledger/iroha/pull/2126
     // #[get("/{id}")]
     // async fn show(
     //     data: web::Data<AppState>,
