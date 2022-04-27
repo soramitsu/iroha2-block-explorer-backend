@@ -5,7 +5,7 @@ mod logger {
     use tracing_log::LogTracer;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
-    pub use tracing::info;
+    pub use tracing::{error, info};
 
     /// Compose multiple layers into a `tracing`'s subscriber.
     fn get_subscriber(name: String, env_filter: String) -> impl Subscriber + Send + Sync {
@@ -36,7 +36,7 @@ mod logger {
 mod args {
     use clap::Parser;
     use color_eyre::{eyre::Context as _, Help as _, Result};
-    use iroha_client::Configuration as IrohaClientConfiguration;
+    use iroha_client::{client::Client as IrohaClient, Configuration as IrohaClientConfiguration};
 
     #[derive(Debug, Parser)]
     #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
@@ -51,6 +51,10 @@ mod args {
             help = "`iroha_client` JSON configuration path"
         )]
         pub client_config: String,
+
+        #[cfg(feature = "dev_actor")]
+        #[clap(long, help = "Run actor that fills Iroha with fake data")]
+        pub dev_actor: bool,
     }
 
     impl Args {
@@ -78,22 +82,48 @@ mod args {
             Ok(Self(cfg))
         }
     }
+
+    impl TryFrom<ArgsClientConfig> for IrohaClient {
+        type Error = color_eyre::Report;
+
+        fn try_from(ArgsClientConfig(cfg): ArgsClientConfig) -> color_eyre::Result<Self> {
+            Ok(Self::new(&cfg))
+        }
+    }
 }
 
 /// Web-specific logic - server initialization, endpoints, DTOs etc
 mod web;
 
+#[cfg(feature = "dev_actor")]
+mod dev_actor;
+
+use std::sync::{Arc, Mutex};
+
 use color_eyre::{eyre::WrapErr, Result};
+use iroha_client::client::Client as IrohaClient;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
     let args = args::Args::parse();
     let client_config = args::ArgsClientConfig::load(&args)?;
 
+    let client: IrohaClient = client_config
+        .try_into()
+        .wrap_err("Failed to construct Iroha Client")?;
+    let client = Arc::new(Mutex::new(client));
+
     logger::setup();
     logger::info!("Server is going to listen on {}", args.port);
 
-    web::server(web::AppState::new(&client_config.0), args.port)?
+    #[cfg(feature = "dev_actor")]
+    let _dev_actor = if args.dev_actor {
+        Some(dev_actor::DevActor::start(client.clone()))
+    } else {
+        None
+    };
+
+    web::server(web::AppState::new(client.clone()), args.port)?
         .await
         .wrap_err("Server run failed")
 }

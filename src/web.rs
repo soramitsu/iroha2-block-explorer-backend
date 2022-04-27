@@ -5,12 +5,12 @@ use color_eyre::eyre::{eyre, WrapErr};
 use derive_more::Display;
 use iroha_client::client::Client as IrohaClient;
 use serde::Serialize;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Web app state that may be injected in runtime
 pub struct AppState {
     /// Pre-initialized Iroha Client
-    iroha_client: Mutex<IrohaClient>,
+    iroha_client: Arc<Mutex<IrohaClient>>,
 }
 
 impl AppState {
@@ -36,6 +36,13 @@ impl AppState {
         let mut client = self.lock_client()?;
         let res = op(&mut client);
         Ok(res)
+    }
+
+    /// Creates new state with provided client
+    pub fn new(client: Arc<Mutex<IrohaClient>>) -> Self {
+        Self {
+            iroha_client: client,
+        }
     }
 }
 
@@ -66,6 +73,12 @@ impl ResponseError for WebError {
 impl From<color_eyre::Report> for WebError {
     fn from(err: color_eyre::Report) -> Self {
         Self::Internal(err)
+    }
+}
+
+impl From<iroha_data_model::ParseError> for WebError {
+    fn from(err: iroha_data_model::ParseError) -> Self {
+        Self::Internal(err.into())
     }
 }
 
@@ -134,26 +147,24 @@ mod accounts {
     }
 
     impl From<Account> for AccountDTO {
-        fn from(
-            Account {
-                assets,
-                id,
-                metadata,
-                roles,
-                ..
-            }: Account,
-        ) -> Self {
-            let assets: Vec<AssetDTO> = assets
+        fn from(account: Account) -> Self {
+            let assets: Vec<AssetDTO> = account
+                .assets()
                 .into_iter()
-                .map(|(_, asset)| AssetDTO::from(asset))
+                .map(|asset|
+                    // FIXME clone
+                    AssetDTO::from(asset.clone()
+                  ))
                 .collect();
 
-            let roles: Vec<String> = roles.into_iter().map(|x| x.to_string()).collect();
+            let roles: Vec<String> = account.roles().into_iter().map(|x| x.to_string()).collect();
 
             Self {
-                id: id.to_string(),
+                id: account.id().to_string(),
                 assets,
-                metadata,
+                metadata:
+                // FIXME clone
+                account.metadata().clone(),
                 roles,
             }
         }
@@ -232,24 +243,24 @@ mod domains {
     }
 
     impl From<Domain> for DomainDTO {
-        fn from(
-            Domain {
-                id,
-                accounts,
-                logo,
-                metadata,
-                asset_definitions,
-            }: Domain,
-        ) -> Self {
+        fn from(domain: Domain) -> Self {
             Self {
-                id: id.to_string(),
-                accounts: accounts
+                id: domain.id().to_string(),
+                accounts: domain
+                    .accounts()
                     .into_iter()
-                    .map(|(_, acc)| AccountDTO::from(acc))
+                    .map(|acc|
+                        // FIXME clone
+                        AccountDTO::from(acc.clone()))
                     .collect(),
-                logo: logo.map(|x| x.as_ref().to_owned()),
-                metadata,
-                asset_definitions: AssetDefinitionDTO::vec_from_map(asset_definitions),
+                logo: domain.logo().as_ref().map(|x| x.as_ref().to_owned()),
+                metadata: domain.metadata().clone(), // FIXME clone
+                asset_definitions: AssetDefinitionDTO::vec_from_map(
+                    domain
+                        .asset_definitions()
+                        // FIXME clone
+                        .map(|x| x.clone()),
+                ),
                 triggers: 0,
             }
         }
@@ -260,8 +271,7 @@ mod domains {
         data: web::Data<AppState>,
         path: web::Path<String>,
     ) -> Result<impl Responder, WebError> {
-        let domain_id_raw = path.into_inner();
-        let domain_id = DomainId::new(&domain_id_raw).wrap_err("")?;
+        let domain_id: DomainId = path.into_inner().parse()?;
         // TODO handle not found error
         let domain = data.with_client(|client| {
             let query = FindDomainById::new(domain_id);
@@ -322,10 +332,14 @@ mod assets {
 
     impl From<Asset> for AssetDTO {
         fn from(val: Asset) -> Self {
+            let id = val.id();
+            // FIXME clone
+            let value = val.value().clone();
+
             Self {
-                account_id: val.id.account_id.to_string(),
-                definition_id: val.id.definition_id.to_string(),
-                value: AssetValueDTO::from(val.value),
+                account_id: id.account_id.to_string(),
+                definition_id: id.definition_id.to_string(),
+                value: AssetValueDTO::from(value),
             }
         }
     }
@@ -372,8 +386,11 @@ mod assets {
 mod asset_definitions {
     use super::*;
     use iroha_data_model::{
-        asset::AssetDefinitionsMap,
-        prelude::{AssetDefinition, AssetDefinitionId, AssetValueType, FindAllAssetsDefinitions},
+        asset::Mintable,
+        prelude::{
+            AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
+            FindAllAssetsDefinitions,
+        },
     };
     use serde::de::{self, Deserialize, Deserializer, Visitor};
     use std::{fmt, str::FromStr};
@@ -382,30 +399,26 @@ mod asset_definitions {
     pub struct AssetDefinitionDTO {
         id: String,
         value_type: AssetValueTypeDTO,
-        mintable: bool,
+        mintable: Mintable,
     }
 
     impl AssetDefinitionDTO {
-        pub fn vec_from_map(map: AssetDefinitionsMap) -> Vec<Self> {
+        pub fn vec_from_map<T>(map: T) -> Vec<Self>
+        where
+            T: ExactSizeIterator + Iterator<Item = AssetDefinitionEntry>,
+        {
             map.into_iter()
-                .map(|(_, def)| def.definition.into())
+                .map(|def| def.definition().clone().into())
                 .collect()
         }
     }
 
     impl From<AssetDefinition> for AssetDefinitionDTO {
-        fn from(
-            AssetDefinition {
-                value_type,
-                id,
-                mintable,
-                ..
-            }: AssetDefinition,
-        ) -> Self {
+        fn from(definition: AssetDefinition) -> Self {
             Self {
-                id: id.to_string(),
-                value_type: AssetValueTypeDTO(value_type),
-                mintable,
+                id: definition.id().to_string(),
+                value_type: AssetValueTypeDTO(*definition.value_type()),
+                mintable: *definition.mintable(),
             }
         }
     }
@@ -431,8 +444,8 @@ mod asset_definitions {
                     E: de::Error,
                 {
                     AssetDefinitionId::from_str(v)
-                        .map(AssetDefinitionIdInPath)
-                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(v), &self))
+                        .map(|x| AssetDefinitionIdInPath(x))
+                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(&v), &self))
                 }
             }
 
@@ -526,14 +539,6 @@ mod roles {
 
     pub fn service() -> Scope {
         web::scope("/roles").service(index)
-    }
-}
-
-impl AppState {
-    pub fn new(client_config: &iroha_client::Configuration) -> Self {
-        Self {
-            iroha_client: Mutex::new(IrohaClient::new(client_config)),
-        }
     }
 }
 
