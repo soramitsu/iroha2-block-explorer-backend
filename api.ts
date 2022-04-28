@@ -3,6 +3,15 @@ type Tagged<Tag extends string, Content> = {
   c: Content;
 };
 
+interface Paginated<T> {
+  pagination: {
+    page_number: number;
+    page_size: number;
+    pages: number;
+  };
+  items: T[];
+}
+
 interface Asset {
   account_id: string;
   definition_id: string;
@@ -11,8 +20,8 @@ interface Asset {
 
 type AssetValue =
   | Tagged<"Quantity", number>
-  | Tagged<"BigQuantity", string>
-  | Tagged<"Fixed", string>
+  | Tagged<"BigQuantity", bigint> // be careful! should be deserialized with `json-bigint`
+  | Tagged<"Fixed", string> // it's a number too, "float" number, but it cannot fit into js `number`
   | Tagged<"Store", any>;
 
 type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
@@ -54,6 +63,10 @@ interface Domain {
   asset_definitions: AssetDefinition[];
   logo: null | string;
   metadata: any;
+  /**
+   * amount of triggers, always 0 for now
+   */
+  triggers: number;
 }
 
 interface PublicKey {
@@ -62,19 +75,15 @@ interface PublicKey {
 }
 
 /**
- * `peers`, `blocks` and `txs` are u64 numbers,
- * so JSON parsing may fail if they are larger than MAX_U32
- * (which fits into `f64` JS number)
+ * This JSON should be parsed with bigint support
+ * e.g. https://www.npmjs.com/package/json-bigint
  */
 interface Status {
-    peers: number
-    blocks: number
-    txs: number
-    uptime: {
-        secs: number
-        /**
-         * only this is u32
-         */
-        nanos: number
-    }
+  peers: bigint;
+  blocks: bigint;
+  txs: bigint;
+  uptime: {
+    secs: bigint;
+    nanos: number;
+  };
 }

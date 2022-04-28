@@ -1,7 +1,4 @@
 /target
 
-# local dev client config
-client_config.dev.json
-
-# and local dev iroha dir
-/iroha
+# the folder with dev binaries, configs etc
+/dev_artifacts
