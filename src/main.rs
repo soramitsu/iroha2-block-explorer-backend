@@ -107,21 +107,22 @@ use iroha_client::client::Client as IrohaClient;
 async fn main() -> Result<()> {
     let args = args::Args::parse();
     let client_config = args::ArgsClientConfig::load(&args)?;
+    let account_id = client_config.0.account_id.clone();
 
     let client: IrohaClient = client_config
         .try_into()
         .wrap_err("Failed to construct Iroha Client")?;
     let client = Arc::new(Mutex::new(client));
 
-    logger::setup();
-    logger::info!("Server is going to listen on {}", args.port);
-
     #[cfg(feature = "dev_actor")]
     let _dev_actor = if args.dev_actor {
-        Some(dev_actor::DevActor::start(client.clone()))
+        Some(dev_actor::DevActor::start(client.clone(), account_id))
     } else {
         None
     };
+
+    logger::setup();
+    logger::info!("Server is going to listen on {}", args.port);
 
     web::server(web::AppState::new(client.clone()), args.port)?
         .await
