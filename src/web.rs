@@ -1,45 +1,24 @@
+use std::fmt::Debug;
+use std::sync::Arc;
+
 use actix_web::{
     error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Scope,
 };
-use color_eyre::eyre::{eyre, WrapErr};
 use derive_more::Display;
-use iroha_client::client::Client as IrohaClient;
 use serde::Serialize;
-use std::sync::{Arc, Mutex, MutexGuard};
+
+use crate::iroha_client_wrap::IrohaClientWrap;
+use pagination::{Paginated, PaginationQueryParams};
 
 /// Web app state that may be injected in runtime
-pub struct AppState {
+pub struct AppData {
     /// Pre-initialized Iroha Client
-    iroha_client: Arc<Mutex<IrohaClient>>,
+    iroha_client: IrohaClientWrap,
 }
 
-impl AppState {
-    /// Tries to lock the client's mutex
-    ///
-    /// # Errors
-    /// Fails if mutex lock fails
-    pub fn lock_client(&self) -> color_eyre::Result<MutexGuard<IrohaClient>> {
-        self.iroha_client
-            .lock()
-            .map_err(|_| eyre!("failed to lock iroha client mutex"))
-    }
-
-    /// Locks client mutex and passes it into the closure. Returns the closure output.
-    ///
-    /// # Errors
-    /// Fails if mutex lock fails
-    pub fn with_client<F, T>(&self, op: F) -> color_eyre::Result<T>
-    where
-        F: FnOnce(&mut MutexGuard<IrohaClient>) -> T,
-        T: Sized,
-    {
-        let mut client = self.lock_client()?;
-        let res = op(&mut client);
-        Ok(res)
-    }
-
+impl AppData {
     /// Creates new state with provided client
-    pub fn new(client: Arc<Mutex<IrohaClient>>) -> Self {
+    pub fn new(client: IrohaClientWrap) -> Self {
         Self {
             iroha_client: client,
         }
@@ -82,53 +61,7 @@ impl From<iroha_data_model::ParseError> for WebError {
     }
 }
 
-mod pagination {
-    use super::*;
-
-    // pub const DEFAULT_PAGE_SIZE: u32 = 15;
-
-    /// Represents some items list with its pagination data
-    #[derive(Serialize)]
-    pub struct Paginated<T> {
-        pagination: Pagination,
-        items: Vec<T>,
-    }
-
-    impl<T> Paginated<T> {
-        /// Wraps some items list with a provided pagination data
-        pub fn wrap(items: Vec<T>, pagination: Pagination) -> Self {
-            Self { items, pagination }
-        }
-
-        /// It is primarily to fake real pagination
-        pub fn from_the_whole_list(items: Vec<T>) -> color_eyre::Result<Self> {
-            let len: u32 = items.len().try_into()?;
-            let new_self = Self::wrap(items, Pagination::new(1, len, 1));
-            Ok(new_self)
-        }
-    }
-
-    /// Represents pagination data
-    #[derive(Serialize)]
-    pub struct Pagination {
-        /// Current page. Starts from 1
-        page_number: u32,
-        /// Represents pagination scale
-        page_size: u32,
-        /// Total count of data pages in according to [`Pagination::page_size`]
-        pages: u32,
-    }
-
-    impl Pagination {
-        pub fn new(page_number: u32, page_size: u32, pages: u32) -> Self {
-            Self {
-                page_number,
-                page_size,
-                pages,
-            }
-        }
-    }
-}
+mod pagination;
 
 mod accounts {
     use super::{assets::AssetDTO, *};
@@ -202,23 +135,28 @@ mod accounts {
 
     #[get("/{id}")]
     async fn show(
-        data: web::Data<AppState>,
+        data: web::Data<AppData>,
         id: web::Path<AccountIdInPath>,
     ) -> Result<impl Responder, WebError> {
         // TODO handle not found error
-        let account =
-            data.with_client(|client| client.request(FindAccountById::new(id.into_inner().0)))??;
+        let account = data
+            .iroha_client
+            .request(FindAccountById::new(id.into_inner().0))
+            .await?;
         Ok(web::Json(AccountDTO::from(account)))
     }
 
     #[get("")]
-    async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let accounts: Vec<Account> =
-            data.with_client(|client| client.request(FindAllAccounts::new()))??;
+    async fn index(
+        data: web::Data<AppData>,
+        web::Query(pagination): web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let paginated: Paginated<_> = data
+            .iroha_client
+            .request_with_pagination(FindAllAccounts::new(), pagination.into())
+            .await?
+            .try_into()?;
 
-        let accounts: Vec<AccountDTO> = accounts.into_iter().map(AccountDTO::from).collect();
-
-        let paginated = pagination::Paginated::from_the_whole_list(accounts)?;
         Ok(web::Json(paginated))
     }
 
@@ -268,25 +206,31 @@ mod domains {
 
     #[get("/{id}")]
     async fn show(
-        data: web::Data<AppState>,
+        data: web::Data<AppData>,
         path: web::Path<String>,
     ) -> Result<impl Responder, WebError> {
         let domain_id: DomainId = path.into_inner().parse()?;
         // TODO handle not found error
-        let domain = data.with_client(|client| {
-            let query = FindDomainById::new(domain_id);
-            client.request(query)
-        })??;
+        let domain = data
+            .iroha_client
+            .request(FindDomainById::new(domain_id))
+            .await?;
         Ok(web::Json(DomainDTO::from(domain)))
     }
 
     #[get("")]
-    async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let domains = data.with_client(|client| client.request(FindAllDomains::new()))??;
-        let domains: Vec<DomainDTO> = domains.into_iter().map(|x| x.into()).collect();
-        Ok(web::Json(pagination::Paginated::from_the_whole_list(
-            domains,
-        )?))
+    async fn index(
+        data: web::Data<AppData>,
+        pagination: web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let paginated: Paginated<_> = data
+            .iroha_client
+            .request_with_pagination(FindAllDomains::new(), pagination.into_inner().into())
+            .await?
+            .try_into()?;
+        let paginated: Paginated<Vec<DomainDTO>> =
+            paginated.map(|domains| domains.into_iter().map(|x| x.into()).collect());
+        Ok(web::Json(paginated))
     }
 
     pub fn service() -> Scope {
@@ -360,21 +304,31 @@ mod assets {
     }
 
     #[get("")]
-    async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let assets = data.with_client(|client| client.request(FindAllAssets::new()))??;
-        let assets: Vec<AssetDTO> = assets.into_iter().map(|x| x.into()).collect();
-        let paginated = pagination::Paginated::from_the_whole_list(assets)?;
-        Ok(web::Json(paginated))
+    async fn index(
+        data: web::Data<AppData>,
+        pagination: web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let data: Paginated<_> = data
+            .iroha_client
+            .request_with_pagination(FindAllAssets::new(), pagination.into_inner().into())
+            .await?
+            .try_into()?;
+        let data: Paginated<Vec<AssetDTO>> =
+            data.map(|assets| assets.into_iter().map(|x| x.into()).collect());
+        Ok(web::Json(data))
     }
 
     #[get("/{definition_id}/{account_id}")]
     async fn show(
-        data: web::Data<AppState>,
+        data: web::Data<AppData>,
         path: web::Path<AssetIdInPath>,
     ) -> Result<impl Responder, WebError> {
         let asset_id: AssetId = path.into_inner().into();
         // TODO handle not found error
-        let asset = data.with_client(|client| client.request(FindAssetById::new(asset_id)))??;
+        let asset = data
+            .iroha_client
+            .request(FindAssetById::new(asset_id))
+            .await?;
         Ok(web::Json(AssetDTO::from(asset)))
     }
 
@@ -469,13 +423,19 @@ mod asset_definitions {
     // }
 
     #[get("")]
-    async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let items =
-            data.with_client(|client| client.request(FindAllAssetsDefinitions::new()))??;
-        let items: Vec<AssetDefinitionDTO> = items.into_iter().map(|x| x.into()).collect();
-        Ok(web::Json(pagination::Paginated::from_the_whole_list(
-            items,
-        )?))
+    async fn index(
+        data: web::Data<AppData>,
+        pagination: web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let data: Paginated<_> = data
+            .iroha_client
+            .request_with_pagination(FindAllAssetsDefinitions::new(), pagination.0.into())
+            .await?
+            .try_into()?;
+        let data = data.map::<Vec<AssetDefinitionDTO>, _>(|items| {
+            items.into_iter().map(|x| x.into()).collect()
+        });
+        Ok(web::Json(data))
     }
 
     pub fn service() -> Scope {
@@ -498,17 +458,23 @@ mod peer {
     }
 
     #[get("/peers")]
-    async fn peers(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let items = data.with_client(|client| client.request(FindAllPeers::new()))??;
-        let items: Vec<PeerDTO> = items.into_iter().map(|x| x.into()).collect();
-        Ok(web::Json(items))
+    async fn peers(
+        data: web::Data<AppData>,
+        pagination: web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let data: Paginated<_> = data
+            .iroha_client
+            .request_with_pagination(FindAllPeers::new(), pagination.0.into())
+            .await?
+            .try_into()?;
+        let data =
+            data.map::<Vec<PeerDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
+        Ok(web::Json(data))
     }
 
     #[get("/status")]
-    async fn status(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let status =
-            data.with_client(|client| client.get_status().wrap_err("failed to get status"))??;
-
+    async fn status(data: web::Data<AppData>) -> Result<impl Responder, WebError> {
+        let status = data.iroha_client.get_status().await?;
         Ok(web::Json(status))
     }
 
@@ -531,10 +497,19 @@ mod roles {
     }
 
     #[get("")]
-    async fn index(data: web::Data<AppState>) -> Result<impl Responder, WebError> {
-        let items = data.with_client(|client| client.request(FindAllRoles {}))??;
-        let items: Vec<RoleDTO> = items.into_iter().map(|x| x.into()).collect();
-        Ok(web::Json(items))
+    async fn index(
+        app: web::Data<AppData>,
+        pagination: web::Query<PaginationQueryParams>,
+    ) -> Result<impl Responder, WebError> {
+        let data: Paginated<_> = app
+            .iroha_client
+            // TODO add an issue about absense of `FindAllRoles::new()`?
+            .request_with_pagination(FindAllRoles {}, pagination.0.into())
+            .await?
+            .try_into()?;
+        let data =
+            data.map::<Vec<RoleDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
+        Ok(web::Json(data))
     }
 
     pub fn service() -> Scope {
@@ -551,21 +526,41 @@ async fn root_health_check() -> impl Responder {
     HttpResponse::Ok().body("Welcome to Iroha 2 Block Explorer!")
 }
 
+pub struct ServerInitData {
+    iroha_client: Arc<iroha_client::client::Client>,
+}
+
+impl ServerInitData {
+    pub fn new(iroha_client: Arc<iroha_client::client::Client>) -> Self {
+        Self { iroha_client }
+    }
+}
+
 /// Initializes a server listening on `127.0.0.1:<port>`. It should be awaited to be actually started.
-pub fn server(state: AppState, port: u16) -> color_eyre::Result<actix_server::Server> {
-    let state = web::Data::new(state);
+pub fn server(
+    ServerInitData { iroha_client }: ServerInitData,
+    port: u16,
+) -> color_eyre::Result<actix_server::Server> {
+    // let app_data = web::Data::new(state);
+    // let iroha_client = iroha_client.clone();
 
     let server = HttpServer::new(move || {
+        let client_wrap = crate::iroha_client_wrap::IrohaClientWrap::new(iroha_client.clone());
+        let app_data = web::Data::new(AppData::new(client_wrap));
+
         App::new()
-            .app_data(state.clone())
+            .app_data(app_data)
             .wrap(super::logger::TracingLogger::default())
-            .service(root_health_check)
-            .service(accounts::service())
-            .service(domains::service())
-            .service(assets::service())
-            .service(asset_definitions::service())
-            .service(roles::service())
-            .service(peer::service())
+            .service(
+                web::scope("/api/v1")
+                    .service(root_health_check)
+                    .service(accounts::service())
+                    .service(domains::service())
+                    .service(assets::service())
+                    .service(asset_definitions::service())
+                    .service(roles::service())
+                    .service(peer::service()),
+            )
             .default_service(web::route().to(default_route))
     })
     .bind(("127.0.0.1", port))?

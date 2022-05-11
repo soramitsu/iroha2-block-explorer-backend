@@ -1,8 +1,12 @@
 use super::logger;
-use actix::prelude::{Actor, Addr, AsyncContext, Context, Handler, Message};
+use crate::iroha_client_wrap::IrohaClientWrap;
+use actix::{
+    prelude::{Actor, Addr, AsyncContext, Context, Handler, Message},
+    ActorFutureExt, ContextFutureSpawner, ResponseActFuture, WrapFuture,
+};
 use color_eyre::{eyre::eyre, Result};
 use core::time::Duration;
-use iroha_client::client::Client as IrohaClient;
+// use futures_util::future::future::FutureExt;
 use iroha_data_model::{
     prelude::{
         Account, AccountId, AssetDefinition, AssetDefinitionId, AssetValue, AssetValueType, Domain,
@@ -23,46 +27,68 @@ use std::{
 
 const DEV_ACTOR_WORK_INTERVAL_MS: u64 = 1500;
 
-pub struct DevActor {
-    client: Arc<Mutex<IrohaClient>>,
+pub struct DevActor;
+
+impl DevActor {
+    pub fn start(client: Arc<iroha_client::client::Client>, account_id: AccountId) -> Addr<Self> {
+        let msg_state = Arc::new(Mutex::new(RandomWorkState {
+            client: IrohaClientWrap::new(client),
+            account_id,
+            rng: rand::thread_rng(),
+        }));
+
+        let addr = Actor::start(Self);
+        addr.send(DoRandomStuff {
+            state: msg_state.clone(),
+        });
+        addr
+    }
+}
+
+impl Actor for DevActor {
+    type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        logger::info!("DevActor is started");
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct DoRandomStuff {
+    state: Arc<Mutex<RandomWorkState>>,
+}
+
+struct RandomWorkState {
+    client: IrohaClientWrap,
     account_id: AccountId,
     rng: ThreadRng,
 }
 
-impl DevActor {
-    pub fn start(client: Arc<Mutex<IrohaClient>>, account_id: AccountId) -> Addr<Self> {
-        Actor::start(Self {
-            client,
-            account_id,
-            rng: rand::thread_rng(),
-        })
-    }
+impl DoRandomStuff {
+    async fn do_it(&mut self) -> Result<()> {
+        let mut rng = &self.rng;
 
-    fn do_random_stuff(&mut self) -> Result<()> {
-        let some_action: RandomAction = self.rng.gen();
+        let some_action: RandomAction = rng.gen();
         logger::info!("Doing: {:?}", some_action);
-        let mut client = self
-            .client
-            .lock()
-            .map_err(|err| eyre!("Failed to lock client mutex: {:?}", err))?;
+        let client = &self.client;
 
         use faker_rand::fr_fr::{internet::Username, names::FirstName};
 
         match some_action {
             RandomAction::RegisterDomain => {
-                let domain_name: FirstName = self.rng.gen();
+                let domain_name: FirstName = rng.gen();
                 let new_domain_id: DomainId = domain_name.to_string().to_lowercase().parse()?;
                 let create_domain = RegisterBox::new(Domain::new(new_domain_id));
 
-                client.submit(create_domain)?;
-
-                // do
+                client.submit(create_domain).await?;
             }
             RandomAction::MintAsset => {
                 // The goal is to find an existing mintable asset and.. mint it with some value
 
                 let asset = client
-                    .request(FindAssetsByAccountId::new(self.account_id.clone()))?
+                    .request(FindAssetsByAccountId::new(self.account_id.clone()))
+                    .await?
                     .into_iter()
                     .find(|asset| match asset.value() {
                         AssetValue::Quantity(_) => true,
@@ -70,20 +96,20 @@ impl DevActor {
                     });
 
                 if let Some(asset) = asset {
-                    let value = Value::U32(self.rng.gen());
+                    let value = Value::U32(rng.gen());
                     let mint = MintBox::new(value, IdBox::AssetId(asset.id().clone()));
 
                     logger::info!("Minting: {:?}", mint);
 
-                    client.submit(mint)?;
+                    client.submit(mint).await?;
                 }
             }
             RandomAction::RegisterAsset => {
                 let domain_id = self.account_id.domain_id.clone();
-                let asset_name: Username = self.rng.gen();
+                let asset_name: Username = rng.gen();
                 let definition_id =
                     AssetDefinitionId::from_str(format!("{}#{}", asset_name, domain_id).as_ref())?;
-                let asset_value_type = RandomAssetValueType::new(&mut self.rng)?.0;
+                let asset_value_type = RandomAssetValueType::new(&mut rng)?.0;
 
                 let new_asset_definition = match asset_value_type {
                     AssetValueType::Quantity => AssetDefinition::quantity(definition_id),
@@ -93,16 +119,18 @@ impl DevActor {
                 };
                 let create_asset = RegisterBox::new(new_asset_definition.build());
 
-                client.submit(create_asset)?;
+                logger::info!("Create asset: {:?}", create_asset);
+
+                client.submit(create_asset).await?;
             }
             RandomAction::RegisterAccount => {
                 let domain_id = self.account_id.domain_id.clone();
-                let account_name: FirstName = self.rng.gen();
+                let account_name: FirstName = rng.gen();
 
                 let account_id: AccountId = format!("{}@{}", account_name, domain_id).parse()?;
                 let create_account = RegisterBox::new(Account::new(account_id, []));
 
-                client.submit(create_account)?;
+                client.submit(create_account).await?;
             }
         }
 
@@ -110,32 +138,23 @@ impl DevActor {
     }
 }
 
-impl Actor for DevActor {
-    type Context = Context<Self>;
+impl Handler<DoRandomStuff> for DevActor {
+    type Result = ResponseActFuture<Self, ()>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {
-        logger::info!("DevActor is started");
-        ctx.notify(DoSomething);
-    }
-}
+    fn handle(&mut self, msg: DoRandomStuff, ctx: &mut Self::Context) -> Self::Result {
+        let fut = async {
+            if let Err(err) = msg.do_it().await {
+                logger::error!("Failed to do random stuff: {}", err)
+            }
 
-#[derive(Message)]
-#[rtype(result = "()")]
-struct DoSomething;
+            msg
+        }
+        .into_actor(self)
+        .map(|msg, _act, ctx| {
+            ctx.notify_later(msg, Duration::from_millis(DEV_ACTOR_WORK_INTERVAL_MS));
+        });
 
-impl Handler<DoSomething> for DevActor {
-    type Result = ();
-
-    fn handle(&mut self, _msg: DoSomething, ctx: &mut Self::Context) -> Self::Result {
-        match self.do_random_stuff() {
-            Ok(()) => (),
-            Err(err) => logger::error!("Failed to do random stuff: {}", err),
-        };
-
-        ctx.notify_later(
-            DoSomething,
-            Duration::from_millis(DEV_ACTOR_WORK_INTERVAL_MS),
-        );
+        Box::pin(fut)
     }
 }
 

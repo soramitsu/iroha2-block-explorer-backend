@@ -9,24 +9,26 @@ edition = "2021"
 actix = "0.13.0"
 actix-web = "4"
 actix-server = "2.1.1"
+awc = "3.0.0"
 derive_more = "0.99"
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 tracing-log = "0.1.2"
-tracing-bunyan-formatter = "0.3.2"
 tracing-actix-web = "0.5.1"
 clap = { version = "3.1.12", features = ["derive", "env"] }
-iroha_client     = { git = "https://github.com/hyperledger/iroha.git", rev = "3671fdb0a01adcea5742557079692ce5d526c430" }
-iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "3671fdb0a01adcea5742557079692ce5d526c430" }
-iroha_crypto     = { git = "https://github.com/hyperledger/iroha.git", rev = "3671fdb0a01adcea5742557079692ce5d526c430" }
+iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "26dc6eb02b80ab4b6f29f7d9b7fc79c3182c57ca" }
+iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "26dc6eb02b80ab4b6f29f7d9b7fc79c3182c57ca" }
+iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "26dc6eb02b80ab4b6f29f7d9b7fc79c3182c57ca" }
+iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "26dc6eb02b80ab4b6f29f7d9b7fc79c3182c57ca" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
+futures = "0.3.21"
 rand = { version = "0.8.5", optional = true }
 faker_rand = { version = "0.1", optional = true }
 
 [features]
-default = ["dev_actor"]
+default = []
 # Enables an actor that fills Iroha with different data. For dev purposes
 dev_actor = ["dep:rand", "dep:faker_rand"]
 

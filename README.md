@@ -56,6 +56,10 @@ DTOs are described at [api.ts](./api.ts).
 >
 > Some DTOs (most of them) may contain bigints. If there are numbers greater than JavaScript's native `number` can fit (`f64`), then native `JSON` decoder will throw an error. You should decode DTOs with some special JSON-decoder than is fine with bigints, e.g. https://www.npmjs.com/package/json-bigint
 
+> **Important**
+>
+> All paths are prefixed with `/api/v1`
+
 - `GET /` - web server health check. Returns 200 OK.
 
 - **TODO** `GET /blocks`
