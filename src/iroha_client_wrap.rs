@@ -130,7 +130,6 @@ mod request_builder {
     impl<T> ResponseWrapper<T>
     where
         T: actix::prelude::Stream<Item = Result<actix_web::web::Bytes, awc::error::PayloadError>>,
-        // <T as actix::prelude::Stream>::Item = Result<actix_web::web::Bytes, PayloadError>,
     {
         pub fn new(resp: RespActix<T>) -> Self {
             Self(resp)

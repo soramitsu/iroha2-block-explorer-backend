@@ -90,8 +90,6 @@ mod web;
 /// Actix implementation around Iroha Client
 mod iroha_client_wrap;
 
-// mod actor_test;
-
 #[cfg(feature = "dev_actor")]
 mod dev_actor;
 

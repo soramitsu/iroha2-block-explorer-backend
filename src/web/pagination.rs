@@ -73,10 +73,6 @@ struct IrohaPaginationWithTotal {
     total: u64,
 }
 
-// impl IrohaPaginationWithTotal {
-//     fn new (start: Option<u32>, limit: Option<u32>)
-// }
-
 /// # Errors
 /// Fails if [`IrohaPagination`] has data that is not aligned to pages.
 /// For example, if there is a `limit = 10`, but `start = 5`, it means that we have a page size = 10,
