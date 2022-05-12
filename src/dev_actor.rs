@@ -2,11 +2,10 @@ use super::logger;
 use crate::iroha_client_wrap::IrohaClientWrap;
 use actix::{
     prelude::{Actor, Addr, AsyncContext, Context, Handler, Message},
-    ActorFutureExt, ContextFutureSpawner, ResponseActFuture, WrapFuture,
+    ActorFutureExt, ResponseActFuture, WrapFuture,
 };
 use color_eyre::{eyre::eyre, Result};
 use core::time::Duration;
-// use futures_util::future::future::FutureExt;
 use iroha_data_model::{
     prelude::{
         Account, AccountId, AssetDefinition, AssetDefinitionId, AssetValue, AssetValueType, Domain,
@@ -20,28 +19,25 @@ use rand::{
     seq::IteratorRandom,
     Rng,
 };
-use std::{
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
+use std::{str::FromStr, sync::Arc};
 
 const DEV_ACTOR_WORK_INTERVAL_MS: u64 = 1500;
 
-pub struct DevActor;
+pub struct DevActor {
+    work: Option<Box<RandomWorkState>>,
+}
 
 impl DevActor {
     pub fn start(client: Arc<iroha_client::client::Client>, account_id: AccountId) -> Addr<Self> {
-        let msg_state = Arc::new(Mutex::new(RandomWorkState {
+        let work = RandomWorkState {
             client: IrohaClientWrap::new(client),
             account_id,
             rng: rand::thread_rng(),
-        }));
+        };
 
-        let addr = Actor::start(Self);
-        addr.send(DoRandomStuff {
-            state: msg_state.clone(),
-        });
-        addr
+        Actor::start(Self {
+            work: Some(Box::new(work)),
+        })
     }
 }
 
@@ -50,14 +46,13 @@ impl Actor for DevActor {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         logger::info!("DevActor is started");
+        ctx.notify(DoRandomStuff);
     }
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
-struct DoRandomStuff {
-    state: Arc<Mutex<RandomWorkState>>,
-}
+struct DoRandomStuff;
 
 struct RandomWorkState {
     client: IrohaClientWrap,
@@ -65,9 +60,9 @@ struct RandomWorkState {
     rng: ThreadRng,
 }
 
-impl DoRandomStuff {
+impl RandomWorkState {
     async fn do_it(&mut self) -> Result<()> {
-        let mut rng = &self.rng;
+        let mut rng = &mut self.rng;
 
         let some_action: RandomAction = rng.gen();
         logger::info!("Doing: {:?}", some_action);
@@ -90,10 +85,7 @@ impl DoRandomStuff {
                     .request(FindAssetsByAccountId::new(self.account_id.clone()))
                     .await?
                     .into_iter()
-                    .find(|asset| match asset.value() {
-                        AssetValue::Quantity(_) => true,
-                        _ => false,
-                    });
+                    .find(|asset| matches!(asset.value(), AssetValue::Quantity(_)));
 
                 if let Some(asset) = asset {
                     let value = Value::U32(rng.gen());
@@ -141,20 +133,32 @@ impl DoRandomStuff {
 impl Handler<DoRandomStuff> for DevActor {
     type Result = ResponseActFuture<Self, ()>;
 
-    fn handle(&mut self, msg: DoRandomStuff, ctx: &mut Self::Context) -> Self::Result {
-        let fut = async {
-            if let Err(err) = msg.do_it().await {
-                logger::error!("Failed to do random stuff: {}", err)
+    fn handle(&mut self, _msg: DoRandomStuff, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(mut work) = self.work.take() {
+            let fut = async {
+                if let Err(err) = (*work).do_it().await {
+                    logger::error!("Failed to do random stuff: {}", err)
+                }
+
+                work
             }
+            .into_actor(self)
+            .map(|work, actor, ctx| {
+                actor.work = Some(work);
 
-            msg
+                ctx.notify_later(
+                    DoRandomStuff,
+                    Duration::from_millis(DEV_ACTOR_WORK_INTERVAL_MS),
+                );
+            });
+
+            Box::pin(fut)
+        } else {
+            logger::warn!(
+                "While hanlding DoRandomStuff message, it turned out there work state is empty",
+            );
+            Box::pin(async {}.into_actor(self))
         }
-        .into_actor(self)
-        .map(|msg, _act, ctx| {
-            ctx.notify_later(msg, Duration::from_millis(DEV_ACTOR_WORK_INTERVAL_MS));
-        });
-
-        Box::pin(fut)
     }
 }
 

@@ -181,8 +181,7 @@ impl IrohaClientWrap {
             self.iroha.prepare_query_request(request, pagination)?;
         // FIXME response should be a trait!
         let resp = req.send(&self.http).await?;
-        let query_result = resp_handler.handle(resp);
-        query_result
+        resp_handler.handle(resp)
     }
 
     pub async fn request<R>(&self, request: R) -> Result<R::Output>
@@ -198,8 +197,7 @@ impl IrohaClientWrap {
     pub async fn get_status(&self) -> Result<Status> {
         let (req, resp_handler) = self.iroha.prepare_status_request::<ActixReqBuilder>();
         let resp = req.send(&self.http).await?;
-        let status = resp_handler.handle(resp);
-        status
+        resp_handler.handle(resp)
     }
 
     pub async fn submit(&self, instruction: impl Into<Instruction> + Debug) -> Result<()> {

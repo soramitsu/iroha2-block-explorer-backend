@@ -4,7 +4,7 @@ mod logger {
     use tracing_log::LogTracer;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
-    pub use tracing::{error, info};
+    pub use tracing::{error, info, warn};
 
     /// Compose multiple layers into a `tracing`'s subscriber.
     fn get_subscriber(default_env_filter: String) -> impl Subscriber + Send + Sync {

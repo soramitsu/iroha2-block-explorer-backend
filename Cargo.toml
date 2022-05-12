@@ -28,7 +28,7 @@ rand = { version = "0.8.5", optional = true }
 faker_rand = { version = "0.1", optional = true }
 
 [features]
-default = []
+default = ["dev_actor"]
 # Enables an actor that fills Iroha with different data. For dev purposes
 dev_actor = ["dep:rand", "dep:faker_rand"]
 

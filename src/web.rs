@@ -195,9 +195,9 @@ mod domains {
                 metadata: domain.metadata().clone(), // FIXME clone
                 asset_definitions: AssetDefinitionDTO::vec_from_map(
                     domain
-                        .asset_definitions()
                         // FIXME clone
-                        .map(|x| x.clone()),
+                        .asset_definitions()
+                        .cloned(),
                 ),
                 triggers: 0,
             }
@@ -398,8 +398,8 @@ mod asset_definitions {
                     E: de::Error,
                 {
                     AssetDefinitionId::from_str(v)
-                        .map(|x| AssetDefinitionIdInPath(x))
-                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(&v), &self))
+                        .map(AssetDefinitionIdInPath)
+                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(v), &self))
                 }
             }
 
@@ -541,9 +541,6 @@ pub fn server(
     ServerInitData { iroha_client }: ServerInitData,
     port: u16,
 ) -> color_eyre::Result<actix_server::Server> {
-    // let app_data = web::Data::new(state);
-    // let iroha_client = iroha_client.clone();
-
     let server = HttpServer::new(move || {
         let client_wrap = crate::iroha_client_wrap::IrohaClientWrap::new(iroha_client.clone());
         let app_data = web::Data::new(AppData::new(client_wrap));

@@ -102,9 +102,9 @@ impl TryFrom<IrohaPaginationWithTotal> for PaginationDTO {
                     let (page, page_size) = if total % (start as u64) == 0 {
                         (2, start)
                     } else {
-                        Err(eyre!(
+                        return Err(eyre!(
                             "`start` ({start}) is not aligned with `total` ({total})"
-                        ))?
+                        ));
                     };
 
                     Self::from_unchecked_nums(page, page_size, total)
@@ -113,9 +113,9 @@ impl TryFrom<IrohaPaginationWithTotal> for PaginationDTO {
                     let (page, page_size) = if start % limit == 0 {
                         ((start / limit) + 1, limit)
                     } else {
-                        Err(eyre!(
+                        return Err(eyre!(
                             "`start` ({start}) is not aligned with `limit` ({limit})"
-                        ))?
+                        ));
                     };
 
                     Self::from_unchecked_nums(page, page_size, total)
