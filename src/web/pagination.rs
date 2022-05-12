@@ -1,4 +1,4 @@
-use super::*;
+use super::{Debug, Serialize};
 use color_eyre::eyre::{eyre, Context, Result};
 use iroha_client::client::ClientQueryOutput;
 use iroha_data_model::prelude::{Pagination as IrohaPagination, Query, QueryBox, Value};
@@ -14,7 +14,7 @@ pub struct Paginated<T> {
 impl<T> Paginated<T> {
     /// Wraps some items list with a provided pagination data
     pub fn new(data: T, pagination: PaginationDTO) -> Self {
-        Self { data, pagination }
+        Self { pagination, data }
     }
 
     pub fn map<U, F>(self, f: F) -> Paginated<U>
@@ -100,7 +100,7 @@ impl TryFrom<IrohaPaginationWithTotal> for PaginationDTO {
             }
             Some(start) => match limit {
                 None => {
-                    let (page, page_size) = if total % (start as u64) == 0 {
+                    let (page, page_size) = if total % u64::from(start) == 0 {
                         (2, start)
                     } else {
                         return Err(eyre!(
@@ -180,7 +180,7 @@ mod positive_int {
                         .map_err(|_err| de::Error::invalid_value(de::Unexpected::Str(v), &self))?;
 
                     Positive::try_from(num).map_err(|_err| {
-                        de::Error::invalid_value(de::Unexpected::Unsigned(num as u64), &self)
+                        de::Error::invalid_value(de::Unexpected::Unsigned(u64::from(num)), &self)
                     })
                 }
             }

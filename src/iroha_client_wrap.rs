@@ -46,9 +46,7 @@ mod request_builder {
             let mut req = client.request(method, url);
 
             if let Some(map) = headers {
-                req = map
-                    .into_iter()
-                    .fold(req, |acc, item| acc.insert_header(item));
+                req = map.into_iter().fold(req, awc::ClientRequest::insert_header);
             }
 
             if let Some(params) = params {
@@ -221,7 +219,7 @@ impl IrohaClientWrap {
             .wrap_err("Failed to prepare transaction request")?;
 
         let resp = req.send(&self.http).await?;
-        let () = resp_handler.handle(resp)?;
+        resp_handler.handle(resp)?;
 
         Ok(())
     }

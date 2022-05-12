@@ -106,7 +106,10 @@ impl From<iroha_data_model::ParseError> for WebError {
 mod pagination;
 
 mod accounts {
-    use super::{assets::AssetDTO, *};
+    use super::{
+        assets::AssetDTO, fmt, get, web, AppData, Context, FromStr, Paginated,
+        PaginationQueryParams, Responder, Scope, Serialize, WebError,
+    };
     use iroha_data_model::prelude::{
         Account, AccountId, FindAccountById, FindAllAccounts, Metadata,
     };
@@ -131,7 +134,11 @@ mod accounts {
                   ))
                 .collect();
 
-            let roles: Vec<String> = account.roles().into_iter().map(|x| x.to_string()).collect();
+            let roles: Vec<String> = account
+                .roles()
+                .into_iter()
+                .map(std::string::ToString::to_string)
+                .collect();
 
             Self {
                 id: account.id().to_string(),
@@ -211,7 +218,10 @@ mod accounts {
 }
 
 mod domains {
-    use super::{accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, *};
+    use super::{
+        accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, get, web, AppData, Paginated,
+        PaginationQueryParams, Responder, Scope, Serialize, WebError,
+    };
     use iroha_data_model::prelude::{Domain, DomainId, FindAllDomains, FindDomainById, Metadata};
 
     #[derive(Serialize)]
@@ -285,7 +295,10 @@ mod domains {
 }
 
 mod assets {
-    use super::{accounts::AccountIdInPath, asset_definitions::AssetDefinitionIdInPath, *};
+    use super::{
+        accounts::AccountIdInPath, asset_definitions::AssetDefinitionIdInPath, get, web, AppData,
+        Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
+    };
     use iroha_data_model::prelude::{
         Asset, AssetId, AssetValue, AssetValueType, FindAllAssets, FindAssetById, Metadata,
     };
@@ -302,7 +315,7 @@ mod assets {
 
     impl From<AssetValue> for AssetValueDTO {
         fn from(val: AssetValue) -> Self {
-            use AssetValue::*;
+            use AssetValue::{BigQuantity, Fixed, Quantity, Store};
 
             match val {
                 Quantity(x) => Self::Quantity(x),
@@ -361,7 +374,7 @@ mod assets {
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let data: Paginated<Vec<AssetDTO>> =
-            data.map(|assets| assets.into_iter().map(|x| x.into()).collect());
+            data.map(|assets| assets.into_iter().map(Into::into).collect());
         Ok(web::Json(data))
     }
 
@@ -385,7 +398,10 @@ mod assets {
 }
 
 mod asset_definitions {
-    use super::*;
+    use super::{
+        fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Responder, Scope,
+        Serialize, WebError,
+    };
     use iroha_data_model::{
         asset::Mintable,
         prelude::{
@@ -479,9 +495,8 @@ mod asset_definitions {
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data = data.map::<Vec<AssetDefinitionDTO>, _>(|items| {
-            items.into_iter().map(|x| x.into()).collect()
-        });
+        let data = data
+            .map::<Vec<AssetDefinitionDTO>, _>(|items| items.into_iter().map(Into::into).collect());
         Ok(web::Json(data))
     }
 
@@ -492,7 +507,9 @@ mod asset_definitions {
 }
 
 mod peer {
-    use super::*;
+    use super::{
+        get, web, AppData, Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
+    };
     use iroha_data_model::prelude::{FindAllPeers, Peer, PeerId};
 
     #[derive(Serialize)]
@@ -515,8 +532,7 @@ mod peer {
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data =
-            data.map::<Vec<PeerDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
+        let data = data.map::<Vec<PeerDTO>, _>(|items| items.into_iter().map(Into::into).collect());
         Ok(web::Json(data))
     }
 
@@ -532,7 +548,9 @@ mod peer {
 }
 
 mod roles {
-    use super::*;
+    use super::{
+        get, web, AppData, Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
+    };
     use iroha_data_model::prelude::{FindAllRoles, Role};
 
     #[derive(Serialize)]
@@ -556,8 +574,7 @@ mod roles {
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data =
-            data.map::<Vec<RoleDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
+        let data = data.map::<Vec<RoleDTO>, _>(|items| items.into_iter().map(Into::into).collect());
         Ok(web::Json(data))
     }
 
