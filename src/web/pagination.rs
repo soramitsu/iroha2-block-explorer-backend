@@ -257,7 +257,7 @@ mod tests {
 
             assert_eq!(result.page.value(), 4);
             assert_eq!(result.page_size.value(), 5);
-            assert_eq!(result.total, 50)
+            assert_eq!(result.total, 50);
         }
 
         #[test]
@@ -295,7 +295,7 @@ mod tests {
 
             assert_eq!(result.page.value(), 2);
             assert_eq!(result.page_size.value(), 13);
-            assert_eq!(result.total, 26)
+            assert_eq!(result.total, 26);
         }
 
         #[test]
@@ -309,7 +309,7 @@ mod tests {
 
             assert_eq!(result.page.value(), 2);
             assert_eq!(result.page_size.value(), 10);
-            assert_eq!(result.total, 50)
+            assert_eq!(result.total, 50);
         }
 
         #[test]
@@ -333,7 +333,7 @@ mod tests {
 
             assert_eq!(result.page.value(), 1);
             assert_eq!(result.page_size.value(), 10);
-            assert_eq!(result.total, 10)
+            assert_eq!(result.total, 10);
         }
     }
 }

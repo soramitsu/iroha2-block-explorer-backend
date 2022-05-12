@@ -62,13 +62,13 @@ struct RandomWorkState {
 
 impl RandomWorkState {
     async fn do_it(&mut self) -> Result<()> {
+        use faker_rand::fr_fr::{internet::Username, names::FirstName};
+
         let mut rng = &mut self.rng;
 
         let some_action: RandomAction = rng.gen();
         logger::info!("Doing: {:?}", some_action);
         let client = &self.client;
-
-        use faker_rand::fr_fr::{internet::Username, names::FirstName};
 
         match some_action {
             RandomAction::RegisterDomain => {
@@ -137,7 +137,7 @@ impl Handler<DoRandomStuff> for DevActor {
         if let Some(mut work) = self.work.take() {
             let fut = async {
                 if let Err(err) = (*work).do_it().await {
-                    logger::error!("Failed to do random stuff: {}", err)
+                    logger::error!("Failed to do random stuff: {}", err);
                 }
 
                 work
