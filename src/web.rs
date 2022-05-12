@@ -2,10 +2,15 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use actix_web::{
-    error::ResponseError, get, http, web, App, HttpResponse, HttpServer, Responder, Scope,
+    error::ResponseError, get, http, middleware, web, App, HttpResponse, HttpServer, Responder,
+    Scope,
 };
+use color_eyre::eyre::{eyre, Context};
 use derive_more::Display;
+use iroha_client::client::ClientQueryError as IrohaClientQueryError;
+use iroha_core::smartcontracts::isi::query::Error as IrohaQueryError;
 use serde::Serialize;
+use std::{fmt, str::FromStr};
 
 use crate::iroha_client_wrap::IrohaClientWrap;
 use pagination::{Paginated, PaginationQueryParams};
@@ -31,6 +36,37 @@ enum WebError {
     /// Some error that should be logged, but shouldn't be returned to
     /// a client. Server should return an empty 500 error instead.
     Internal(color_eyre::Report),
+    /// Some resource was not found.
+    NotFound,
+    BadRequest(String),
+}
+
+impl WebError {
+    /// Constructs from [`IrohaClientQueryError`] to [`WebError::NotFound`], if there is a [`IrohaFindError`].
+    /// Otherwise, constructs [`WebError::Internal`].
+    fn expect_iroha_find_error(client_error: IrohaClientQueryError) -> Self {
+        match client_error {
+            IrohaClientQueryError::QueryError(IrohaQueryError::Find(_err)) => Self::NotFound,
+            IrohaClientQueryError::QueryError(other) => {
+                Self::Internal(eyre!("FindError expected, got: {other}"))
+            }
+            IrohaClientQueryError::Other(other) => {
+                Self::Internal(other.wrap_err("Unexpected query error"))
+            }
+        }
+    }
+
+    /// Constructs [`WebError::Internal`] from [`IrohaClientQueryError`].
+    fn expect_iroha_any_error(client_error: IrohaClientQueryError) -> Self {
+        match client_error {
+            IrohaClientQueryError::QueryError(any) => {
+                Self::Internal(eyre!("Iroha query error: {any}"))
+            }
+            IrohaClientQueryError::Other(other) => {
+                Self::Internal(other.wrap_err("Unexpected query error"))
+            }
+        }
+    }
 }
 
 impl ResponseError for WebError {
@@ -40,12 +76,18 @@ impl ResponseError for WebError {
             .body(match self {
                 // We don't want to expose internal errors to the client, so here it is omitted.
                 // `actix-web` will log it anyway.
-                WebError::Internal(_) => "Internal Server Error",
+                Self::Internal(_) => "Internal Server Error".to_owned(),
+                Self::NotFound => "Not Found".to_owned(),
+                Self::BadRequest(msg) => format!("Bad Request: {}", msg),
             })
     }
 
     fn status_code(&self) -> http::StatusCode {
-        http::StatusCode::INTERNAL_SERVER_ERROR
+        match self {
+            Self::Internal(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NotFound => http::StatusCode::NOT_FOUND,
+            Self::BadRequest(_) => http::StatusCode::BAD_REQUEST,
+        }
     }
 }
 
@@ -68,8 +110,7 @@ mod accounts {
     use iroha_data_model::prelude::{
         Account, AccountId, FindAccountById, FindAllAccounts, Metadata,
     };
-    use serde::de::{self, Deserialize, Deserializer, Visitor};
-    use std::{fmt, str::FromStr};
+    use serde::de;
 
     #[derive(Serialize)]
     pub struct AccountDTO {
@@ -105,14 +146,14 @@ mod accounts {
 
     pub struct AccountIdInPath(pub AccountId);
 
-    impl<'de> Deserialize<'de> for AccountIdInPath {
+    impl<'de> de::Deserialize<'de> for AccountIdInPath {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
-            D: Deserializer<'de>,
+            D: de::Deserializer<'de>,
         {
-            struct AccountIdInPathVisitor;
+            struct Visitor;
 
-            impl<'de> Visitor<'de> for AccountIdInPathVisitor {
+            impl<'de> de::Visitor<'de> for Visitor {
                 type Value = AccountIdInPath;
 
                 fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -129,7 +170,7 @@ mod accounts {
                 }
             }
 
-            deserializer.deserialize_string(AccountIdInPathVisitor)
+            deserializer.deserialize_string(Visitor)
         }
     }
 
@@ -138,11 +179,12 @@ mod accounts {
         data: web::Data<AppData>,
         id: web::Path<AccountIdInPath>,
     ) -> Result<impl Responder, WebError> {
-        // TODO handle not found error
         let account = data
             .iroha_client
             .request(FindAccountById::new(id.into_inner().0))
-            .await?;
+            .await
+            .map_err(WebError::expect_iroha_find_error)?;
+
         Ok(web::Json(AccountDTO::from(account)))
     }
 
@@ -150,14 +192,17 @@ mod accounts {
     async fn index(
         data: web::Data<AppData>,
         web::Query(pagination): web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<AccountDTO>>>, WebError> {
         let paginated: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllAccounts::new(), pagination.into())
-            .await?
+            .await
+            .wrap_err("Failed to request for accounts")?
             .try_into()?;
 
-        Ok(web::Json(paginated))
+        Ok(web::Json(paginated.map(|accounts| {
+            accounts.into_iter().map(Into::into).collect()
+        })))
     }
 
     pub fn service() -> Scope {
@@ -210,11 +255,11 @@ mod domains {
         path: web::Path<String>,
     ) -> Result<impl Responder, WebError> {
         let domain_id: DomainId = path.into_inner().parse()?;
-        // TODO handle not found error
         let domain = data
             .iroha_client
             .request(FindDomainById::new(domain_id))
-            .await?;
+            .await
+            .map_err(WebError::expect_iroha_find_error)?;
         Ok(web::Json(DomainDTO::from(domain)))
     }
 
@@ -226,10 +271,11 @@ mod domains {
         let paginated: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllDomains::new(), pagination.into_inner().into())
-            .await?
+            .await
+            .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let paginated: Paginated<Vec<DomainDTO>> =
-            paginated.map(|domains| domains.into_iter().map(|x| x.into()).collect());
+            paginated.map(|domains| domains.into_iter().map(Into::into).collect());
         Ok(web::Json(paginated))
     }
 
@@ -311,7 +357,8 @@ mod assets {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllAssets::new(), pagination.into_inner().into())
-            .await?
+            .await
+            .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let data: Paginated<Vec<AssetDTO>> =
             data.map(|assets| assets.into_iter().map(|x| x.into()).collect());
@@ -324,11 +371,11 @@ mod assets {
         path: web::Path<AssetIdInPath>,
     ) -> Result<impl Responder, WebError> {
         let asset_id: AssetId = path.into_inner().into();
-        // TODO handle not found error
         let asset = data
             .iroha_client
             .request(FindAssetById::new(asset_id))
-            .await?;
+            .await
+            .map_err(WebError::expect_iroha_find_error)?;
         Ok(web::Json(AssetDTO::from(asset)))
     }
 
@@ -346,8 +393,7 @@ mod asset_definitions {
             FindAllAssetsDefinitions,
         },
     };
-    use serde::de::{self, Deserialize, Deserializer, Visitor};
-    use std::{fmt, str::FromStr};
+    use serde::de;
 
     #[derive(Serialize)]
     pub struct AssetDefinitionDTO {
@@ -379,14 +425,14 @@ mod asset_definitions {
 
     pub struct AssetDefinitionIdInPath(pub AssetDefinitionId);
 
-    impl<'de> Deserialize<'de> for AssetDefinitionIdInPath {
+    impl<'de> de::Deserialize<'de> for AssetDefinitionIdInPath {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
-            D: Deserializer<'de>,
+            D: de::Deserializer<'de>,
         {
-            struct AssetDefinitionIdInPathVisitor;
+            struct Visitor;
 
-            impl<'de> Visitor<'de> for AssetDefinitionIdInPathVisitor {
+            impl<'de> de::Visitor<'de> for Visitor {
                 type Value = AssetDefinitionIdInPath;
 
                 fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -403,7 +449,7 @@ mod asset_definitions {
                 }
             }
 
-            deserializer.deserialize_string(AssetDefinitionIdInPathVisitor)
+            deserializer.deserialize_string(Visitor)
         }
     }
 
@@ -430,7 +476,8 @@ mod asset_definitions {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllAssetsDefinitions::new(), pagination.0.into())
-            .await?
+            .await
+            .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let data = data.map::<Vec<AssetDefinitionDTO>, _>(|items| {
             items.into_iter().map(|x| x.into()).collect()
@@ -465,7 +512,8 @@ mod peer {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllPeers::new(), pagination.0.into())
-            .await?
+            .await
+            .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let data =
             data.map::<Vec<PeerDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
@@ -505,7 +553,8 @@ mod roles {
             .iroha_client
             // TODO add an issue about absense of `FindAllRoles::new()`?
             .request_with_pagination(FindAllRoles {}, pagination.0.into())
-            .await?
+            .await
+            .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
         let data =
             data.map::<Vec<RoleDTO>, _>(|items| items.into_iter().map(|x| x.into()).collect());
@@ -521,7 +570,7 @@ async fn default_route() -> impl Responder {
     HttpResponse::NotFound().body("Not Found")
 }
 
-#[get("/")]
+#[get("")]
 async fn root_health_check() -> impl Responder {
     HttpResponse::Ok().body("Welcome to Iroha 2 Block Explorer!")
 }
@@ -547,7 +596,13 @@ pub fn server(
 
         App::new()
             .app_data(app_data)
+            .app_data(web::QueryConfig::default().error_handler(|err, _req| {
+                WebError::BadRequest(format!("Bad query: {err}")).into()
+            }))
             .wrap(super::logger::TracingLogger::default())
+            .wrap(middleware::NormalizePath::new(
+                middleware::TrailingSlash::Trim,
+            ))
             .service(
                 web::scope("/api/v1")
                     .service(root_health_check)

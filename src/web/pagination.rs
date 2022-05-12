@@ -1,14 +1,14 @@
 use super::*;
 use color_eyre::eyre::{eyre, Context, Result};
-use iroha_client::client::PaginatedQueryOutput;
+use iroha_client::client::ClientQueryOutput;
 use iroha_data_model::prelude::{Pagination as IrohaPagination, Query, QueryBox, Value};
 use serde::Deserialize;
 
 /// Represents some items list with its pagination data
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Paginated<T> {
-    pagination: PaginationDTO,
-    data: T,
+    pub pagination: PaginationDTO,
+    pub data: T,
 }
 
 impl<T> Paginated<T> {
@@ -25,7 +25,7 @@ impl<T> Paginated<T> {
     }
 }
 
-impl<R> TryFrom<PaginatedQueryOutput<R>> for Paginated<R::Output>
+impl<R> TryFrom<ClientQueryOutput<R>> for Paginated<R::Output>
 where
     R: Query + Into<QueryBox> + Debug,
     <R::Output as TryFrom<Value>>::Error: Into<color_eyre::eyre::Error>,
@@ -33,14 +33,15 @@ where
     type Error = color_eyre::Report;
 
     fn try_from(
-        PaginatedQueryOutput {
+        ClientQueryOutput {
             output,
             pagination,
             total,
-        }: PaginatedQueryOutput<R>,
+        }: ClientQueryOutput<R>,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            pagination: PaginationDTO::try_from(IrohaPaginationWithTotal { pagination, total })?,
+            pagination: PaginationDTO::try_from(IrohaPaginationWithTotal { pagination, total })
+                .wrap_err("Failed to construct PaginationDTO")?,
             data: output,
         })
     }
@@ -170,24 +171,28 @@ mod positive_int {
                     write!(formatter, "a positive integer")
                 }
 
-                fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
                 where
                     E: de::Error,
                 {
-                    Positive::try_from(v).map_err(|_err| {
-                        de::Error::invalid_value(de::Unexpected::Unsigned(v as u64), &self)
+                    let num = v
+                        .parse::<u32>()
+                        .map_err(|_err| de::Error::invalid_value(de::Unexpected::Str(v), &self))?;
+
+                    Positive::try_from(num).map_err(|_err| {
+                        de::Error::invalid_value(de::Unexpected::Unsigned(num as u64), &self)
                     })
                 }
             }
 
-            deserializer.deserialize_u32(Visitor)
+            deserializer.deserialize_str(Visitor)
         }
     }
 }
 
 pub use positive_int::Positive;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct PaginationQueryParams {
     #[serde(default = "default_page")]
     pub page: Positive,

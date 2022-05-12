@@ -6,7 +6,7 @@ use color_eyre::{
     Result,
 };
 use iroha_client::{
-    client::{Client as IrohaClient, PaginatedQueryOutput, ResponseHandler},
+    client::{Client as IrohaClient, ClientQueryError, ClientQueryOutput, ResponseHandler},
     http::Response as RespIroha,
 };
 use iroha_data_model::{
@@ -53,7 +53,9 @@ mod request_builder {
 
             if let Some(params) = params {
                 let map: HashMap<String, String> = params.into_iter().collect();
-                req = req.query(&map)?;
+                req = req
+                    .query(&map)
+                    .wrap_err("Failed to set query params to the request")?;
             }
 
             let req = if let Some(body) = body {
@@ -172,26 +174,31 @@ impl IrohaClientWrap {
         &self,
         request: R,
         pagination: Pagination,
-    ) -> Result<PaginatedQueryOutput<R>>
+    ) -> Result<ClientQueryOutput<R>, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
         <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
     {
-        let (req, resp_handler): (ActixReqBuilder, _) =
-            self.iroha.prepare_query_request(request, pagination)?;
+        let (req, resp_handler): (ActixReqBuilder, _) = self
+            .iroha
+            .prepare_query_request(request, pagination)
+            .wrap_err("Failed to prepare query request")?;
         // FIXME response should be a trait!
-        let resp = req.send(&self.http).await?;
+        let resp = req
+            .send(&self.http)
+            .await
+            .wrap_err("Failed to make query")?;
         resp_handler.handle(resp)
     }
 
-    pub async fn request<R>(&self, request: R) -> Result<R::Output>
+    pub async fn request<R>(&self, request: R) -> Result<R::Output, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
         <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
     {
         self.request_with_pagination(request, Pagination::new(None, None))
             .await
-            .map(PaginatedQueryOutput::only_output)
+            .map(ClientQueryOutput::only_output)
     }
 
     pub async fn get_status(&self) -> Result<Status> {
