@@ -108,7 +108,7 @@ mod pagination;
 mod accounts {
     use super::{
         assets::AssetDTO, fmt, get, web, AppData, Context, FromStr, Paginated,
-        PaginationQueryParams, Responder, Scope, Serialize, WebError,
+        PaginationQueryParams, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{
         Account, AccountId, FindAccountById, FindAllAccounts, Metadata,
@@ -185,14 +185,14 @@ mod accounts {
     async fn show(
         data: web::Data<AppData>,
         id: web::Path<AccountIdInPath>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<AccountDTO>, WebError> {
         let account = data
             .iroha_client
             .request(FindAccountById::new(id.into_inner().0))
             .await
             .map_err(WebError::expect_iroha_find_error)?;
 
-        Ok(web::Json(AccountDTO::from(account)))
+        Ok(web::Json(account.into()))
     }
 
     #[get("")]
@@ -220,7 +220,7 @@ mod accounts {
 mod domains {
     use super::{
         accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, get, web, AppData, Paginated,
-        PaginationQueryParams, Responder, Scope, Serialize, WebError,
+        PaginationQueryParams, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{Domain, DomainId, FindAllDomains, FindDomainById, Metadata};
 
@@ -263,7 +263,7 @@ mod domains {
     async fn show(
         data: web::Data<AppData>,
         path: web::Path<String>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<DomainDTO>, WebError> {
         let domain_id: DomainId = path.into_inner().parse()?;
         let domain = data
             .iroha_client
@@ -277,16 +277,16 @@ mod domains {
     async fn index(
         data: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<DomainDTO>>>, WebError> {
         let paginated: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllDomains::new(), pagination.into_inner().into())
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let paginated: Paginated<Vec<DomainDTO>> =
-            paginated.map(|domains| domains.into_iter().map(Into::into).collect());
-        Ok(web::Json(paginated))
+        Ok(web::Json(paginated.map(|domains| {
+            domains.into_iter().map(Into::into).collect()
+        })))
     }
 
     pub fn service() -> Scope {
@@ -297,7 +297,7 @@ mod domains {
 mod assets {
     use super::{
         accounts::AccountIdInPath, asset_definitions::AssetDefinitionIdInPath, get, web, AppData,
-        Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
+        Paginated, PaginationQueryParams, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{
         Asset, AssetId, AssetValue, AssetValueType, FindAllAssets, FindAssetById, Metadata,
@@ -366,30 +366,30 @@ mod assets {
     async fn index(
         data: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<AssetDTO>>>, WebError> {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllAssets::new(), pagination.into_inner().into())
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data: Paginated<Vec<AssetDTO>> =
-            data.map(|assets| assets.into_iter().map(Into::into).collect());
-        Ok(web::Json(data))
+        Ok(web::Json(data.map(|assets| {
+            assets.into_iter().map(Into::into).collect()
+        })))
     }
 
     #[get("/{definition_id}/{account_id}")]
     async fn show(
         data: web::Data<AppData>,
         path: web::Path<AssetIdInPath>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<AssetDTO>, WebError> {
         let asset_id: AssetId = path.into_inner().into();
         let asset = data
             .iroha_client
             .request(FindAssetById::new(asset_id))
             .await
             .map_err(WebError::expect_iroha_find_error)?;
-        Ok(web::Json(AssetDTO::from(asset)))
+        Ok(web::Json(asset.into()))
     }
 
     pub fn service() -> Scope {
@@ -399,8 +399,8 @@ mod assets {
 
 mod asset_definitions {
     use super::{
-        fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Responder, Scope,
-        Serialize, WebError,
+        fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Scope, Serialize,
+        WebError,
     };
     use iroha_data_model::{
         asset::Mintable,
@@ -475,42 +475,35 @@ mod asset_definitions {
     // WIP iroha does not support FindAssetDefinitionById yet
     // https://github.com/hyperledger/iroha/pull/2126
     // #[get("/{id}")]
-    // async fn show(
-    //     data: web::Data<AppState>,
-    //     id: web::Path<AssetDefinitionIdInPath>,
-    // ) -> Result<impl Responder, WebError> {
-    //     let assets = data.with_client(|client| client.request(FindAssetDefinitionKeyValueByIdAndKey::new()))??;
-    //     let assets: Vec<AssetDTO> = assets.into_iter().map(|x| x.into()).collect();
-    //     Ok(web::Json(assets))
-    // }
+    // async fn show(id: web::Path<AssetDefinitionIdInPath>) -> Result<impl Responder, WebError> {}
 
     #[get("")]
     async fn index(
         data: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<AssetDefinitionDTO>>>, WebError> {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllAssetsDefinitions::new(), pagination.0.into())
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data = data
-            .map::<Vec<AssetDefinitionDTO>, _>(|items| items.into_iter().map(Into::into).collect());
-        Ok(web::Json(data))
+        Ok(web::Json(
+            data.map(|items| items.into_iter().map(Into::into).collect()),
+        ))
     }
 
     pub fn service() -> Scope {
-        web::scope("/asset-definitions").service(index)
-        // .service(show)
+        web::scope("/asset-definitions")
+            // .service(show)
+            .service(index)
     }
 }
 
 mod peer {
-    use super::{
-        get, web, AppData, Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
-    };
+    use super::{get, web, AppData, Paginated, PaginationQueryParams, Scope, Serialize, WebError};
     use iroha_data_model::prelude::{FindAllPeers, Peer, PeerId};
+    use iroha_telemetry::metrics::Status;
 
     #[derive(Serialize)]
     pub struct PeerDTO(PeerId);
@@ -525,19 +518,20 @@ mod peer {
     async fn peers(
         data: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<PeerDTO>>>, WebError> {
         let data: Paginated<_> = data
             .iroha_client
             .request_with_pagination(FindAllPeers::new(), pagination.0.into())
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data = data.map::<Vec<PeerDTO>, _>(|items| items.into_iter().map(Into::into).collect());
-        Ok(web::Json(data))
+        Ok(web::Json(
+            data.map(|items| items.into_iter().map(Into::into).collect()),
+        ))
     }
 
     #[get("/status")]
-    async fn status(data: web::Data<AppData>) -> Result<impl Responder, WebError> {
+    async fn status(data: web::Data<AppData>) -> Result<web::Json<Status>, WebError> {
         let status = data.iroha_client.get_status().await?;
         Ok(web::Json(status))
     }
@@ -548,9 +542,7 @@ mod peer {
 }
 
 mod roles {
-    use super::{
-        get, web, AppData, Paginated, PaginationQueryParams, Responder, Scope, Serialize, WebError,
-    };
+    use super::{get, web, AppData, Paginated, PaginationQueryParams, Scope, Serialize, WebError};
     use iroha_data_model::prelude::{FindAllRoles, Role};
 
     #[derive(Serialize)]
@@ -566,7 +558,7 @@ mod roles {
     async fn index(
         app: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
-    ) -> Result<impl Responder, WebError> {
+    ) -> Result<web::Json<Paginated<Vec<RoleDTO>>>, WebError> {
         let data: Paginated<_> = app
             .iroha_client
             // TODO add an issue about absense of `FindAllRoles::new()`?
@@ -574,8 +566,9 @@ mod roles {
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
-        let data = data.map::<Vec<RoleDTO>, _>(|items| items.into_iter().map(Into::into).collect());
-        Ok(web::Json(data))
+        Ok(web::Json(
+            data.map(|items| items.into_iter().map(Into::into).collect()),
+        ))
     }
 
     pub fn service() -> Scope {
