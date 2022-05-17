@@ -47,6 +47,7 @@ Welcome to Iroha 2 Block Explorer!
       -c /path/to/client_config.json \
       -p 8080 # may be env PORT, default is 4000
   ```
+
 ## API
 
 DTOs are described at [api.ts](./api.ts).
@@ -54,6 +55,10 @@ DTOs are described at [api.ts](./api.ts).
 > **Warning**
 >
 > Some DTOs (most of them) may contain bigints. If there are numbers greater than JavaScript's native `number` can fit (`f64`), then native `JSON` decoder will throw an error. You should decode DTOs with some special JSON-decoder than is fine with bigints, e.g. https://www.npmjs.com/package/json-bigint
+
+> **Important**
+>
+> All paths are prefixed with `/api/v1`
 
 - `GET /` - web server health check. Returns 200 OK.
 

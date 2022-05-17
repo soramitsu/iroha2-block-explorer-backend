@@ -26,11 +26,14 @@ type AssetValue =
 
 type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
 
+
 interface AssetDefinition {
   id: string;
   value_type: AssetValueType;
-  mintable: boolean;
+  mintable: Mintable;
 }
+
+type Mintable = 'Once' | 'Infinitely' | 'Not'
 
 interface Peer {
   address: string;
