@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use super::{Debug, Serialize};
 use color_eyre::eyre::{eyre, Context, Result};
 use iroha_client::client::ClientQueryOutput;
@@ -50,10 +52,10 @@ where
 /// Pagination data returned to web
 #[derive(Serialize, Debug, Clone, Copy)]
 pub struct PaginationDTO {
-    /// Current page. Starts from 1.
-    pub page: Positive,
-    /// Represents pagination scale
-    pub page_size: Positive,
+    /// Current page
+    pub page: NonZeroU32,
+    /// Pagination scale
+    pub page_size: NonZeroU32,
     /// Total count of paginated items
     pub total: u64,
 }
@@ -126,102 +128,36 @@ impl TryFrom<IrohaPaginationWithTotal> for PaginationDTO {
     }
 }
 
-mod positive_int {
-    use color_eyre::eyre::{eyre, Report, Result};
-    use serde::{de, Serialize};
-    use std::fmt;
-
-    /// Could only contain a positive (non-zero) integer
-    #[derive(Serialize, Debug, Clone, Copy, PartialEq, PartialOrd)]
-    pub struct Positive(u32);
-
-    impl Positive {
-        pub fn value(self) -> u32 {
-            self.0
-        }
-
-        pub const fn try_from_const(value: u32) -> Result<Self, &'static str> {
-            if value > 0 {
-                Ok(Self(value))
-            } else {
-                Err("zero is not allowed")
-            }
-        }
-    }
-
-    impl TryFrom<u32> for Positive {
-        type Error = Report;
-
-        fn try_from(value: u32) -> Result<Self, Self::Error> {
-            Self::try_from_const(value).map_err(|s| eyre!("{}", s))
-        }
-    }
-
-    impl<'de> de::Deserialize<'de> for Positive {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: de::Deserializer<'de>,
-        {
-            struct Visitor;
-
-            impl<'de> de::Visitor<'de> for Visitor {
-                type Value = Positive;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    write!(formatter, "a positive integer")
-                }
-
-                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                where
-                    E: de::Error,
-                {
-                    let num = v
-                        .parse::<u32>()
-                        .map_err(|_err| de::Error::invalid_value(de::Unexpected::Str(v), &self))?;
-
-                    Positive::try_from(num).map_err(|_err| {
-                        de::Error::invalid_value(de::Unexpected::Unsigned(u64::from(num)), &self)
-                    })
-                }
-            }
-
-            deserializer.deserialize_str(Visitor)
-        }
-    }
-}
-
-pub use positive_int::Positive;
-
 #[derive(Deserialize, Debug)]
 pub struct PaginationQueryParams {
     #[serde(default = "default_page")]
-    pub page: Positive,
+    pub page: NonZeroU32,
     #[serde(default = "default_page_size")]
-    pub page_size: Positive,
+    pub page_size: NonZeroU32,
 }
 
-pub const DEFAULT_PAGE: Positive = match Positive::try_from_const(1) {
-    Ok(v) => v,
-    Err(e) => panic!("{}", e),
+pub const DEFAULT_PAGE: NonZeroU32 = match NonZeroU32::new(1) {
+    Some(v) => v,
+    None => panic!("Failed to make default page"),
 };
 
-pub const DEFAULT_PAGE_SIZE: Positive = match Positive::try_from_const(15) {
-    Ok(v) => v,
-    Err(e) => panic!("{}", e),
+pub const DEFAULT_PAGE_SIZE: NonZeroU32 = match NonZeroU32::new(15) {
+    Some(v) => v,
+    None => panic!("Failed to make default page size"),
 };
 
-const fn default_page() -> Positive {
+const fn default_page() -> NonZeroU32 {
     DEFAULT_PAGE
 }
 
-const fn default_page_size() -> Positive {
+const fn default_page_size() -> NonZeroU32 {
     DEFAULT_PAGE_SIZE
 }
 
 impl From<PaginationQueryParams> for IrohaPagination {
     fn from(PaginationQueryParams { page_size, page }: PaginationQueryParams) -> Self {
-        let page = page.value();
-        let page_size = page_size.value();
+        let page = page.get();
+        let page_size = page_size.get();
         Self::new(Some((page - 1) * page_size), Some(page_size))
     }
 }
@@ -255,8 +191,8 @@ mod tests {
 
             let result = PaginationDTO::try_from(pagination).unwrap();
 
-            assert_eq!(result.page.value(), 4);
-            assert_eq!(result.page_size.value(), 5);
+            assert_eq!(result.page.get(), 4);
+            assert_eq!(result.page_size.get(), 5);
             assert_eq!(result.total, 50);
         }
 
@@ -279,8 +215,8 @@ mod tests {
 
             let result = PaginationDTO::try_from(pagination).unwrap();
 
-            assert_eq!(result.page.value(), 1);
-            assert_eq!(result.page_size.value(), 5);
+            assert_eq!(result.page.get(), 1);
+            assert_eq!(result.page_size.get(), 5);
             assert_eq!(result.total, 25);
         }
 
@@ -293,8 +229,8 @@ mod tests {
 
             let result = PaginationDTO::try_from(pagination).unwrap();
 
-            assert_eq!(result.page.value(), 2);
-            assert_eq!(result.page_size.value(), 13);
+            assert_eq!(result.page.get(), 2);
+            assert_eq!(result.page_size.get(), 13);
             assert_eq!(result.total, 26);
         }
 
@@ -307,8 +243,8 @@ mod tests {
 
             let result = PaginationDTO::try_from(pagination).unwrap();
 
-            assert_eq!(result.page.value(), 2);
-            assert_eq!(result.page_size.value(), 10);
+            assert_eq!(result.page.get(), 2);
+            assert_eq!(result.page_size.get(), 10);
             assert_eq!(result.total, 50);
         }
 
@@ -331,8 +267,8 @@ mod tests {
 
             let result = PaginationDTO::try_from(pagination).unwrap();
 
-            assert_eq!(result.page.value(), 1);
-            assert_eq!(result.page_size.value(), 10);
+            assert_eq!(result.page.get(), 1);
+            assert_eq!(result.page_size.get(), 10);
             assert_eq!(result.total, 10);
         }
     }
