@@ -1562,6 +1562,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "genesis-gen"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "faker_rand",
+ "iroha_client",
+ "iroha_core",
+ "iroha_crypto",
+ "iroha_data_model",
+ "iroha_telemetry",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gethostname"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
