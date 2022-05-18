@@ -13,31 +13,30 @@ mod model {
     };
     use iroha_core::{
         genesis::{GenesisTransaction, RawGenesisBlock},
-        tx::{AssetValue, MintBox},
+        tx::MintBox,
     };
     use iroha_crypto::{KeyGenConfiguration, KeyPair};
     use iroha_data_model::{
         account::NewAccount,
         asset::Mintable,
-        domain::NewDomain,
         prelude::{
-            Account as OriginAccount, AccountId, Asset, AssetDefinition as OriginAssetDefinition,
+            Account as OriginAccount, AccountId, AssetDefinition as OriginAssetDefinition,
             AssetDefinitionId, AssetId, AssetValueType, Domain as OriginDomain, DomainId,
-            Instruction, Metadata, Name, RegisterBox, Value,
+            Instruction, Name, RegisterBox, Value,
         },
     };
     use rand::{prelude::IteratorRandom, thread_rng, Rng};
     use serde::Serialize;
-    use std::str::FromStr;
+    use std::{collections::HashSet, str::FromStr};
 
-    pub struct Model {
+    pub struct View {
         domains: Vec<Domain>,
         accounts: Vec<Account>,
         asset_definitions: Vec<AssetDefinition>,
         asset_actions: Vec<Instruction>,
     }
 
-    impl Model {
+    impl View {
         pub fn generate(config: &CLI) -> Result<Self> {
             let mut rng = thread_rng();
 
@@ -66,9 +65,12 @@ mod model {
                 domains.push(domain);
             }
 
+            let mut action_gen = AssetActionGen::new(&asset_definitions, &accounts);
+
             for _ in 0..config.asset_actions {
                 asset_actions.push(
-                    random_asset_action(&mut rng, &accounts, &asset_definitions)
+                    action_gen
+                        .gen(&mut rng)
                         .wrap_err("Failed to generate random action")?,
                 );
             }
@@ -76,46 +78,46 @@ mod model {
             Ok(Self {
                 domains,
                 accounts,
-                asset_actions,
                 asset_definitions,
+                asset_actions,
             })
         }
 
-        pub fn build(self) -> Result<ModelBuilt> {
-            let transactions: Vec<GenesisTransaction> = self
+        pub fn build(self) -> ViewBuilt {
+            let isi: Vec<_> = self
                 .domains
                 .into_iter()
-                .map(|x| Instruction::Register(RegisterBox::new(Into::<NewDomain>::into(x))))
+                .map(|x| RegisterBox::new(OriginDomain::new(x.id)).into())
                 .chain(
-                    self.accounts.clone().into_iter().map(|x| {
-                        Instruction::Register(RegisterBox::new(Into::<NewAccount>::into(x)))
-                    }),
+                    self.accounts
+                        .clone()
+                        .into_iter()
+                        .map(|x| RegisterBox::new(Into::<NewAccount>::into(x)).into()),
                 )
-                .chain(self.asset_definitions.into_iter().map(|x| {
-                    Instruction::Register(RegisterBox::new(Into::<OriginAssetDefinition>::into(x)))
-                }))
+                .chain(
+                    self.asset_definitions
+                        .into_iter()
+                        .map(|x| RegisterBox::new(Into::<OriginAssetDefinition>::into(x)).into()),
+                )
                 .chain(self.asset_actions.into_iter())
-                .map(|instruction| GenesisTransaction {
-                    isi: vec![instruction].into(),
-                })
                 .collect();
 
-            Ok(ModelBuilt {
+            ViewBuilt {
                 raw_genesis_block: RawGenesisBlock {
-                    transactions: transactions.into(),
+                    transactions: (vec![GenesisTransaction { isi: isi.into() }]).into(),
                 },
                 accounts: self.accounts,
-            })
+            }
         }
     }
 
     #[derive(Serialize)]
-    pub struct ModelBuilt {
+    pub struct ViewBuilt {
         raw_genesis_block: RawGenesisBlock,
         accounts: Vec<Account>,
     }
 
-    impl ModelBuilt {
+    impl ViewBuilt {
         pub fn only_genesis(self) -> RawGenesisBlock {
             self.raw_genesis_block
         }
@@ -129,7 +131,7 @@ mod model {
         fn new<R: Rng>(rng: &mut R) -> Result<Self> {
             let name: faker_rand::fr_fr::company::CompanyName = rng.gen();
             let name = name.to_string().replace(' ', "_");
-            let name = construct_iroha_name(name)?;
+            let name = construct_iroha_name(&name)?;
 
             Ok(Domain {
                 id: DomainId::new(name),
@@ -137,9 +139,9 @@ mod model {
         }
     }
 
-    impl From<Domain> for NewDomain {
+    impl From<Domain> for OriginDomain {
         fn from(domain: Domain) -> Self {
-            OriginDomain::new(domain.id)
+            OriginDomain::new(domain.id).build()
         }
     }
 
@@ -164,13 +166,13 @@ mod model {
                     seed.push(rng.gen());
                 }
 
-                let config = KeyGenConfiguration::default().use_seed(vec![]);
+                let config = KeyGenConfiguration::default().use_seed(seed);
                 KeyPair::generate_with_configuration(config)?
             };
             let keys = vec![kp];
 
             let name: faker_rand::fr_fr::internet::Username = rng.gen();
-            let name = construct_iroha_name(name.to_string())?;
+            let name = construct_iroha_name(&name.to_string())?;
 
             Ok(Self {
                 id: AccountId::new(name, domain_id.clone()),
@@ -193,8 +195,8 @@ mod model {
                 mintable,
             }: AssetDefinition,
         ) -> Self {
-            use AssetValueType::*;
-            use Mintable::*;
+            use AssetValueType::{BigQuantity, Fixed, Quantity, Store};
+            use Mintable::{Infinitely, Not, Once};
 
             let mut definition = match value_type {
                 Quantity => OriginAssetDefinition::quantity(id),
@@ -237,7 +239,7 @@ mod model {
             };
 
             let name: faker_rand::en_us::names::LastName = rng.gen();
-            let name = construct_iroha_name(name.to_string())?;
+            let name = construct_iroha_name(&name.to_string())?;
 
             Ok(Self {
                 id: AssetDefinitionId::new(name, domain_id.clone()),
@@ -247,56 +249,127 @@ mod model {
         }
     }
 
-    fn construct_iroha_name(input: String) -> Result<Name> {
-        Name::from_str(&input)
+    fn construct_iroha_name(input: &str) -> Result<Name> {
+        Name::from_str(input)
             .wrap_err_with(|| format!("Failed to construct Iroha Name from \"{input}\""))
     }
 
-    fn random_asset_action<R: Rng>(
-        rng: &mut R,
-        accounts: &Vec<Account>,
-        assets: &Vec<AssetDefinition>,
-    ) -> Result<Instruction> {
-        let some_asset_definition = assets
-            .iter()
-            .filter(|x| x.mintable != Mintable::Not || x.value_type == AssetValueType::Store)
-            .choose(rng)
-            .ok_or_else(|| eyre!("Failed to choose random asset definition"))?;
+    struct AssetActionGen<'a> {
+        assets: &'a Vec<AssetDefinition>,
+        accounts: &'a Vec<Account>,
+        minted_assets: HashSet<AssetDefinitionId>,
+    }
 
-        let some_account = accounts
-            .iter()
-            .choose(rng)
-            .ok_or_else(|| eyre!("Failed to choose random account"))?;
+    impl<'a> AssetActionGen<'a> {
+        fn new(assets: &'a Vec<AssetDefinition>, accounts: &'a Vec<Account>) -> Self {
+            Self {
+                assets,
+                accounts,
+                minted_assets: HashSet::new(),
+            }
+        }
 
-        let asset_id = AssetId::new(some_asset_definition.id.clone(), some_account.id.clone());
+        /// TODO add Store registration (also link issue)
+        ///
+        /// For now, only minting assets
+        fn gen<R: Rng>(&mut self, rng: &mut R) -> Result<Instruction> {
+            let some_asset_definition = self
+                .assets
+                .iter()
+                .filter(|x| {
+                    x.value_type != AssetValueType::Store
+                        && (match x.mintable {
+                            Mintable::Not => false,
+                            Mintable::Once => !self.minted_assets.contains(&x.id),
+                            Mintable::Infinitely => true,
+                        })
+                })
+                .choose(rng)
+                .ok_or_else(|| eyre!("Failed to choose random asset definition"))?;
 
-        if some_asset_definition.value_type == AssetValueType::Store {
-            let instruction = Instruction::Register(RegisterBox::new(Asset::new(
-                asset_id,
-                AssetValue::Store(Metadata::new()),
-            )));
+            let some_account = self
+                .accounts
+                .iter()
+                .choose(rng)
+                .ok_or_else(|| eyre!("Failed to choose random account"))?;
 
-            Ok(instruction)
-        } else {
-            // Then mintable asset
+            // It should be not a very big value to avoid overflow while composing them
             let value = match some_asset_definition.value_type {
-                AssetValueType::Quantity => Value::U32(rng.gen()),
-                AssetValueType::BigQuantity => Value::U128(rng.gen()),
-                AssetValueType::Fixed => Value::Fixed(TryFrom::<f64>::try_from(rng.gen())?),
-                _ => return Err(eyre!("This arm should be unreachable")),
+                AssetValueType::Quantity => Value::U32(rng.gen_range(0..1_000)),
+                AssetValueType::BigQuantity => Value::U128(rng.gen_range(0..1_000_000)),
+                AssetValueType::Fixed => {
+                    Value::Fixed(TryFrom::try_from(f64::powf(rng.gen(), 0.1))?)
+                }
+                AssetValueType::Store => return Err(eyre!("This arm should be unreachable")),
             };
 
+            let asset_id = AssetId::new(some_asset_definition.id.clone(), some_account.id.clone());
             let instruction = Instruction::Mint(MintBox::new(value, asset_id));
+
+            if some_asset_definition.mintable == Mintable::Once {
+                self.minted_assets.insert(some_asset_definition.id.clone());
+            }
+
             Ok(instruction)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use iroha_core::tx::Expression;
+        use iroha_data_model::IdBox;
+
+        use super::*;
+
+        #[test]
+        fn once_mintable_asset_minted_only_once() {
+            const ISI_COUNT: usize = 1000; // enough to reduce flakyness
+
+            let mut rng = thread_rng();
+            let assets = vec![
+                AssetDefinition {
+                    id: "rose#wonderland".parse().unwrap(),
+                    value_type: AssetValueType::Quantity,
+                    mintable: Mintable::Infinitely,
+                },
+                AssetDefinition {
+                    id: "tulip#wonderland".parse().unwrap(),
+                    value_type: AssetValueType::Quantity,
+                    mintable: Mintable::Once,
+                },
+            ];
+            let accounts = vec![Account {
+                id: "alice@wonderland".parse().unwrap(),
+                keys: vec![],
+            }];
+            let mut gen = AssetActionGen::new(&assets, &accounts);
+
+            let mut isi: Vec<_> = Vec::with_capacity(ISI_COUNT);
+            for _ in 0..ISI_COUNT {
+                isi.push(gen.gen(&mut rng).unwrap());
+            }
+
+            let mut tulip_mint_count = 0usize;
+            for item in isi {
+                if let Instruction::Mint(MintBox { destination_id, .. }) = item {
+                    if let Expression::Raw(value) = *destination_id.expression {
+                        if let Value::Id(IdBox::AssetId(id)) = *value {
+                            if id.definition_id.to_string() == "tulip#wonderland" {
+                                tulip_mint_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            assert_eq!(tulip_mint_count, 1);
         }
     }
 }
 
 pub fn generate(args: &CLI) -> Result<String> {
-    let model = model::Model::generate(args)
+    let model = model::View::generate(args)
         .wrap_err("Failed to generate model")?
-        .build()
-        .wrap_err("Failed to build model")?;
+        .build();
 
     if args.only_genesis {
         to_json(&model.only_genesis(), args.minify)
