@@ -6,7 +6,7 @@ use serde::Serialize;
 ///
 /// Based on Iroha Data Model, but simpler.
 mod model {
-    use super::super::CLI;
+    use crate::CLI;
     use color_eyre::{
         eyre::{eyre, Context},
         Result,
@@ -25,39 +25,86 @@ mod model {
             Instruction, Name, RegisterBox, Value,
         },
     };
-    use rand::{prelude::IteratorRandom, thread_rng, Rng};
+    use itertools::Itertools;
+    use rand::{
+        prelude::{IteratorRandom, ThreadRng},
+        thread_rng, Rng,
+    };
     use serde::Serialize;
-    use std::{collections::HashSet, str::FromStr};
+    use std::{collections::HashSet, hash::Hash, str::FromStr};
+
+    /// When there are too many ISI in a single transaction, Iroha doesn't accept it.
+    ///
+    /// https://github.com/hyperledger/iroha/issues/2232
+    const TRANSACTION_ISI_CHUNK_SIZE: usize = 1400;
 
     pub struct View {
+        chunks: Vec<SingleChunkView>,
+    }
+
+    impl View {
+        pub fn generate(cfg: &CLI) -> Result<Self> {
+            let mut rand_help = RandHelp::with_used_names(UsedNames::with_capacity(
+                cfg.total_domain_names(),
+                cfg.total_account_names(),
+                cfg.total_asset_names(),
+            ));
+
+            Ok(Self {
+                chunks: (0..cfg.chunks.get())
+                    .into_iter()
+                    .map(|_| SingleChunkView::generate(&cfg, &mut rand_help))
+                    .collect::<Result<Vec<SingleChunkView>>>()?,
+            })
+        }
+
+        pub fn build(self) -> ViewBuilt {
+            let (accounts, txs): (Vec<_>, Vec<_>) = self
+                .chunks
+                .into_iter()
+                .map(|view| {
+                    let accounts = view.accounts.clone();
+                    let isi = view.into_isis().take(TRANSACTION_ISI_CHUNK_SIZE);
+                    let tx = GenesisTransaction { isi: isi.collect() };
+                    (accounts, tx)
+                })
+                .multiunzip();
+
+            ViewBuilt {
+                raw_genesis_block: RawGenesisBlock {
+                    transactions: txs.into(),
+                },
+                accounts: accounts.into_iter().flatten().collect(),
+            }
+        }
+    }
+
+    struct SingleChunkView {
         domains: Vec<Domain>,
         accounts: Vec<Account>,
         asset_definitions: Vec<AssetDefinition>,
         asset_actions: Vec<Instruction>,
     }
 
-    impl View {
-        pub fn generate(config: &CLI) -> Result<Self> {
-            let mut rng = thread_rng();
-
+    impl SingleChunkView {
+        fn generate(config: &CLI, rand_help: &mut RandHelp) -> Result<Self> {
             let mut domains: Vec<Domain> = Vec::with_capacity(config.domains);
-            let mut accounts: Vec<Account> =
-                Vec::with_capacity(config.domains * config.accounts_per_domain);
+            let mut accounts: Vec<Account> = Vec::with_capacity(config.accounts_per_chunk());
             let mut asset_definitions: Vec<AssetDefinition> =
-                Vec::with_capacity(config.domains * config.assets_per_domain);
+                Vec::with_capacity(config.assets_per_chunk());
             let mut asset_actions: Vec<Instruction> = Vec::with_capacity(config.asset_actions);
 
             for _ in 0..config.domains {
-                let domain = Domain::new(&mut rng).wrap_err("Failed to generate domain")?;
+                let domain = Domain::new(rand_help).wrap_err("Failed to generate domain")?;
 
                 for _ in 0..config.accounts_per_domain {
-                    let account = Account::new(&mut rng, &domain.id)
+                    let account = Account::new(rand_help, &domain.id)
                         .wrap_err("Failed to generate account")?;
                     accounts.push(account);
                 }
 
                 for _ in 0..config.assets_per_domain {
-                    let definition = AssetDefinition::new(&mut rng, &domain.id)
+                    let definition = AssetDefinition::new(rand_help, &domain.id)
                         .wrap_err("Failed to generage asset definition")?;
                     asset_definitions.push(definition);
                 }
@@ -70,7 +117,7 @@ mod model {
             for _ in 0..config.asset_actions {
                 asset_actions.push(
                     action_gen
-                        .gen(&mut rng)
+                        .gen(&mut rand_help.rng)
                         .wrap_err("Failed to generate random action")?,
                 );
             }
@@ -83,9 +130,8 @@ mod model {
             })
         }
 
-        pub fn build(self) -> ViewBuilt {
-            let isi: Vec<_> = self
-                .domains
+        fn into_isis(self) -> impl Iterator<Item = Instruction> {
+            self.domains
                 .into_iter()
                 .map(|x| RegisterBox::new(OriginDomain::new(x.id)).into())
                 .chain(
@@ -100,14 +146,6 @@ mod model {
                         .map(|x| RegisterBox::new(Into::<OriginAssetDefinition>::into(x)).into()),
                 )
                 .chain(self.asset_actions.into_iter())
-                .collect();
-
-            ViewBuilt {
-                raw_genesis_block: RawGenesisBlock {
-                    transactions: (vec![GenesisTransaction { isi: isi.into() }]).into(),
-                },
-                accounts: self.accounts,
-            }
         }
     }
 
@@ -123,15 +161,53 @@ mod model {
         }
     }
 
+    /// For used names tracking
+    #[derive(Default)]
+    struct UsedNames {
+        domains: HashSet<String>,
+        accounts: HashSet<String>,
+        asset_definitions: HashSet<String>,
+    }
+
+    impl UsedNames {
+        fn with_capacity(domains: usize, accounts: usize, definitions: usize) -> Self {
+            Self {
+                domains: HashSet::with_capacity(domains),
+                accounts: HashSet::with_capacity(accounts),
+                asset_definitions: HashSet::with_capacity(definitions),
+            }
+        }
+    }
+
+    struct RandHelp<'a> {
+        rng: ThreadRng,
+        petnames: petname::Petnames<'a>,
+        used_names: UsedNames,
+    }
+
+    impl<'a> RandHelp<'a> {
+        fn with_used_names(used_names: UsedNames) -> Self {
+            Self {
+                rng: thread_rng(),
+                petnames: petname::Petnames::large(),
+                used_names,
+            }
+        }
+    }
+
     struct Domain {
         id: DomainId,
     }
 
     impl Domain {
-        fn new<R: Rng>(rng: &mut R) -> Result<Self> {
-            let name: faker_rand::fr_fr::company::CompanyName = rng.gen();
-            let name = name.to_string().replace(' ', "_");
-            let name = construct_iroha_name(&name)?;
+        fn new(rnd: &mut RandHelp) -> Result<Self> {
+            let name = try_gen_rand_non_repetitive_value(&mut rnd.used_names.domains, || {
+                let name: faker_rand::en_us::internet::Domain = rnd.rng.gen();
+                let name = name.to_string().replace(' ', "_");
+                let name = construct_iroha_name(&name)?;
+                Ok((name.to_string(), name))
+            })
+            .wrap_err("Failed to generate domain name")?;
 
             Ok(Domain {
                 id: DomainId::new(name),
@@ -158,12 +234,12 @@ mod model {
     }
 
     impl Account {
-        fn new<R: Rng>(rng: &mut R, domain_id: &DomainId) -> Result<Self> {
+        fn new(rnd: &mut RandHelp, domain_id: &DomainId) -> Result<Self> {
             let kp: KeyPair = {
-                let seed_len: usize = rng.gen_range(5..30);
+                let seed_len: usize = rnd.rng.gen_range(5..30);
                 let mut seed: Vec<u8> = Vec::with_capacity(seed_len);
                 for _ in 0..seed_len {
-                    seed.push(rng.gen());
+                    seed.push(rnd.rng.gen());
                 }
 
                 let config = KeyGenConfiguration::default().use_seed(seed);
@@ -171,13 +247,20 @@ mod model {
             };
             let keys = vec![kp];
 
-            let name: faker_rand::fr_fr::internet::Username = rng.gen();
-            let name = construct_iroha_name(&name.to_string())?;
+            let id = Self::gen_account_id(rnd, domain_id)?;
 
-            Ok(Self {
-                id: AccountId::new(name, domain_id.clone()),
-                keys,
+            Ok(Self { id, keys })
+        }
+
+        fn gen_account_id(rnd: &mut RandHelp, domain_id: &DomainId) -> Result<AccountId> {
+            try_gen_rand_non_repetitive_value(&mut rnd.used_names.accounts, || {
+                let name = rnd.petnames.generate(&mut rnd.rng, 3, "_");
+                let name = construct_iroha_name(&name)?;
+                let id = AccountId::new(name, domain_id.clone());
+                let id_str = id.to_string();
+                Ok((id_str, id))
             })
+            .wrap_err("Failed to generate account id")
         }
     }
 
@@ -222,15 +305,15 @@ mod model {
     }
 
     impl AssetDefinition {
-        fn new<R: Rng>(rng: &mut R, domain_id: &DomainId) -> Result<Self> {
-            let mintable: Mintable = match rng.gen_range(0..10u32) {
+        fn new(rnd: &mut RandHelp, domain_id: &DomainId) -> Result<Self> {
+            let mintable: Mintable = match rnd.rng.gen_range(0..10u32) {
                 5..=9 => Mintable::Infinitely,
                 2..=4 => Mintable::Not,
                 0..=1 => Mintable::Once,
                 x => return Err(eyre!("Unexpected random num: {x}")),
             };
 
-            let value_type: AssetValueType = match rng.gen_range(0..10u32) {
+            let value_type: AssetValueType = match rnd.rng.gen_range(0..10u32) {
                 7..=9 => AssetValueType::Quantity,
                 4..=6 => AssetValueType::BigQuantity,
                 1..=3 => AssetValueType::Fixed,
@@ -238,11 +321,18 @@ mod model {
                 x => return Err(eyre!("Unexpected random num: {x}")),
             };
 
-            let name: faker_rand::en_us::names::LastName = rng.gen();
-            let name = construct_iroha_name(&name.to_string())?;
+            let id =
+                try_gen_rand_non_repetitive_value(&mut rnd.used_names.asset_definitions, || {
+                    let name = rnd.petnames.generate(&mut rnd.rng, 3, "-");
+                    let name = construct_iroha_name(&name)?;
+                    let id = AssetDefinitionId::new(name, domain_id.clone());
+                    let id_str = id.to_string();
+                    Ok((id_str, id))
+                })
+                .wrap_err("Failed to generate definition id")?;
 
             Ok(Self {
-                id: AssetDefinitionId::new(name, domain_id.clone()),
+                id,
                 mintable,
                 value_type,
             })
@@ -252,6 +342,36 @@ mod model {
     fn construct_iroha_name(input: &str) -> Result<Name> {
         Name::from_str(input)
             .wrap_err_with(|| format!("Failed to construct Iroha Name from \"{input}\""))
+    }
+
+    /// Useful for random names generation in Domain, Account etc
+    ///
+    /// # Errors
+    /// Fails if there are too much attempts or if value generation fails
+    fn try_gen_rand_non_repetitive_value<T, K, F>(used: &mut HashSet<K>, mut f: F) -> Result<T>
+    where
+        K: Hash + Eq,
+        F: FnMut() -> Result<(K, T)>,
+    {
+        const MAX_ATTEMPTS: usize = 100;
+
+        let mut iterations: usize = 0;
+
+        loop {
+            let (key, value) = f()?;
+
+            if !used.contains(&key) {
+                used.insert(key);
+                return Ok(value);
+            }
+
+            iterations += 1;
+            if iterations >= MAX_ATTEMPTS {
+                return Err(eyre!(
+                    "Too much attempts to generate random non-repetitive value (max: {MAX_ATTEMPTS})"
+                ));
+            }
+        }
     }
 
     struct AssetActionGen<'a> {
@@ -269,7 +389,8 @@ mod model {
             }
         }
 
-        /// TODO add Store registration (also link issue)
+        /// TODO add Store registration https://github.com/hyperledger/iroha/issues/2227
+        /// TODO add assets transfers
         ///
         /// For now, only minting assets
         fn gen<R: Rng>(&mut self, rng: &mut R) -> Result<Instruction> {
@@ -362,6 +483,83 @@ mod model {
                 }
             }
             assert_eq!(tulip_mint_count, 1);
+        }
+
+        #[test]
+        fn isis_are_chunked() {
+            let ViewBuilt {
+                raw_genesis_block, ..
+            } = View::generate(&CLI {
+                domains: 1,
+                accounts_per_domain: 1,
+                assets_per_domain: 50,
+                asset_actions: 5_000,
+                minify: false,
+                only_genesis: false,
+                chunks: 5.try_into().unwrap(),
+            })
+            .unwrap()
+            .build();
+
+            for GenesisTransaction { isi } in raw_genesis_block.transactions {
+                more_asserts::assert_le!(isi.len(), TRANSACTION_ISI_CHUNK_SIZE);
+            }
+        }
+
+        #[test]
+        fn domains_are_not_repeated() {
+            repetition_test_factory(
+                |rnd| {
+                    let Domain { id } = Domain::new(rnd).unwrap();
+                    id.to_string()
+                },
+                500,
+            );
+        }
+
+        #[test]
+        fn accounts_are_not_repeated() {
+            let domain_id = DomainId::from_str("wonderland").unwrap();
+
+            repetition_test_factory(
+                |rnd| {
+                    // Testing `gen_account_id` to avoid keys generation
+                    let id = Account::gen_account_id(rnd, &domain_id).unwrap();
+                    id.to_string()
+                },
+                100_000,
+            );
+        }
+
+        #[test]
+        fn asset_definitions_are_not_repeated() {
+            let domain_id = DomainId::from_str("wonderland").unwrap();
+
+            repetition_test_factory(
+                |rnd| {
+                    let AssetDefinition { id, .. } = AssetDefinition::new(rnd, &domain_id).unwrap();
+                    id.to_string()
+                },
+                10_000,
+            );
+        }
+
+        fn repetition_test_factory<F>(f: F, repeat_count: usize)
+        where
+            F: Fn(&mut RandHelp) -> String,
+        {
+            let mut rnd = RandHelp::with_used_names(UsedNames::with_capacity(
+                repeat_count,
+                repeat_count,
+                repeat_count,
+            ));
+            let mut occured = HashSet::with_capacity(repeat_count);
+
+            for _ in 0..repeat_count {
+                let id = f(&mut rnd);
+                assert!(!occured.contains(&id));
+                occured.insert(id);
+            }
         }
     }
 }

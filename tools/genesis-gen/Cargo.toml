@@ -7,14 +7,18 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "3.1.12", features = ["derive", "env"] }
-iroha_client        = { git = "https://github.com/hyperledger/iroha.git", branch = "iroha2-dev" }
-iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", branch = "iroha2-dev" }
-iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", branch = "iroha2-dev" }
-iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", branch = "iroha2-dev" }
-iroha_core          = { git = "https://github.com/hyperledger/iroha.git", branch = "iroha2-dev" }
+iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "407e40622fdcdf07610f247b0f0cdc3832c5518b" }
+iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "407e40622fdcdf07610f247b0f0cdc3832c5518b" }
+iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "407e40622fdcdf07610f247b0f0cdc3832c5518b" }
+iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "407e40622fdcdf07610f247b0f0cdc3832c5518b" }
+iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "407e40622fdcdf07610f247b0f0cdc3832c5518b" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
 rand = "0.8.5"
 faker_rand = "0.1"
+petname = "1.1.2"
+itertools = "0.10.3"
 
+[dev-dependencies]
+more-asserts = "0.2.2"
