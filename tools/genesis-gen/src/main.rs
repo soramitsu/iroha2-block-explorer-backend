@@ -58,11 +58,11 @@ impl CLI {
     }
 
     fn total_account_names(&self) -> usize {
-        self.accounts_per_chunk() & self.chunks.get()
+        self.accounts_per_chunk() * self.chunks.get()
     }
 
     fn total_asset_names(&self) -> usize {
-        self.assets_per_chunk() & self.chunks.get()
+        self.assets_per_chunk() * self.chunks.get()
     }
 }
 
