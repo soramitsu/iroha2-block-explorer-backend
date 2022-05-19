@@ -35,7 +35,7 @@ mod model {
 
     /// When there are too many ISI in a single transaction, Iroha doesn't accept it.
     ///
-    /// https://github.com/hyperledger/iroha/issues/2232
+    /// [issue](https://github.com/hyperledger/iroha/issues/2232)
     const TRANSACTION_ISI_CHUNK_SIZE: usize = 1400;
 
     pub struct View {
@@ -53,7 +53,7 @@ mod model {
             Ok(Self {
                 chunks: (0..cfg.chunks.get())
                     .into_iter()
-                    .map(|_| SingleChunkView::generate(&cfg, &mut rand_help))
+                    .map(|_| SingleChunkView::generate(cfg, &mut rand_help))
                     .collect::<Result<Vec<SingleChunkView>>>()?,
             })
         }
@@ -333,8 +333,8 @@ mod model {
 
             Ok(Self {
                 id,
-                mintable,
                 value_type,
+                mintable,
             })
         }
     }
@@ -389,7 +389,7 @@ mod model {
             }
         }
 
-        /// TODO add Store registration https://github.com/hyperledger/iroha/issues/2227
+        /// TODO add Store registration [issue](https://github.com/hyperledger/iroha/issues/2227)
         /// TODO add assets transfers
         ///
         /// For now, only minting assets
