@@ -1,6 +1,6 @@
 # genesis-gen
 
-Tool for generation huge genesis
+Tool for generating a genesis block simulating real-world usage. Meant for testing and prototyping. 
 
 ## Usage
 
