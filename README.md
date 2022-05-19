@@ -185,3 +185,7 @@ They should be HTML-escaped.
 - `page_size=<number>` - page size limit. Default: 15.
 
 Pagination is not yet implemented! For now it always returns the whole dataset. Query params will be ignored.
+
+## Tools
+
+- [genesis-gen](./tools/genesis-gen/README.md) - genesis generator.
