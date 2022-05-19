@@ -45,9 +45,9 @@ mod model {
     impl View {
         pub fn generate(cfg: &CLI) -> Result<Self> {
             let mut rand_help = RandHelp::with_used_names(UsedNames::with_capacity(
-                cfg.total_domain_names(),
-                cfg.total_account_names(),
-                cfg.total_asset_names(),
+                cfg.total_domain_names().try_into()?,
+                cfg.total_account_names().try_into()?,
+                cfg.total_asset_names().try_into()?,
             ));
 
             Ok(Self {
@@ -88,11 +88,13 @@ mod model {
 
     impl SingleChunkView {
         fn generate(config: &CLI, rand_help: &mut RandHelp) -> Result<Self> {
-            let mut domains: Vec<Domain> = Vec::with_capacity(config.domains);
-            let mut accounts: Vec<Account> = Vec::with_capacity(config.accounts_per_chunk());
+            let mut domains: Vec<Domain> = Vec::with_capacity(config.domains.try_into()?);
+            let mut accounts: Vec<Account> =
+                Vec::with_capacity(config.accounts_per_chunk().try_into()?);
             let mut asset_definitions: Vec<AssetDefinition> =
-                Vec::with_capacity(config.assets_per_chunk());
-            let mut asset_actions: Vec<Instruction> = Vec::with_capacity(config.asset_actions);
+                Vec::with_capacity(config.assets_per_chunk().try_into()?);
+            let mut asset_actions: Vec<Instruction> =
+                Vec::with_capacity(config.asset_actions.try_into()?);
 
             for _ in 0..config.domains {
                 let domain = Domain::new(rand_help).wrap_err("Failed to generate domain")?;
@@ -308,8 +310,7 @@ mod model {
         fn new(rnd: &mut RandHelp, domain_id: &DomainId) -> Result<Self> {
             let mintable: Mintable = match rnd.rng.gen_range(0..10u32) {
                 5..=9 => Mintable::Infinitely,
-                2..=4 => Mintable::Not,
-                0..=1 => Mintable::Once,
+                0..=4 => Mintable::Once,
                 x => return Err(eyre!("Unexpected random num: {x}")),
             };
 

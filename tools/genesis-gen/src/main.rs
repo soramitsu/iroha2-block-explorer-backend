@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::num::NonZeroU32;
 
 use clap::Parser;
 use color_eyre::Result;
@@ -26,42 +26,42 @@ pub struct CLI {
     only_genesis: bool,
     /// How many domains to generate
     #[clap(long, short, default_value = "5")]
-    pub domains: usize,
+    pub domains: u32,
     /// How many accounts to generate per each domain
     #[clap(long, default_value = "7")]
-    pub accounts_per_domain: usize,
+    pub accounts_per_domain: u32,
     /// How many asset definitions to generate per each asset
     #[clap(long, default_value = "3")]
-    pub assets_per_domain: usize,
+    pub assets_per_domain: u32,
     /// How many asset actions (mints, burns, transfers) to perform
     #[clap(long, default_value = "50")]
-    pub asset_actions: usize,
+    pub asset_actions: u32,
     /// How many chunks (transactions) to generate. Due to Iroha limitations,
     /// each transaction runs in a clean World-State-View, and transaction size is limited
     /// for some reason to ~1400 instructions. Thus, you can specify how many random separate
     /// data chunks to generate
     #[clap(long, default_value = "1")]
-    pub chunks: NonZeroUsize,
+    pub chunks: NonZeroU32,
 }
 
 impl CLI {
-    fn accounts_per_chunk(&self) -> usize {
+    fn accounts_per_chunk(&self) -> u32 {
         self.domains * self.accounts_per_domain
     }
 
-    fn assets_per_chunk(&self) -> usize {
+    fn assets_per_chunk(&self) -> u32 {
         self.domains * self.assets_per_domain
     }
 
-    fn total_domain_names(&self) -> usize {
+    fn total_domain_names(&self) -> u32 {
         self.domains * self.chunks.get()
     }
 
-    fn total_account_names(&self) -> usize {
+    fn total_account_names(&self) -> u32 {
         self.accounts_per_chunk() * self.chunks.get()
     }
 
-    fn total_asset_names(&self) -> usize {
+    fn total_asset_names(&self) -> u32 {
         self.assets_per_chunk() * self.chunks.get()
     }
 }
