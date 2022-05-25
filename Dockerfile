@@ -1,4 +1,4 @@
-FROM ekidd/rust-musl-builder:1.57.0 AS builder
+FROM nwtgck/rust-musl-builder:1.60.0 AS builder
 
 COPY src src
 COPY Cargo.toml Cargo.toml
@@ -8,7 +8,7 @@ COPY api.ts api.ts
 RUN sudo chown -R rust:rust /home/rust && \
     cargo build --release
 
-FROM alpine:3.14
+FROM alpine:3.16
 
 ENV LOAD_DIR=/usr/local/bin/
 
