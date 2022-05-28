@@ -36,16 +36,13 @@ mod args {
         #[clap(short, long, default_value = "4000", env)]
         pub port: u16,
 
-        #[clap(
-            short = 'c',
-            long,
-            default_value = "client_config.json",
-            help = "`iroha_client` JSON configuration path"
-        )]
+        /// `iroha_client` JSON configuration path
+        #[clap(short = 'c', long, default_value = "client_config.json")]
         pub client_config: String,
 
+        /// Run actor that fills Iroha with fake data
         #[cfg(feature = "dev_actor")]
-        #[clap(long, help = "Run actor that fills Iroha with fake data")]
+        #[clap(long)]
         pub dev_actor: bool,
     }
 

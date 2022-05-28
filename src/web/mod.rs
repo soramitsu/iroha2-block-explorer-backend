@@ -1,6 +1,4 @@
-use std::fmt::Debug;
-use std::sync::Arc;
-
+use crate::iroha_client_wrap::IrohaClientWrap;
 use actix_web::{
     error::ResponseError, get, http, middleware, web, App, HttpResponse, HttpServer, Responder,
     Scope,
@@ -9,11 +7,18 @@ use color_eyre::eyre::{eyre, Context};
 use derive_more::Display;
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
 use iroha_core::smartcontracts::isi::query::Error as IrohaQueryError;
-use serde::Serialize;
-use std::{fmt, str::FromStr};
-
-use crate::iroha_client_wrap::IrohaClientWrap;
 use pagination::{Paginated, PaginationQueryParams};
+use serde::Serialize;
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+    sync::Arc,
+};
+
+mod blocks;
+mod etc;
+mod pagination;
+mod transactions;
 
 /// Web app state that may be injected in runtime
 pub struct AppData {
@@ -38,7 +43,10 @@ enum WebError {
     Internal(color_eyre::Report),
     /// Some resource was not found.
     NotFound,
+    /// Client made a bad request. Contains a message for the client.
     BadRequest(String),
+    /// Some functionality is not yet implemented. Contains a message for the client.
+    NotImplemented(String),
 }
 
 impl WebError {
@@ -78,7 +86,8 @@ impl ResponseError for WebError {
                 // `actix-web` will log it anyway.
                 Self::Internal(_) => "Internal Server Error".to_owned(),
                 Self::NotFound => "Not Found".to_owned(),
-                Self::BadRequest(msg) => format!("Bad Request: {}", msg),
+                Self::BadRequest(msg) => format!("Bad Request: {msg}"),
+                Self::NotImplemented(msg) => format!("Not Implemented: {msg}"),
             })
     }
 
@@ -87,6 +96,7 @@ impl ResponseError for WebError {
             Self::Internal(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound => http::StatusCode::NOT_FOUND,
             Self::BadRequest(_) => http::StatusCode::BAD_REQUEST,
+            Self::NotImplemented(_) => http::StatusCode::NOT_IMPLEMENTED,
         }
     }
 }
@@ -102,8 +112,6 @@ impl From<iroha_data_model::ParseError> for WebError {
         Self::Internal(err.into())
     }
 }
-
-mod pagination;
 
 mod accounts {
     use super::{
@@ -212,7 +220,7 @@ mod accounts {
         })))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/accounts").service(index).service(show)
     }
 }
@@ -289,7 +297,7 @@ mod domains {
         })))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/domains").service(index).service(show)
     }
 }
@@ -392,7 +400,7 @@ mod assets {
         Ok(web::Json(asset.into()))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/assets").service(index).service(show)
     }
 }
@@ -493,7 +501,7 @@ mod asset_definitions {
         ))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/asset-definitions")
             // .service(show)
             .service(index)
@@ -536,7 +544,7 @@ mod peer {
         Ok(web::Json(status))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/peer").service(peers).service(status)
     }
 }
@@ -561,8 +569,7 @@ mod roles {
     ) -> Result<web::Json<Paginated<Vec<RoleDTO>>>, WebError> {
         let data: Paginated<_> = app
             .iroha_client
-            // TODO add an issue about absense of `FindAllRoles::new()`?
-            .request_with_pagination(FindAllRoles {}, pagination.0.into())
+            .request_with_pagination(FindAllRoles, pagination.0.into())
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
@@ -571,16 +578,18 @@ mod roles {
         ))
     }
 
-    pub fn service() -> Scope {
+    pub fn scope() -> Scope {
         web::scope("/roles").service(index)
     }
 }
 
+#[allow(clippy::unused_async)]
 async fn default_route() -> impl Responder {
     HttpResponse::NotFound().body("Not Found")
 }
 
 #[get("")]
+#[allow(clippy::unused_async)]
 async fn root_health_check() -> impl Responder {
     HttpResponse::Ok().body("Welcome to Iroha 2 Block Explorer!")
 }
@@ -609,6 +618,10 @@ pub fn server(
             .app_data(web::QueryConfig::default().error_handler(|err, _req| {
                 WebError::BadRequest(format!("Bad query: {err}")).into()
             }))
+            // .app_data(web::JsonConfig::default().error_handler(|err, req| {
+            //     println!("Json parse error: {err:?}");
+            //     WebError::BadRequest("wait".to_owned()).into()
+            // }))
             .wrap(super::logger::TracingLogger::default())
             .wrap(middleware::NormalizePath::new(
                 middleware::TrailingSlash::Trim,
@@ -616,12 +629,14 @@ pub fn server(
             .service(
                 web::scope("/api/v1")
                     .service(root_health_check)
-                    .service(accounts::service())
-                    .service(domains::service())
-                    .service(assets::service())
-                    .service(asset_definitions::service())
-                    .service(roles::service())
-                    .service(peer::service()),
+                    .service(accounts::scope())
+                    .service(domains::scope())
+                    .service(assets::scope())
+                    .service(asset_definitions::scope())
+                    .service(roles::scope())
+                    .service(peer::scope())
+                    .service(blocks::scope())
+                    .service(transactions::scope()),
             )
             .default_service(web::route().to(default_route))
     })
