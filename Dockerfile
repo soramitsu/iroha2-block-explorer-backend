@@ -1,4 +1,4 @@
-FROM rust:1.60.0 AS builder
+FROM  nwtgck/rust-musl-builder:1.60.0 AS builder
 
 COPY  src src
 COPY  Cargo.toml Cargo.toml
