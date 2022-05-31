@@ -10,20 +10,20 @@ members = [".", "tools/genesis-gen"]
 
 [dependencies]
 actix = "0.13.0"
-actix-web = "4"
+actix-web = { version = "4.0.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies"] }
+awc = { version = "=3.0.0", default-features = false, features = ["compress-brotli", "compress-gzip", "cookies"]  }
 actix-server = "2.1.1"
-awc = "3.0.0"
 derive_more = "0.99"
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 tracing-log = "0.1.2"
 tracing-actix-web = "0.5.1"
 clap = { version = "3.1.12", features = ["derive", "env"] }
-iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
+iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"

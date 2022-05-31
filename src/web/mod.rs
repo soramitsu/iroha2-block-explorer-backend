@@ -406,6 +406,8 @@ mod assets {
 }
 
 mod asset_definitions {
+    use crate::web::accounts::AccountDTO;
+
     use super::{
         fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Scope, Serialize,
         WebError,
@@ -414,7 +416,7 @@ mod asset_definitions {
         asset::Mintable,
         prelude::{
             AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
-            FindAllAssetsDefinitions,
+            FindAccountsWithAsset, FindAllAssetsDefinitions, FindAssetDefinitionById,
         },
     };
     use serde::de;
@@ -424,6 +426,13 @@ mod asset_definitions {
         id: String,
         value_type: AssetValueTypeDTO,
         mintable: Mintable,
+    }
+
+    #[derive(Serialize)]
+    pub struct AssetDefinitionWithAccountsDTO {
+        #[serde(flatten)]
+        base: AssetDefinitionDTO,
+        accounts: Vec<AccountDTO>,
     }
 
     impl AssetDefinitionDTO {
@@ -447,6 +456,7 @@ mod asset_definitions {
         }
     }
 
+    #[derive(Debug)]
     pub struct AssetDefinitionIdInPath(pub AssetDefinitionId);
 
     impl<'de> de::Deserialize<'de> for AssetDefinitionIdInPath {
@@ -480,10 +490,35 @@ mod asset_definitions {
     #[derive(Serialize)]
     pub struct AssetValueTypeDTO(AssetValueType);
 
-    // WIP iroha does not support FindAssetDefinitionById yet
-    // https://github.com/hyperledger/iroha/pull/2126
-    // #[get("/{id}")]
-    // async fn show(id: web::Path<AssetDefinitionIdInPath>) -> Result<impl Responder, WebError> {}
+    #[get("/{id}")]
+    async fn show(
+        app: web::Data<AppData>,
+        id: web::Path<AssetDefinitionIdInPath>,
+    ) -> Result<web::Json<AssetDefinitionWithAccountsDTO>, WebError> {
+        let definition_id = id.into_inner().0;
+
+        let definition = app
+            .iroha_client
+            .request(FindAssetDefinitionById::new(definition_id.clone()))
+            .await
+            .map_err(WebError::expect_iroha_find_error)?
+            .into();
+
+        let accounts = app
+            .iroha_client
+            .request(FindAccountsWithAsset::new(definition_id))
+            .await
+            // TODO which error will be returned if id isn't found?
+            .map_err(WebError::expect_iroha_find_error)?
+            .into_iter()
+            .map(AccountDTO::from)
+            .collect();
+
+        Ok(web::Json(AssetDefinitionWithAccountsDTO {
+            base: definition,
+            accounts,
+        }))
+    }
 
     #[get("")]
     async fn index(
@@ -503,8 +538,8 @@ mod asset_definitions {
 
     pub fn scope() -> Scope {
         web::scope("/asset-definitions")
-            // .service(show)
             .service(index)
+            .service(show)
     }
 }
 

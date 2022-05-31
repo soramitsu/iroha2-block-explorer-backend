@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "3.1.12", features = ["derive", "env"] }
-iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
-iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "fe33f0f2817d0b46f66ff02354c823b25991247f" }
+iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
+iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"

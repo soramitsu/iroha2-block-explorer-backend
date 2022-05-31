@@ -26,14 +26,13 @@ type AssetValue =
 
 type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
 
-
 interface AssetDefinition {
   id: string;
   value_type: AssetValueType;
   mintable: Mintable;
 }
 
-type Mintable = 'Once' | 'Infinitely' | 'Not'
+type Mintable = "Once" | "Infinitely" | "Not";
 
 interface Peer {
   address: string;
@@ -89,4 +88,111 @@ interface Status {
     secs: bigint;
     nanos: number;
   };
+}
+
+interface BlockShallow {
+  /**
+   * Block height, u64
+   */
+  height: number;
+  /**
+   * ISO DateTime
+   */
+  timestamp: string;
+  /**
+   * WIP zeroed
+   */
+  block_hash: string;
+  /**
+   * Transactions count
+   */
+  transactions: number;
+  /**
+   * Rejected transactions count
+   */
+  rejected_transactions: number;
+}
+
+interface Block {
+  /**
+   *
+   */
+  height: number;
+  /**
+   * See {@link BlockShallow.timestamp}
+   */
+  timestamp: string;
+  /**
+   * WIP as {@link BlockShallow.block_hash}
+   */
+  block_hash: string;
+  parent_block_hash: string;
+  rejected_transactions_merkle_root_hash: string;
+  invalidated_blocks_hashes: string[];
+  /**
+   * List of serialized {@link @iroha2/data-model#VersionedValidTransaction}
+   */
+  transactions: string[];
+  /**
+   * List of serialized {@link @iroha2/data-model#VersionedRejectedTransaction}
+   */
+  rejected_transactions: string[];
+  /**
+   * List of hashes. WIP always empty
+   */
+  view_change_proofs: string[];
+}
+
+type Transaction =
+  | Tagged<"Committed", CommittedTransaction>
+  | Tagged<"Rejected", RejectedTransaction>;
+
+interface CommittedTransaction {
+  /**
+   * WIP zeroed
+   */
+  block_hash: string;
+  payload: TransactionPayload;
+  signatures: Signature[];
+}
+
+interface RejectedTransaction extends CommittedTransaction {
+  /**
+   * List of serialized {@link @iroha2/data-model#TransactionRejectionReason}
+   */
+  rejection_reason: string;
+}
+
+interface TransactionPayload {
+  account_id: string;
+  instructions: TransactionInstructions;
+  /**
+   * ISO timestamp
+   */
+  creation_time: string;
+  /**
+   * u64
+   */
+  time_to_live_ms: number;
+  nonce: null | number;
+  metadata: any;
+}
+
+/**
+ * `Instructions` `string[]` - list of serialized
+ * {@link @iroha2/data-model#Instruction}
+ */
+type TransactionInstructions =
+  | Tagged<"Instructions", string[]>
+  | Tagged<"Wasm", undefined>;
+
+interface Signature {
+  /**
+   * Public key's multihash
+   */
+  public_key: string;
+  /**
+   * Hex binary
+   */
+  payload: string;
 }

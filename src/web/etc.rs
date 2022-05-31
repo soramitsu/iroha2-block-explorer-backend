@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use color_eyre::Result;
-use iroha_crypto::Hash;
+use iroha_crypto::{Hash, HashOf, PublicKey, Signature};
 use parity_scale_codec::Encode;
 use serde::{de, Serialize};
 use std::fmt;
@@ -40,11 +40,12 @@ impl TryFrom<u64> for Timestamp {
 }
 
 /// Container for a SCALE-encodable value. Serializes into hex string.
-pub struct SerializeScaleIntoHex<T>(pub T)
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub struct SerScaleHex<T>(pub T)
 where
     T: Encode;
 
-impl<T> Serialize for SerializeScaleIntoHex<T>
+impl<T> Serialize for SerScaleHex<T>
 where
     T: Encode,
 {
@@ -58,12 +59,19 @@ where
     }
 }
 
-impl<T> From<T> for SerializeScaleIntoHex<T>
+impl<T> From<T> for SerScaleHex<T>
 where
     T: Encode,
 {
     fn from(value: T) -> Self {
         Self(value)
+    }
+}
+
+impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
+    fn from(value: HashOf<T>) -> Self {
+        let hash: Hash = value.into();
+        hash.into()
     }
 }
 
@@ -105,9 +113,24 @@ impl<'de> de::Deserialize<'de> for HashDeser {
     }
 }
 
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SignatureDTO {
+    pub public_key: PublicKey,
+    pub payload: SerScaleHex<Vec<u8>>,
+}
+
+impl From<Signature> for SignatureDTO {
+    fn from(value: Signature) -> Self {
+        Self {
+            public_key: value.public_key().clone(),
+            payload: value.payload().clone().into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SerializeScaleIntoHex, Timestamp};
+    use super::{SerScaleHex, Timestamp};
 
     // TODO move to doctest when possible
     #[test]
@@ -132,7 +155,7 @@ mod tests {
         let sample_num = 42;
         let sample_num_expected_json = "\"2a000000\"";
 
-        let wrap = SerializeScaleIntoHex(sample_num);
+        let wrap = SerScaleHex(sample_num);
         let wrap_json = serde_json::to_string(&wrap).unwrap();
 
         assert_eq!(wrap_json, sample_num_expected_json)

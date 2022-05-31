@@ -60,33 +60,45 @@ DTOs are described at [api.ts](./api.ts).
 >
 > All paths are prefixed with `/api/v1`
 
-- `GET /` - web server health check. Returns 200 OK.
+- **`GET`** `/`
 
-- **TODO** `GET /blocks`
+  - Description: web server health check.
+
+  - Response: 200 OK
+
+- **`GET`** `/blocks`
 
   - Query:
 
     - [Pagination](#pagination-query-params)
 
-  - Response: ?
+  - Response: `Paginated<BlockShallow>`
 
-- **TODO** `GET /blocks/{height}`
+- **`GET`** `/blocks/{height or hash}`
 
   - Params:
 
-    - `height` - numeric
+    - `height or hash` - non-zero number or 32-byte hash hex
 
-  - Response: ?
+  - Response: `Block` or 404
 
-- **TODO** `GET /transactions`
+- **`GET`** `/transactions`
 
   - Query:
 
     - [Pagination](#pagination-query-params)
 
-  - Response: ?
+  - Response: `Paginated<Transaction>`
 
-- `GET /accounts`
+- **`GET`** `/transactions/{hash}`
+
+  - Query:
+
+    - `hash` - 32-byte hash hex
+
+  - Response: `Transaction` or 404
+
+- **`GET`** `/accounts`
 
   - Query:
 
@@ -94,7 +106,7 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<Account>`
 
-- `GET /accounts/{id}`
+- **`GET`** `/accounts/{id}`
 
   - Params:
 
@@ -104,7 +116,7 @@ DTOs are described at [api.ts](./api.ts).
 
   - Also: [Id Transformation](#id-transformation)
 
-- `GET /assets`
+- **`GET`** `/assets`
 
   - Query:
 
@@ -112,7 +124,7 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<Asset>`
 
-- `GET /assets/{definition_id}/{account_id}`
+- **`GET`** `/assets/{definition_id}/{account_id}`
 
   - Params:
 
@@ -123,7 +135,7 @@ DTOs are described at [api.ts](./api.ts).
 
   - Also: [Id Transformation](#id-transformation)
 
-- `GET /asset-definitions`
+- **`GET`** `/asset-definitions`
 
   - Query:
 
@@ -131,17 +143,17 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<AssetDefinition>`
 
-- **TODO** `GET /asset-definitions/{id}`
+- **`GET`** `/asset-definitions/{id}`
 
   - Params:
 
     - `id` - string. The id of the asset definition.
 
-  - Response: `AssetDefinition` or 404
+  - Response: `AssetDefinitionWithAccounts` or 404
 
   - Also: [Id Transformation](#id-transformation)
 
-- `GET /domains`
+- **`GET`** `/domains`
 
   - Query:
 
@@ -149,7 +161,7 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Paginated<Domain>`
 
-- `GET /domains/{id}`
+- **`GET`** `/domains/{id}`
 
   - Params:
 
@@ -157,15 +169,15 @@ DTOs are described at [api.ts](./api.ts).
 
   - Response: `Domain` or 404
 
-- `GET /peer/peers`
+- **`GET`** `/peer/peers`
 
   - Response: `Peer[]`
 
-- `GET /peer/status`
+- **`GET`** `/peer/status`
 
   - Reponse: `Status`
 
-- `GET /roles`
+- **`GET`** `/roles`
 
   - Response: `Role[]`
 
@@ -184,7 +196,6 @@ They should be HTML-escaped.
 - `page=<number>` - page number. Default: 1.
 - `page_size=<number>` - page size limit. Default: 15.
 
-Pagination is not yet implemented! For now it always returns the whole dataset. Query params will be ignored.
 
 ## Tools
 

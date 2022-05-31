@@ -1,6 +1,5 @@
-
 use super::{
-    etc::{HashDeser, SerializeScaleIntoHex, Timestamp},
+    etc::{HashDeser, SerScaleHex, Timestamp},
     get,
     pagination::{Paginated, PaginationQueryParams},
     web, AppData, Scope, WebError,
@@ -16,13 +15,13 @@ use iroha_core::{
 use iroha_crypto::{Hash, HashOf, MerkleTree};
 use iroha_data_model::prelude::{BlockValue, FindAllBlocks};
 use serde::{de, Serialize};
-use std::fmt;
+use std::{fmt, num::NonZeroU64};
 
 #[derive(Serialize)]
 pub struct BlockShallowDTO {
     height: u64,
     timestamp: Timestamp,
-    block_hash: Hash,
+    block_hash: SerScaleHex<Hash>,
     transactions: u32,
     rejected_transactions: u32,
 }
@@ -35,7 +34,7 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
             height: block.header.height,
 
             // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed(),
+            block_hash: Hash::zeroed().into(),
 
             timestamp: Timestamp::try_from(block.header.timestamp)?,
             transactions: block.transactions.len().try_into()?,
@@ -48,14 +47,14 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
 pub struct BlockDTO {
     height: u64,
     timestamp: Timestamp,
-    block_hash: Hash,
-    parent_block_hash: Hash,
-    transactions_merkle_root_hash: HashOf<MerkleTree<VersionedTransaction>>,
-    rejected_transactions_merkle_root_hash: HashOf<MerkleTree<VersionedTransaction>>,
-    invalidated_blocks_hashes: Vec<Hash>,
-    transactions: Vec<SerializeScaleIntoHex<VersionedValidTransaction>>,
-    rejected_transactions: Vec<SerializeScaleIntoHex<VersionedRejectedTransaction>>,
-    view_change_proofs: Vec<Hash>,
+    block_hash: SerScaleHex<Hash>,
+    parent_block_hash: SerScaleHex<Hash>,
+    transactions_merkle_root_hash: SerScaleHex<Hash>,
+    rejected_transactions_merkle_root_hash: SerScaleHex<Hash>,
+    invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
+    transactions: Vec<SerScaleHex<VersionedValidTransaction>>,
+    rejected_transactions: Vec<SerScaleHex<VersionedRejectedTransaction>>,
+    view_change_proofs: Vec<SerScaleHex<Hash>>,
 }
 
 impl TryFrom<BlockValue> for BlockDTO {
@@ -67,12 +66,17 @@ impl TryFrom<BlockValue> for BlockDTO {
             timestamp: Timestamp::try_from(block.header.timestamp)?,
 
             // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed(),
+            block_hash: Hash::zeroed().into(),
 
-            parent_block_hash: block.header.previous_block_hash,
-            transactions_merkle_root_hash: block.header.transactions_hash,
-            rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash,
-            invalidated_blocks_hashes: block.header.invalidated_blocks_hashes,
+            parent_block_hash: block.header.previous_block_hash.into(),
+            transactions_merkle_root_hash: block.header.transactions_hash.into(),
+            rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash.into(),
+            invalidated_blocks_hashes: block
+                .header
+                .invalidated_blocks_hashes
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             transactions: block.transactions.into_iter().map(Into::into).collect(),
             rejected_transactions: block
                 .rejected_transactions
@@ -141,19 +145,22 @@ impl<'de> de::Deserialize<'de> for HeightOrHash {
 async fn show(
     app: web::Data<AppData>,
 
-    block_id: web::Either<web::Path<u64>, web::Path<HashDeser>>,
+    block_id: web::Either<web::Path<NonZeroU64>, web::Path<HashDeser>>,
 ) -> Result<web::Json<BlockDTO>, WebError> {
     match block_id {
         web::Either::Left(height) => {
             let height = height.into_inner();
+
+            // -1 because of how blocks pagination works
+            let pagination_offset: u32 = (height.get() - 1)
+                .try_into()
+                .wrap_err("Failed to convert height")?;
+
             let blocks = app
                 .iroha_client
                 .request_with_pagination(
                     FindAllBlocks,
-                    Pagination::new(
-                        Some(height.try_into().wrap_err("Failed to convert height")?),
-                        Some(1),
-                    ),
+                    Pagination::new(Some(pagination_offset), Some(1)),
                 )
                 .await
                 .map_err(WebError::expect_iroha_any_error)?
