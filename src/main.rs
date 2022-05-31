@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 mod logger {
     use tracing::{subscriber::set_global_default, Subscriber};
     pub use tracing_actix_web::TracingLogger;

@@ -69,7 +69,7 @@ impl TryFrom<RejectedTransaction> for RejectedTransactionDTO {
 }
 
 #[derive(Serialize)]
-struct CommittedTransactionDTO {
+pub struct CommittedTransactionDTO {
     block_hash: SerScaleHex<Hash>,
     payload: TransactionPayloadDTO,
     signatures: BTreeSet<SignatureDTO>,

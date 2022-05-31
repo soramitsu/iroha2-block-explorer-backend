@@ -12,7 +12,7 @@ use std::fmt;
 /// let json = serde_json::to_string(&timestamp).unwrap();
 /// assert_eq!(json, "2022-05-26T17:07:56.961Z")
 /// ```
-/// *(ignoring this doctest due https://github.com/rust-lang/rust/issues/50784)*
+/// *(ignoring this doctest due [rust-lang/rust#50784](https://github.com/rust-lang/rust/issues/50784)*
 #[derive(Serialize)]
 pub struct Timestamp(DateTime<Utc>);
 
@@ -22,9 +22,9 @@ impl TryFrom<u128> for Timestamp {
 
     fn try_from(unix_time: u128) -> Result<Self> {
         let secs: i64 = (unix_time / 1_000).try_into()?;
-        let nsecs: u32 = ((unix_time % 1_000) * 1_000_000).try_into()?;
-        let naive = chrono::NaiveDateTime::from_timestamp(secs, nsecs);
-        let dt = DateTime::<Utc>::from_utc(naive, Utc);
+        let nano_secs: u32 = ((unix_time % 1_000) * 1_000_000).try_into()?;
+        let naive_dt = chrono::NaiveDateTime::from_timestamp(secs, nano_secs);
+        let dt = DateTime::<Utc>::from_utc(naive_dt, Utc);
 
         Ok(Self(dt))
     }
@@ -35,7 +35,7 @@ impl TryFrom<u64> for Timestamp {
     type Error = color_eyre::Report;
 
     fn try_from(unix_time: u64) -> Result<Self> {
-        Self::try_from(unix_time as u128)
+        Self::try_from(u128::from(unix_time))
     }
 }
 
@@ -135,7 +135,7 @@ mod tests {
     // TODO move to doctest when possible
     #[test]
     fn timestamp_from_unix_time() {
-        let unix_millis_input = 1653584876961u128;
+        let unix_millis_input = 1_653_584_876_961_u128;
         let expected_iso = "2022-05-26T17:07:56.961Z";
         let expected_iso_json = serde_json::to_string(&expected_iso).unwrap();
 
@@ -143,10 +143,6 @@ mod tests {
         let actual_json = serde_json::to_string(&actual).unwrap();
 
         assert_eq!(actual_json, expected_iso_json);
-
-        let timestamp = Timestamp::try_from(1653584876961u128).unwrap();
-        let json = serde_json::to_string(&timestamp).unwrap();
-        assert_eq!(json, "2022-05-26T17:07:56.961Z")
     }
 
     // TODO move to doctest when possible
@@ -158,6 +154,6 @@ mod tests {
         let wrap = SerScaleHex(sample_num);
         let wrap_json = serde_json::to_string(&wrap).unwrap();
 
-        assert_eq!(wrap_json, sample_num_expected_json)
+        assert_eq!(wrap_json, sample_num_expected_json);
     }
 }

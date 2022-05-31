@@ -10,9 +10,9 @@ use color_eyre::{
 };
 use iroha_core::{
     prelude::VersionedValidTransaction,
-    tx::{Pagination, VersionedRejectedTransaction, VersionedTransaction},
+    tx::{Pagination, VersionedRejectedTransaction},
 };
-use iroha_crypto::{Hash, HashOf, MerkleTree};
+use iroha_crypto::Hash;
 use iroha_data_model::prelude::{BlockValue, FindAllBlocks};
 use serde::{de, Serialize};
 use std::{fmt, num::NonZeroU64};
@@ -168,7 +168,7 @@ async fn show(
 
             let block = match blocks.len() {
                 0 => return Err(WebError::NotFound),
-                1 => blocks.into_iter().nth(0).expect("Blocks len should be 1"),
+                1 => blocks.into_iter().next().expect("Blocks len should be 1"),
                 x => return Err(eyre!("Expected to get 0 or 1 block, got: {x}").into()),
             };
 
@@ -176,11 +176,9 @@ async fn show(
                 block.try_into().wrap_err("Failed to construct BlockDTO")?,
             ))
         }
-        web::Either::Right(_hash) => {
-            return Err(WebError::NotImplemented(format!(
-                "Fetching block by hash is not yet implemented"
-            )))
-        }
+        web::Either::Right(_hash) => Err(WebError::NotImplemented(
+            "Fetching block by hash is not yet implemented".to_string(),
+        )),
     }
 }
 
@@ -219,15 +217,22 @@ mod tests {
     #[test]
     fn block_height_or_hash_from_height() {
         let value: HeightOrHash = serde_json::from_str("\"575712\"").unwrap();
-        assert_eq!(value, HeightOrHash::Height(575712));
+        assert_eq!(value, HeightOrHash::Height(575_712));
     }
 
     #[test]
     fn block_height_or_hash_from_hash() {
-        let mut bytes = [0u8; Hash::LENGTH];
-        for i in 0..Hash::LENGTH {
-            bytes[i] = i as u8;
-        }
+        let bytes = {
+            let mut bytes = [0u8; Hash::LENGTH];
+            for (i, item) in bytes.iter_mut().enumerate() {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *item = i as u8;
+                }
+            }
+
+            bytes
+        };
         let bytes_hex = hex::encode(&bytes);
 
         let value: HeightOrHash = serde_json::from_str(&format!("\"{}\"", &bytes_hex)).unwrap();
