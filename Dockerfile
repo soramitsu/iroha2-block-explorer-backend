@@ -1,6 +1,7 @@
 FROM  nwtgck/rust-musl-builder:1.60.0 AS builder
 
 COPY  src src
+COPY  tools tools
 COPY  Cargo.toml Cargo.toml
 COPY  Cargo.lock Cargo.lock
 COPY  api.ts api.ts
