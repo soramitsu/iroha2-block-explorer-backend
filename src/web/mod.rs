@@ -115,20 +115,21 @@ impl From<iroha_data_model::ParseError> for WebError {
 
 mod accounts {
     use super::{
-        assets::AssetDTO, fmt, get, web, AppData, Context, FromStr, Paginated,
+        assets::AssetDTO, etc::StringOf, fmt, get, web, AppData, Context, FromStr, Paginated,
         PaginationQueryParams, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{
-        Account, AccountId, FindAccountById, FindAllAccounts, Metadata,
+        Account, AccountId, FindAccountById, FindAllAccounts, Metadata, RoleId,
     };
     use serde::de;
 
     #[derive(Serialize)]
     pub struct AccountDTO {
-        id: String,
+        id: StringOf<AccountId>,
+        // FIXME should it be paginated?
         assets: Vec<AssetDTO>,
         metadata: Metadata,
-        roles: Vec<String>,
+        roles: Vec<StringOf<RoleId>>,
     }
 
     impl From<Account> for AccountDTO {
@@ -142,19 +143,13 @@ mod accounts {
                   ))
                 .collect();
 
-            let roles: Vec<String> = account
-                .roles()
-                .into_iter()
-                .map(std::string::ToString::to_string)
-                .collect();
-
             Self {
-                id: account.id().to_string(),
+                id: account.id().into(),
                 assets,
                 metadata:
                 // FIXME clone
                 account.metadata().clone(),
-                roles,
+                roles: account.roles().into_iter().map(StringOf::from).collect(),
             }
         }
     }
@@ -227,14 +222,14 @@ mod accounts {
 
 mod domains {
     use super::{
-        accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, get, web, AppData, Paginated,
-        PaginationQueryParams, Scope, Serialize, WebError,
+        accounts::AccountDTO, asset_definitions::AssetDefinitionDTO, etc::StringOf, get, web,
+        AppData, Paginated, PaginationQueryParams, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{Domain, DomainId, FindAllDomains, FindDomainById, Metadata};
 
     #[derive(Serialize)]
     struct DomainDTO {
-        id: String,
+        id: StringOf<DomainId>,
         accounts: Vec<AccountDTO>,
         logo: Option<String>,
         metadata: Metadata,
@@ -246,7 +241,7 @@ mod domains {
     impl From<Domain> for DomainDTO {
         fn from(domain: Domain) -> Self {
             Self {
-                id: domain.id().to_string(),
+                id: domain.id().into(),
                 accounts: domain
                     .accounts()
                     .into_iter()
@@ -406,16 +401,14 @@ mod assets {
 }
 
 mod asset_definitions {
-    use crate::web::accounts::AccountDTO;
-
     use super::{
-        fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Scope, Serialize,
-        WebError,
+        etc::StringOf, fmt, get, web, AppData, FromStr, Paginated, PaginationQueryParams, Scope,
+        Serialize, WebError,
     };
     use iroha_data_model::{
         asset::Mintable,
         prelude::{
-            AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
+            AccountId, AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
             FindAccountsWithAsset, FindAllAssetsDefinitions, FindAssetDefinitionById,
         },
     };
@@ -423,7 +416,7 @@ mod asset_definitions {
 
     #[derive(Serialize)]
     pub struct AssetDefinitionDTO {
-        id: String,
+        id: StringOf<AssetDefinitionId>,
         value_type: AssetValueTypeDTO,
         mintable: Mintable,
     }
@@ -432,7 +425,7 @@ mod asset_definitions {
     pub struct AssetDefinitionWithAccountsDTO {
         #[serde(flatten)]
         base: AssetDefinitionDTO,
-        accounts: Vec<AccountDTO>,
+        accounts: Vec<StringOf<AccountId>>,
     }
 
     impl AssetDefinitionDTO {
@@ -449,7 +442,7 @@ mod asset_definitions {
     impl From<AssetDefinition> for AssetDefinitionDTO {
         fn from(definition: AssetDefinition) -> Self {
             Self {
-                id: definition.id().to_string(),
+                id: definition.id().into(),
                 value_type: AssetValueTypeDTO(*definition.value_type()),
                 mintable: *definition.mintable(),
             }
@@ -504,14 +497,16 @@ mod asset_definitions {
             .map_err(WebError::expect_iroha_find_error)?
             .into();
 
+        // FIXME fetching asset accounts only to get their ids. It is inefficient.
         let accounts = app
             .iroha_client
+            // FIXME fetching without pagination
             .request(FindAccountsWithAsset::new(definition_id))
             .await
-            // TODO which error will be returned if id isn't found?
+            // FIXME which error will be returned if id isn't found?
             .map_err(WebError::expect_iroha_find_error)?
             .into_iter()
-            .map(AccountDTO::from)
+            .map(|x| x.id().into())
             .collect();
 
         Ok(web::Json(AssetDefinitionWithAccountsDTO {

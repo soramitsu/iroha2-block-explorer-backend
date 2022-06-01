@@ -14,12 +14,15 @@ use iroha_core::{
 };
 use iroha_crypto::Hash;
 use iroha_data_model::prelude::{BlockValue, FindAllBlocks};
-use serde::{de, Serialize};
-use std::{fmt, num::NonZeroU64};
+use serde::Serialize;
+use std::num::NonZeroU64;
 
+/// Block DTO intended to be lightweight and to have only simple aggregated data.
+/// Detailed data is contained within [`BlockDTO`]
 #[derive(Serialize)]
 pub struct BlockShallowDTO {
-    height: u64,
+    /// See [`BlockDTO`]'s height
+    height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
     transactions: u32,
@@ -31,7 +34,7 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
 
     fn try_from(block: BlockValue) -> Result<Self> {
         Ok(Self {
-            height: block.header.height,
+            height: block.header.height.try_into()?,
 
             // FIXME https://github.com/hyperledger/iroha/issues/2276
             block_hash: Hash::zeroed().into(),
@@ -43,9 +46,11 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
     }
 }
 
+/// Full Block DTO
 #[derive(Serialize)]
 pub struct BlockDTO {
-    height: u64,
+    /// Original height value is u64, but u64 can't fit into JS `number`
+    height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
     parent_block_hash: SerScaleHex<Hash>,
@@ -62,7 +67,7 @@ impl TryFrom<BlockValue> for BlockDTO {
 
     fn try_from(block: BlockValue) -> Result<Self> {
         Ok(Self {
-            height: block.header.height,
+            height: block.header.height.try_into()?,
             timestamp: Timestamp::try_from(block.header.timestamp)?,
 
             // FIXME https://github.com/hyperledger/iroha/issues/2276
@@ -90,61 +95,9 @@ impl TryFrom<BlockValue> for BlockDTO {
     }
 }
 
-/// FIXME use [`actix_web::Either`]?
-#[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord, PartialEq)]
-pub enum HeightOrHash {
-    Height(u64),
-    Hash(Hash),
-}
-
-impl<'de> de::Deserialize<'de> for HeightOrHash {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        const HASH_HEX_LENGTH: usize = Hash::LENGTH * 2;
-
-        struct Visitor;
-
-        impl<'de> de::Visitor<'de> for Visitor {
-            type Value = HeightOrHash;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(
-                    formatter,
-                    "a block height or a {}-byte hex string",
-                    Hash::LENGTH
-                )
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if v.len() == HASH_HEX_LENGTH {
-                    let mut slice = [0u8; Hash::LENGTH];
-                    hex::decode_to_slice(v, &mut slice).map_err(|_from_hex_error| {
-                        E::invalid_value(de::Unexpected::Str(v), &self)
-                    })?;
-                    let hash = Hash::prehashed(slice);
-                    Ok(HeightOrHash::Hash(hash))
-                } else {
-                    let height: u64 = v
-                        .parse()
-                        .map_err(|_parse_error| E::invalid_value(de::Unexpected::Str(v), &self))?;
-                    Ok(HeightOrHash::Height(height))
-                }
-            }
-        }
-
-        deserializer.deserialize_string(Visitor)
-    }
-}
-
 #[get("/{height_or_hash}")]
 async fn show(
     app: web::Data<AppData>,
-
     block_id: web::Either<web::Path<NonZeroU64>, web::Path<HashDeser>>,
 ) -> Result<web::Json<BlockDTO>, WebError> {
     match block_id {
@@ -208,34 +161,4 @@ async fn index(
 
 pub fn scope() -> Scope {
     web::scope("/blocks").service(index).service(show)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Hash, HeightOrHash};
-
-    #[test]
-    fn block_height_or_hash_from_height() {
-        let value: HeightOrHash = serde_json::from_str("\"575712\"").unwrap();
-        assert_eq!(value, HeightOrHash::Height(575_712));
-    }
-
-    #[test]
-    fn block_height_or_hash_from_hash() {
-        let bytes = {
-            let mut bytes = [0u8; Hash::LENGTH];
-            for (i, item) in bytes.iter_mut().enumerate() {
-                #[allow(clippy::cast_possible_truncation)]
-                {
-                    *item = i as u8;
-                }
-            }
-
-            bytes
-        };
-        let bytes_hex = hex::encode(&bytes);
-
-        let value: HeightOrHash = serde_json::from_str(&format!("\"{}\"", &bytes_hex)).unwrap();
-        assert_eq!(value, HeightOrHash::Hash(Hash::prehashed(bytes)));
-    }
 }

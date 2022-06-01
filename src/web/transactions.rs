@@ -48,27 +48,6 @@ impl TryFrom<TransactionValue> for TransactionDTO {
 }
 
 #[derive(Serialize)]
-pub struct RejectedTransactionDTO {
-    #[serde(flatten)]
-    base: CommittedTransactionDTO,
-    rejection_reason: SerScaleHex<TransactionRejectionReason>,
-}
-
-impl TryFrom<RejectedTransaction> for RejectedTransactionDTO {
-    type Error = Report;
-
-    fn try_from(value: RejectedTransaction) -> Result<Self, Self::Error> {
-        Ok(Self {
-            base: CommittedTransactionDTO::from_payload_and_signatures(
-                value.payload,
-                value.signatures,
-            )?,
-            rejection_reason: value.rejection_reason.into(),
-        })
-    }
-}
-
-#[derive(Serialize)]
 pub struct CommittedTransactionDTO {
     block_hash: SerScaleHex<Hash>,
     payload: TransactionPayloadDTO,
@@ -103,12 +82,34 @@ impl TryFrom<Transaction> for CommittedTransactionDTO {
     }
 }
 
+/// Just as [`CommittedTransactionDTO`], but with rejection reason
+#[derive(Serialize)]
+pub struct RejectedTransactionDTO {
+    #[serde(flatten)]
+    base: CommittedTransactionDTO,
+    rejection_reason: SerScaleHex<TransactionRejectionReason>,
+}
+
+impl TryFrom<RejectedTransaction> for RejectedTransactionDTO {
+    type Error = Report;
+
+    fn try_from(value: RejectedTransaction) -> Result<Self, Self::Error> {
+        Ok(Self {
+            base: CommittedTransactionDTO::from_payload_and_signatures(
+                value.payload,
+                value.signatures,
+            )?,
+            rejection_reason: value.rejection_reason.into(),
+        })
+    }
+}
+
 #[derive(Serialize)]
 pub struct TransactionPayloadDTO {
     account_id: String,
-    instructions: TransactionInstructionsDTO,
+    instructions: ExecutableDTO,
     creation_time: Timestamp,
-    time_to_live_ms: u64,
+    time_to_live_ms: u32,
     nonce: Option<u32>,
     metadata: UnlimitedMetadata,
 }
@@ -122,22 +123,23 @@ impl TryFrom<Payload> for TransactionPayloadDTO {
             instructions: payload.instructions.into(),
             creation_time: Timestamp::try_from(payload.creation_time)
                 .wrap_err("Failed to map creation_time")?,
-            time_to_live_ms: payload.time_to_live_ms,
+            time_to_live_ms: payload.time_to_live_ms.try_into()?,
             nonce: payload.nonce,
             metadata: payload.metadata,
         })
     }
 }
 
+/// Reflection of [`Executable`].
 #[derive(Serialize)]
 #[serde(tag = "t", content = "c")]
-pub enum TransactionInstructionsDTO {
+pub enum ExecutableDTO {
     Instructions(Vec<SerScaleHex<Instruction>>),
-    // For now WASM binary content isn't exposed to frontend
+    /// WASM binary content is omitted for frontend
     Wasm,
 }
 
-impl From<Executable> for TransactionInstructionsDTO {
+impl From<Executable> for ExecutableDTO {
     fn from(value: Executable) -> Self {
         match value {
             Executable::Instructions(items) => {

@@ -3,7 +3,7 @@ use color_eyre::Result;
 use iroha_crypto::{Hash, HashOf, PublicKey, Signature};
 use parity_scale_codec::Encode;
 use serde::{de, Serialize};
-use std::fmt;
+use std::{fmt, marker::PhantomData};
 
 /// Serializes into RFC 3339 and ISO 8601 format. Can be constructed from `u64` and `u128`.
 ///
@@ -75,6 +75,53 @@ impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
     }
 }
 
+/// String wrap primarily used for semantic reasons.
+///
+/// ```ignore
+/// struct Account {
+///   // What this string actually is?
+///   id_opaque: String,
+///   
+///   // Here it is clear, what
+///   id_clear: StringOf<AccountId>
+/// }
+/// ```
+pub struct StringOf<T> {
+    value: String,
+    _marker: PhantomData<T>,
+}
+
+impl<T> From<T> for StringOf<T>
+where
+    T: ToString,
+{
+    fn from(value: T) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl<T> From<&T> for StringOf<T>
+where
+    T: ToString,
+{
+    fn from(value: &T) -> Self {
+        Self {
+            value: value.to_string(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Serialize for StringOf<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.value.as_ref())
+    }
+}
+
+/// Deserializes from string to [`Hash`].
 pub struct HashDeser(pub Hash);
 
 impl<'de> de::Deserialize<'de> for HashDeser {
@@ -113,6 +160,7 @@ impl<'de> de::Deserialize<'de> for HashDeser {
     }
 }
 
+/// Same as [`Signature`], but serializes payload as hex
 #[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SignatureDTO {
     pub public_key: PublicKey,

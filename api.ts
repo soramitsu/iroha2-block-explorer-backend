@@ -1,9 +1,9 @@
-type Tagged<Tag extends string, Content> = {
+export type Tagged<Tag extends string, Content> = {
   t: Tag;
   c: Content;
 };
 
-interface Paginated<T> {
+export interface Paginated<T> {
   pagination: {
     page_number: number;
     page_size: number;
@@ -12,44 +12,51 @@ interface Paginated<T> {
   items: T[];
 }
 
-interface Asset {
+export interface Asset {
   account_id: string;
   definition_id: string;
   value: AssetValue;
 }
 
-type AssetValue =
+export type AssetValue =
   | Tagged<"Quantity", number>
   | Tagged<"BigQuantity", bigint> // be careful! should be deserialized with `json-bigint`
   | Tagged<"Fixed", string> // it's a number too, "float" number, but it cannot fit into js `number`
   | Tagged<"Store", any>;
 
-type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
+export type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
 
-interface AssetDefinition {
+export interface AssetDefinition {
   id: string;
   value_type: AssetValueType;
   mintable: Mintable;
 }
 
-type Mintable = "Once" | "Infinitely" | "Not";
+export interface AssetDefinitionWithAccounts extends AssetDefinition {
+  /**
+   * List of account IDs
+   */
+  accounts: string[];
+}
 
-interface Peer {
+export type Mintable = "Once" | "Infinitely" | "Not";
+
+export interface Peer {
   address: string;
   public_key: PublicKey;
 }
 
-interface Role {
+export interface Role {
   id: string;
   permissions: PermissionToken[];
 }
 
-interface PermissionToken {
+export interface PermissionToken {
   name: string;
   params: any;
 }
 
-interface Account {
+export interface Account {
   id: string;
   assets: Asset[];
   signatories: PublicKey[];
@@ -59,7 +66,7 @@ interface Account {
   metadata: any;
 }
 
-interface Domain {
+export interface Domain {
   id: string;
   accounts: Account[];
   asset_definitions: AssetDefinition[];
@@ -71,7 +78,7 @@ interface Domain {
   triggers: number;
 }
 
-interface PublicKey {
+export interface PublicKey {
   digest_function: string;
   payload: string;
 }
@@ -80,7 +87,7 @@ interface PublicKey {
  * This JSON should be parsed with bigint support
  * e.g. https://www.npmjs.com/package/json-bigint
  */
-interface Status {
+export interface Status {
   peers: bigint;
   blocks: bigint;
   txs: bigint;
@@ -90,10 +97,7 @@ interface Status {
   };
 }
 
-interface BlockShallow {
-  /**
-   * Block height, u64
-   */
+export interface BlockShallow {
   height: number;
   /**
    * ISO DateTime
@@ -113,10 +117,7 @@ interface BlockShallow {
   rejected_transactions: number;
 }
 
-interface Block {
-  /**
-   *
-   */
+export interface Block {
   height: number;
   /**
    * See {@link BlockShallow.timestamp}
@@ -143,11 +144,11 @@ interface Block {
   view_change_proofs: string[];
 }
 
-type Transaction =
+export type Transaction =
   | Tagged<"Committed", CommittedTransaction>
   | Tagged<"Rejected", RejectedTransaction>;
 
-interface CommittedTransaction {
+export interface CommittedTransaction {
   /**
    * WIP zeroed
    */
@@ -156,23 +157,20 @@ interface CommittedTransaction {
   signatures: Signature[];
 }
 
-interface RejectedTransaction extends CommittedTransaction {
+export interface RejectedTransaction extends CommittedTransaction {
   /**
    * List of serialized {@link @iroha2/data-model#TransactionRejectionReason}
    */
   rejection_reason: string;
 }
 
-interface TransactionPayload {
+export interface TransactionPayload {
   account_id: string;
   instructions: TransactionInstructions;
   /**
    * ISO timestamp
    */
   creation_time: string;
-  /**
-   * u64
-   */
   time_to_live_ms: number;
   nonce: null | number;
   metadata: any;
@@ -182,11 +180,11 @@ interface TransactionPayload {
  * `Instructions` `string[]` - list of serialized
  * {@link @iroha2/data-model#Instruction}
  */
-type TransactionInstructions =
+export type TransactionInstructions =
   | Tagged<"Instructions", string[]>
   | Tagged<"Wasm", undefined>;
 
-interface Signature {
+export interface Signature {
   /**
    * Public key's multihash
    */
