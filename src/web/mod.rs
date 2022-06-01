@@ -500,7 +500,7 @@ mod asset_definitions {
         // FIXME fetching asset accounts only to get their ids. It is inefficient.
         let accounts = app
             .iroha_client
-            // FIXME fetching without pagination
+            // FIXME shouldn't it be paginated?
             .request(FindAccountsWithAsset::new(definition_id))
             .await
             // FIXME which error will be returned if id isn't found?

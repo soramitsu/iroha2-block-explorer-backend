@@ -61,7 +61,7 @@ impl CommittedTransactionDTO {
         U: Into<Signature>,
     {
         Ok(Self {
-            // FIXME
+            // FIXME https://github.com/hyperledger/iroha/issues/2301
             block_hash: Hash::zeroed().into(),
 
             payload: payload.try_into().wrap_err("Failed to map Payload")?,
