@@ -234,7 +234,7 @@ mod domains {
         logo: Option<String>,
         metadata: Metadata,
         asset_definitions: Vec<AssetDefinitionDTO>,
-        // TODO amount of triggers
+        // FIXME https://github.com/hyperledger/iroha/issues/2302
         triggers: u32,
     }
 
