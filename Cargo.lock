@@ -1941,12 +1941,12 @@ dependencies = [
 
 [[package]]
 name = "iroha_actor"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "async-trait",
  "dashmap",
- "eyre",
+ "derive_more",
  "futures",
  "iroha_actor_derive",
  "iroha_data_primitives",
@@ -1958,8 +1958,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_actor_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -1969,11 +1969,12 @@ dependencies = [
 
 [[package]]
 name = "iroha_client"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "attohttpc",
  "base64",
+ "derive_more",
  "eyre",
  "http",
  "iroha_config",
@@ -1986,18 +1987,17 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "smallstr",
- "smallvec",
  "thiserror",
  "tungstenite",
 ]
 
 [[package]]
 name = "iroha_config"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "crossbeam",
+ "derive_more",
  "iroha_config_derive",
  "serde",
  "serde_json",
@@ -2006,8 +2006,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_config_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -2017,17 +2017,18 @@ dependencies = [
 
 [[package]]
 name = "iroha_core"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "color-eyre",
  "crossbeam-queue",
  "dashmap",
+ "derive_more",
  "eyre",
  "futures",
+ "getset",
  "iroha_actor",
  "iroha_config",
  "iroha_crypto",
@@ -2044,8 +2045,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "smallstr",
- "smallvec",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -2054,8 +2053,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_crypto"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "derive_more",
  "getset",
@@ -2068,8 +2067,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_data_model"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "dashmap",
  "derive_more",
@@ -2090,8 +2089,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_data_primitives"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "derive_more",
  "fixnum",
@@ -2106,8 +2105,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2116,8 +2115,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_futures"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "iroha_futures_derive",
  "iroha_logger",
@@ -2129,8 +2128,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_futures_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -2140,10 +2139,11 @@ dependencies = [
 
 [[package]]
 name = "iroha_logger"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "color-eyre",
+ "derive_more",
  "iroha_config",
  "once_cell",
  "serde",
@@ -2158,16 +2158,16 @@ dependencies = [
 
 [[package]]
 name = "iroha_macro"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "iroha_derive",
 ]
 
 [[package]]
 name = "iroha_p2p"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "aead",
  "async-stream",
@@ -2186,8 +2186,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_schema"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "fixnum",
  "iroha_schema_derive",
@@ -2196,8 +2196,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_schema_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2206,8 +2206,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_telemetry"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2231,8 +2231,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_telemetry_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -2242,8 +2242,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_version"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "iroha_macro",
  "iroha_schema",
@@ -2257,8 +2257,8 @@ dependencies = [
 
 [[package]]
 name = "iroha_version_derive"
-version = "2.0.0-pre-rc.4"
-source = "git+https://github.com/hyperledger/iroha.git?rev=2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405#2ba9c8f73dabb5eda27a2a8dc66e44b7382e0405"
+version = "2.0.0-pre-rc.5"
+source = "git+https://github.com/hyperledger/iroha.git?rev=916a2cc584ba110775eafeae69e9658157f704c9#916a2cc584ba110775eafeae69e9658157f704c9"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",

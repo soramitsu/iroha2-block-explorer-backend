@@ -1,3 +1,5 @@
+use crate::iroha_client_wrap::QueryBuilder;
+
 use super::{
     etc::{HashDeser, SerScaleHex, Timestamp},
     get,
@@ -111,9 +113,9 @@ async fn show(
 
             let blocks = app
                 .iroha_client
-                .request_with_pagination(
-                    FindAllBlocks,
-                    Pagination::new(Some(pagination_offset), Some(1)),
+                .request(
+                    QueryBuilder::new(FindAllBlocks)
+                        .with_pagination(Pagination::new(Some(pagination_offset), Some(1))),
                 )
                 .await
                 .map_err(WebError::expect_iroha_any_error)?
@@ -145,7 +147,7 @@ async fn index(
         pagination,
     } = app
         .iroha_client
-        .request_with_pagination(FindAllBlocks, pagination.0.into())
+        .request(QueryBuilder::new(FindAllBlocks).with_pagination(pagination.0.into()))
         .await
         .map_err(WebError::expect_iroha_any_error)?
         .try_into()?;

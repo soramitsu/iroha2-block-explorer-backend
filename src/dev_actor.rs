@@ -1,5 +1,5 @@
 use super::logger;
-use crate::iroha_client_wrap::IrohaClientWrap;
+use crate::iroha_client_wrap::{IrohaClientWrap, QueryBuilder};
 use actix::{
     prelude::{Actor, Addr, AsyncContext, Context, Handler, Message},
     ActorFutureExt, ResponseActFuture, WrapFuture,
@@ -9,7 +9,7 @@ use core::time::Duration;
 use iroha_data_model::{
     prelude::{
         Account, AccountId, AssetDefinition, AssetDefinitionId, AssetValue, AssetValueType, Domain,
-        DomainId, FindAssetsByAccountId, MintBox, RegisterBox, Value,
+        DomainId, FindAssetsByAccountId, Identifiable, MintBox, RegisterBox, Value,
     },
     IdBox,
 };
@@ -82,8 +82,11 @@ impl RandomWorkState {
                 // The goal is to find an existing mintable asset and.. mint it with some value
 
                 let asset = client
-                    .request(FindAssetsByAccountId::new(self.account_id.clone()))
+                    .request(QueryBuilder::new(FindAssetsByAccountId::new(
+                        self.account_id.clone(),
+                    )))
                     .await?
+                    .only_output()
                     .into_iter()
                     .find(|asset| matches!(asset.value(), AssetValue::Quantity(_)));
 
