@@ -1,25 +1,24 @@
-FROM ekidd/rust-musl-builder:1.57.0 AS builder
+FROM  nwtgck/rust-musl-builder:1.60.0 AS builder
 
-COPY src src
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
-COPY api.ts api.ts
+COPY  src src
+COPY  tools tools
+COPY  Cargo.toml Cargo.toml
+COPY  Cargo.lock Cargo.lock
+COPY  api.ts api.ts
 
-RUN sudo chown -R rust:rust /home/rust && \
-    cargo build --release
+RUN   cargo build --release
 
-FROM alpine:3.14
+FROM  alpine:3.16
 
-ENV LOAD_DIR=/usr/local/bin/
+ENV   LOAD_DIR=/usr/local/bin/
 
-RUN apk --no-cache add ca-certificates && \
-    adduser --disabled-password --gecos "" iroha && \
-    chown -R iroha ${LOAD_DIR}
+RUN   apk --no-cache add ca-certificates && \
+      adduser --disabled-password --gecos "" iroha
     
-USER iroha
+COPY  --from=builder \
+      /home/rust/src/target/x86_64-unknown-linux-musl/release/iroha2_explorer_web \
+      ${LOAD_DIR}
 
-COPY --from=builder \
-    /home/rust/src/target/x86_64-unknown-linux-musl/release/iroha2_explorer_web \
-    ${LOAD_DIR}
+CMD   ${LOAD_DIR}iroha2_explorer_web
 
-CMD ${LOAD_DIR}iroha2_explorer_web
+USER  iroha
