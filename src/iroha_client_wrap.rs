@@ -240,8 +240,8 @@ impl IrohaClientWrap {
             .iroha
             .prepare_query_request(
                 query.request,
-                query.pagination.unwrap_or_else(|| Pagination::default()),
-                query.filter.unwrap_or_else(|| PredicateBox::default()),
+                query.pagination.unwrap_or_default(),
+                query.filter.unwrap_or_default(),
             )
             .wrap_err("Failed to prepare query request")?;
         // FIXME response should be a trait!
