@@ -37,10 +37,7 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
     fn try_from(block: BlockValue) -> Result<Self> {
         Ok(Self {
             height: block.header.height.try_into()?,
-
-            // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed().into(),
-
+            block_hash: block.header.current_block_hash.into(),
             timestamp: Timestamp::try_from(block.header.timestamp)?,
             transactions: block.transactions.len().try_into()?,
             rejected_transactions: block.rejected_transactions.len().try_into()?,
@@ -71,10 +68,7 @@ impl TryFrom<BlockValue> for BlockDTO {
         Ok(Self {
             height: block.header.height.try_into()?,
             timestamp: Timestamp::try_from(block.header.timestamp)?,
-
-            // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed().into(),
-
+            block_hash: block.header.current_block_hash.into(),
             parent_block_hash: block.header.previous_block_hash.into(),
             transactions_merkle_root_hash: block.header.transactions_hash.into(),
             rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash.into(),

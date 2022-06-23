@@ -103,9 +103,6 @@ export interface BlockShallow {
    * ISO DateTime
    */
   timestamp: string;
-  /**
-   * WIP zeroed
-   */
   block_hash: string;
   /**
    * Transactions count
@@ -123,9 +120,6 @@ export interface Block {
    * See {@link BlockShallow.timestamp}
    */
   timestamp: string;
-  /**
-   * WIP as {@link BlockShallow.block_hash}
-   */
   block_hash: string;
   parent_block_hash: string;
   rejected_transactions_merkle_root_hash: string;
