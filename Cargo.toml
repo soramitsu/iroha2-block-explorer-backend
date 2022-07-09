@@ -18,11 +18,11 @@ tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 tracing-log = "0.1.2"
 tracing-actix-web = "0.5.1"
 clap = { version = "3.1.12", features = ["derive", "env"] }
-iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "43be45fc7fb7b0bd73f87b4fef167d61680c8e1e" }
-iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "43be45fc7fb7b0bd73f87b4fef167d61680c8e1e" }
-iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "43be45fc7fb7b0bd73f87b4fef167d61680c8e1e" }
-iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "43be45fc7fb7b0bd73f87b4fef167d61680c8e1e" }
-iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "43be45fc7fb7b0bd73f87b4fef167d61680c8e1e" }
+iroha_client        = { git = "https://github.com/hyperledger/iroha.git", rev = "75da907f66d5270f407a50e06bc76cec41d3d409" }
+iroha_data_model    = { git = "https://github.com/hyperledger/iroha.git", rev = "75da907f66d5270f407a50e06bc76cec41d3d409" }
+iroha_crypto        = { git = "https://github.com/hyperledger/iroha.git", rev = "75da907f66d5270f407a50e06bc76cec41d3d409" }
+iroha_telemetry     = { git = "https://github.com/hyperledger/iroha.git", rev = "75da907f66d5270f407a50e06bc76cec41d3d409" }
+iroha_core          = { git = "https://github.com/hyperledger/iroha.git", rev = "75da907f66d5270f407a50e06bc76cec41d3d409" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
