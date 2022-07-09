@@ -4,7 +4,6 @@ use actix_web::{
     Scope,
 };
 use color_eyre::eyre::{eyre, Context};
-use derive_more::Display;
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
 use iroha_core::smartcontracts::isi::query::Error as IrohaQueryError;
 use pagination::{Paginated, PaginationQueryParams};
@@ -36,17 +35,21 @@ impl AppData {
 }
 
 /// General error for all endpoints
-#[derive(Display, Debug)]
+#[derive(Debug, thiserror::Error)]
 enum WebError {
     /// Some error that should be logged, but shouldn't be returned to
     /// a client. Server should return an empty 500 error instead.
+    #[error("Internal Server Error")]
     Internal(color_eyre::Report),
     /// Some resource was not found.
+    #[error("Not Found")]
     NotFound,
     /// Client made a bad request. Contains a message for the client.
-    BadRequest(String),
+    #[error("Bad Request: {message_to_client}")]
+    BadRequest { message_to_client: String },
     /// Some functionality is not yet implemented. Contains a message for the client.
-    NotImplemented(String),
+    #[error("Not Implemented: {message_to_client}")]
+    NotImplemented { message_to_client: String },
 }
 
 impl WebError {
@@ -75,28 +78,29 @@ impl WebError {
             }
         }
     }
+
+    fn bad_request(message_to_client: String) -> Self {
+        Self::BadRequest { message_to_client }
+    }
+
+    fn not_implemented(message_to_client: String) -> Self {
+        Self::NotImplemented { message_to_client }
+    }
 }
 
 impl ResponseError for WebError {
     fn error_response(&self) -> HttpResponse {
         HttpResponse::build(self.status_code())
             .insert_header(http::header::ContentType::html())
-            .body(match self {
-                // We don't want to expose internal errors to the client, so here it is omitted.
-                // `actix-web` will log it anyway.
-                Self::Internal(_) => "Internal Server Error".to_owned(),
-                Self::NotFound => "Not Found".to_owned(),
-                Self::BadRequest(msg) => format!("Bad Request: {msg}"),
-                Self::NotImplemented(msg) => format!("Not Implemented: {msg}"),
-            })
+            .body(format!("{self}"))
     }
 
     fn status_code(&self) -> http::StatusCode {
         match self {
             Self::Internal(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound => http::StatusCode::NOT_FOUND,
-            Self::BadRequest(_) => http::StatusCode::BAD_REQUEST,
-            Self::NotImplemented(_) => http::StatusCode::NOT_IMPLEMENTED,
+            Self::BadRequest { .. } => http::StatusCode::BAD_REQUEST,
+            Self::NotImplemented { .. } => http::StatusCode::NOT_IMPLEMENTED,
         }
     }
 }
@@ -613,12 +617,14 @@ mod roles {
     }
 }
 
+// actix requires a service to be async
 #[allow(clippy::unused_async)]
 async fn default_route() -> impl Responder {
     HttpResponse::NotFound().body("Not Found")
 }
 
 #[get("")]
+// actix requires a service to be async
 #[allow(clippy::unused_async)]
 async fn root_health_check() -> impl Responder {
     HttpResponse::Ok().body("Welcome to Iroha 2 Block Explorer!")
@@ -646,7 +652,7 @@ pub fn server(
         App::new()
             .app_data(app_data)
             .app_data(web::QueryConfig::default().error_handler(|err, _req| {
-                WebError::BadRequest(format!("Bad query: {err}")).into()
+                WebError::bad_request(format!("Bad query: {err}")).into()
             }))
             // .app_data(web::JsonConfig::default().error_handler(|err, req| {
             //     println!("Json parse error: {err:?}");

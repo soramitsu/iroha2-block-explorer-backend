@@ -49,7 +49,7 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
 /// Full Block DTO
 #[derive(Serialize)]
 pub struct BlockDTO {
-    /// Original height value is u64, but u64 can't fit into JS `number`
+    // Original height value is u64, but u64 can't fit into JS `number`
     height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
@@ -129,7 +129,7 @@ async fn show(
                 block.try_into().wrap_err("Failed to construct BlockDTO")?,
             ))
         }
-        web::Either::Right(_hash) => Err(WebError::NotImplemented(
+        web::Either::Right(_hash) => Err(WebError::not_implemented(
             "Fetching block by hash is not yet implemented".to_string(),
         )),
     }

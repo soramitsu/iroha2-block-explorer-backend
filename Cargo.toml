@@ -13,7 +13,6 @@ actix = "0.13.0"
 actix-web = { version = "4.0.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies"] }
 awc = { version = "=3.0.0", default-features = false, features = ["compress-brotli", "compress-gzip", "cookies"]  }
 actix-server = "2.1.1"
-derive_more = "0.99"
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 tracing-log = "0.1.2"
@@ -32,6 +31,7 @@ http = "0.2.6"
 chrono = { version = "0.4.19", features = ["serde"] }
 hex = "0.4.3"
 parity-scale-codec = "2.3.1"
+thiserror = "1.0"
 rand = { version = "0.8.5", optional = true }
 faker_rand = { version = "0.1", optional = true }
 

@@ -75,7 +75,9 @@ impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
     }
 }
 
-/// String wrap primarily used for semantic reasons.
+/// Wrap that serializes into string. It's purpose is to add semantics
+/// to serializable structures about **what** a particular data
+/// is a string of.
 ///
 /// ```ignore
 /// struct Account {
@@ -86,6 +88,9 @@ impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
 ///   id_clear: StringOf<AccountId>
 /// }
 /// ```
+///
+/// It's generic type exists only for semantic reasons - `StringOf<T>` doesn't
+/// actually own the `T`.
 pub struct StringOf<T> {
     value: String,
     _marker: PhantomData<T>,
