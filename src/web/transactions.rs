@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::web::etc::HashDeser;
+use crate::{iroha_client_wrap::QueryBuilder, web::etc::HashDeser};
 
 use super::{
     etc::{SerScaleHex, SignatureDTO, Timestamp},
@@ -158,9 +158,10 @@ async fn show(
     let hash = hash.into_inner().0;
     let tx = app
         .iroha_client
-        .request(FindTransactionByHash::new(hash))
+        .request(QueryBuilder::new(FindTransactionByHash::new(hash)))
         .await
-        .map_err(WebError::expect_iroha_find_error)?;
+        .map_err(WebError::expect_iroha_find_error)?
+        .only_output();
 
     Ok(web::Json(
         tx.try_into().wrap_err("Failed to map TransactionValue")?,
@@ -174,7 +175,7 @@ async fn index(
 ) -> Result<web::Json<Paginated<Vec<TransactionDTO>>>, WebError> {
     let Paginated { data, pagination } = app
         .iroha_client
-        .request_with_pagination(FindAllTransactions, pagination.0.into())
+        .request(QueryBuilder::new(FindAllTransactions).with_pagination(pagination.0.into()))
         .await
         .map_err(WebError::expect_iroha_any_error)?
         .try_into()?;

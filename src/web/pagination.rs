@@ -39,6 +39,7 @@ where
             output,
             pagination,
             total,
+            ..
         }: ClientQueryOutput<R>,
     ) -> Result<Self, Self::Error> {
         Ok(Self {

@@ -11,6 +11,7 @@ use iroha_client::{
 };
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
+    predicate::PredicateBox,
     prelude::{Instruction, Pagination, Query, QueryBox, Value},
 };
 use iroha_telemetry::metrics::Status;
@@ -182,6 +183,43 @@ pub struct IrohaClientWrap {
     http: ActixClient,
 }
 
+pub struct QueryBuilder<R>
+where
+    R: Query,
+{
+    request: R,
+    pagination: Option<Pagination>,
+    filter: Option<PredicateBox>,
+}
+
+impl<R> QueryBuilder<R>
+where
+    R: Query,
+{
+    pub fn new(request: R) -> Self {
+        Self {
+            request,
+            pagination: None,
+            filter: None,
+        }
+    }
+
+    pub fn with_pagination(self, value: Pagination) -> Self {
+        Self {
+            pagination: Some(value),
+            ..self
+        }
+    }
+
+    // unused for now
+    pub fn _with_filter(self, value: PredicateBox) -> Self {
+        Self {
+            filter: Some(value),
+            ..self
+        }
+    }
+}
+
 impl IrohaClientWrap {
     pub fn new(iroha_client: Arc<IrohaClient>) -> Self {
         Self {
@@ -190,10 +228,9 @@ impl IrohaClientWrap {
         }
     }
 
-    pub async fn request_with_pagination<R>(
+    pub async fn request<R>(
         &self,
-        request: R,
-        pagination: Pagination,
+        query: QueryBuilder<R>,
     ) -> Result<ClientQueryOutput<R>, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
@@ -201,7 +238,11 @@ impl IrohaClientWrap {
     {
         let (req, resp_handler): (ActixReqBuilder, _) = self
             .iroha
-            .prepare_query_request(request, pagination)
+            .prepare_query_request(
+                query.request,
+                query.pagination.unwrap_or_default(),
+                query.filter.unwrap_or_default(),
+            )
             .wrap_err("Failed to prepare query request")?;
         // FIXME response should be a trait!
         let resp = req
@@ -209,16 +250,6 @@ impl IrohaClientWrap {
             .await
             .wrap_err("Failed to make query")?;
         resp_handler.handle(resp)
-    }
-
-    pub async fn request<R>(&self, request: R) -> Result<R::Output, ClientQueryError>
-    where
-        R: Query + Into<QueryBox> + Debug,
-        <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
-    {
-        self.request_with_pagination(request, Pagination::new(None, None))
-            .await
-            .map(ClientQueryOutput::only_output)
     }
 
     pub async fn get_status(&self) -> Result<Status> {

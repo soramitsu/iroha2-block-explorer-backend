@@ -1,3 +1,5 @@
+use crate::iroha_client_wrap::QueryBuilder;
+
 use super::{
     etc::{HashDeser, SerScaleHex, Timestamp},
     get,
@@ -35,10 +37,7 @@ impl TryFrom<BlockValue> for BlockShallowDTO {
     fn try_from(block: BlockValue) -> Result<Self> {
         Ok(Self {
             height: block.header.height.try_into()?,
-
-            // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed().into(),
-
+            block_hash: block.header.current_block_hash.into(),
             timestamp: Timestamp::try_from(block.header.timestamp)?,
             transactions: block.transactions.len().try_into()?,
             rejected_transactions: block.rejected_transactions.len().try_into()?,
@@ -69,10 +68,7 @@ impl TryFrom<BlockValue> for BlockDTO {
         Ok(Self {
             height: block.header.height.try_into()?,
             timestamp: Timestamp::try_from(block.header.timestamp)?,
-
-            // FIXME https://github.com/hyperledger/iroha/issues/2276
-            block_hash: Hash::zeroed().into(),
-
+            block_hash: block.header.current_block_hash.into(),
             parent_block_hash: block.header.previous_block_hash.into(),
             transactions_merkle_root_hash: block.header.transactions_hash.into(),
             rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash.into(),
@@ -111,9 +107,9 @@ async fn show(
 
             let blocks = app
                 .iroha_client
-                .request_with_pagination(
-                    FindAllBlocks,
-                    Pagination::new(Some(pagination_offset), Some(1)),
+                .request(
+                    QueryBuilder::new(FindAllBlocks)
+                        .with_pagination(Pagination::new(Some(pagination_offset), Some(1))),
                 )
                 .await
                 .map_err(WebError::expect_iroha_any_error)?
@@ -145,7 +141,7 @@ async fn index(
         pagination,
     } = app
         .iroha_client
-        .request_with_pagination(FindAllBlocks, pagination.0.into())
+        .request(QueryBuilder::new(FindAllBlocks).with_pagination(pagination.0.into()))
         .await
         .map_err(WebError::expect_iroha_any_error)?
         .try_into()?;
