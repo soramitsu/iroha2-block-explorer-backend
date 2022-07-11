@@ -206,7 +206,7 @@ IDs in path should be HTML-escaped:
 
 ## Pagination Query Params
 
-|        Param         | Default |   Description   |
-| -------------------- | :-----: | --------------- |
-| `page=<number>`      |    1    | Page number     |
-| `page_size=<number>` |   15    | Page size limit |
+| Param       | Type     | Default | Description     |
+| ----------- | -------- | :-----: | --------------- |
+| `page`      | `number` |    1    | Page number     |
+| `page_size` | `number` |   15    | Page size limit |
