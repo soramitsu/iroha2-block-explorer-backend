@@ -174,7 +174,7 @@ See also: [Id Transformation](#id-transformation)
 
 - **Response**: `Domain` or `404`
 
-### Peers
+### Peer
 
 - [`/peer/peers`](#get-apiv1peerpeers)
 - [`/peer/status`](#get-apiv1peerstatus)
