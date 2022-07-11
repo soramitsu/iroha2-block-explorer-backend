@@ -18,7 +18,7 @@ mod model {
     use iroha_crypto::{KeyGenConfiguration, KeyPair};
     use iroha_data_model::{
         account::NewAccount,
-        asset::Mintable,
+        asset::NewAssetDefinition,
         prelude::{
             Account as OriginAccount, AccountId, AssetDefinition as OriginAssetDefinition,
             AssetDefinitionId, AssetId, AssetValueType, Domain as OriginDomain, DomainId,
@@ -145,7 +145,7 @@ mod model {
                 .chain(
                     self.asset_definitions
                         .into_iter()
-                        .map(|x| RegisterBox::new(Into::<OriginAssetDefinition>::into(x)).into()),
+                        .map(|x| RegisterBox::new(Into::<NewAssetDefinition>::into(x)).into()),
                 )
                 .chain(self.asset_actions.into_iter())
         }
@@ -269,10 +269,18 @@ mod model {
     struct AssetDefinition {
         id: AssetDefinitionId,
         value_type: AssetValueType,
-        mintable: Mintable,
+        mintable: InitialMintable,
     }
 
-    impl From<AssetDefinition> for OriginAssetDefinition {
+    /// As [`Mintable`], but does not allow [`Mintable::Not`], because it is not
+    /// relevant at the genesis stage
+    #[derive(PartialEq)]
+    enum InitialMintable {
+        Once,
+        Infinitely,
+    }
+
+    impl From<AssetDefinition> for NewAssetDefinition {
         fn from(
             AssetDefinition {
                 id,
@@ -281,7 +289,6 @@ mod model {
             }: AssetDefinition,
         ) -> Self {
             use AssetValueType::{BigQuantity, Fixed, Quantity, Store};
-            use Mintable::{Infinitely, Not, Once};
 
             let mut definition = match value_type {
                 Quantity => OriginAssetDefinition::quantity(id),
@@ -290,27 +297,19 @@ mod model {
                 Store => OriginAssetDefinition::store(id),
             };
 
-            let definition = match mintable {
-                Not => {
-                    definition.mintable(false);
-                    definition
-                }
-                Once => definition.mintable_once(),
-                Infinitely => {
-                    definition.mintable(true);
-                    definition
-                }
-            };
+            if mintable == InitialMintable::Once {
+                definition = definition.mintable_once();
+            }
 
-            definition.build()
+            definition
         }
     }
 
     impl AssetDefinition {
         fn new(rnd: &mut RandHelp, domain_id: &DomainId) -> Result<Self> {
-            let mintable: Mintable = match rnd.rng.gen_range(0..10u32) {
-                5..=9 => Mintable::Infinitely,
-                0..=4 => Mintable::Once,
+            let mintable: InitialMintable = match rnd.rng.gen_range(0..10u32) {
+                5..=9 => InitialMintable::Infinitely,
+                0..=4 => InitialMintable::Once,
                 x => return Err(eyre!("Unexpected random num: {x}")),
             };
 
@@ -401,9 +400,8 @@ mod model {
                 .filter(|x| {
                     x.value_type != AssetValueType::Store
                         && (match x.mintable {
-                            Mintable::Not => false,
-                            Mintable::Once => !self.minted_assets.contains(&x.id),
-                            Mintable::Infinitely => true,
+                            InitialMintable::Once => !self.minted_assets.contains(&x.id),
+                            InitialMintable::Infinitely => true,
                         })
                 })
                 .choose(rng)
@@ -428,7 +426,7 @@ mod model {
             let asset_id = AssetId::new(some_asset_definition.id.clone(), some_account.id.clone());
             let instruction = Instruction::Mint(MintBox::new(value, asset_id));
 
-            if some_asset_definition.mintable == Mintable::Once {
+            if some_asset_definition.mintable == InitialMintable::Once {
                 self.minted_assets.insert(some_asset_definition.id.clone());
             }
 
@@ -452,12 +450,12 @@ mod model {
                 AssetDefinition {
                     id: "rose#wonderland".parse().unwrap(),
                     value_type: AssetValueType::Quantity,
-                    mintable: Mintable::Infinitely,
+                    mintable: InitialMintable::Infinitely,
                 },
                 AssetDefinition {
                     id: "tulip#wonderland".parse().unwrap(),
                     value_type: AssetValueType::Quantity,
-                    mintable: Mintable::Once,
+                    mintable: InitialMintable::Once,
                 },
             ];
             let accounts = vec![Account {
