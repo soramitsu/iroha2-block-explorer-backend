@@ -18,10 +18,12 @@ export interface Asset {
   value: AssetValue;
 }
 
+// There is no need to work with values as with numbers on the frontend. 
+// Some values may exceed the allowable number sizes in js
 export type AssetValue =
-  | Tagged<"Quantity", number>
-  | Tagged<"BigQuantity", bigint> // be careful! should be deserialized with `json-bigint`
-  | Tagged<"Fixed", string> // it's a number too, "float" number, but it cannot fit into js `number`
+  | Tagged<"Quantity", string>
+  | Tagged<"BigQuantity", string>
+  | Tagged<"Fixed", string> 
   | Tagged<"Store", any>;
 
 export type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
@@ -83,16 +85,15 @@ export interface PublicKey {
   payload: string;
 }
 
-/**
- * This JSON should be parsed with bigint support
- * e.g. https://www.npmjs.com/package/json-bigint
- */
+// There is no need to work with values as with numbers on the frontend. 
+// Some values may exceed the allowable number sizes in js
 export interface Status {
-  peers: bigint;
-  blocks: bigint;
-  txs: bigint;
+  peers: string;
+  blocks: string;
+  txs: string;
   uptime: {
-    secs: bigint;
+    // Despite the fact that u64 is here, the value will not exceed the allowable number in js
+    secs: number; 
     nanos: number;
   };
 }

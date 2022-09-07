@@ -323,8 +323,8 @@ mod assets {
     #[derive(Serialize)]
     #[serde(tag = "t", content = "c")]
     pub enum AssetValueDTO {
-        Quantity(u32),
-        BigQuantity(u128),
+        Quantity(String),
+        BigQuantity(String),
         Fixed(String),
         Store(Metadata),
     }
@@ -334,8 +334,8 @@ mod assets {
             use AssetValue::{BigQuantity, Fixed, Quantity, Store};
 
             match val {
-                Quantity(x) => Self::Quantity(x),
-                BigQuantity(x) => Self::BigQuantity(x),
+                Quantity(x) => Self::Quantity(x.to_string()),
+                BigQuantity(x) => Self::BigQuantity(x.to_string()),
                 Fixed(x) => Self::Fixed(f64::from(x).to_string()),
                 Store(x) => Self::Store(x),
             }
