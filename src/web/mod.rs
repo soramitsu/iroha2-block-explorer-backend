@@ -311,8 +311,8 @@ mod domains {
 
 mod assets {
     use super::{
-        accounts::AccountIdInPath, asset_definitions::AssetDefinitionIdInPath, get, web, AppData,
-        Paginated, PaginationQueryParams, QueryBuilder, Scope, Serialize, WebError,
+        accounts::AccountIdInPath, asset_definitions::AssetDefinitionIdInPath, etc::StringOf, get,
+        web, AppData, Paginated, PaginationQueryParams, QueryBuilder, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{
         Asset, AssetId, AssetValue, AssetValueType, FindAllAssets, FindAssetById, Identifiable,
@@ -323,8 +323,8 @@ mod assets {
     #[derive(Serialize)]
     #[serde(tag = "t", content = "c")]
     pub enum AssetValueDTO {
-        Quantity(String),
-        BigQuantity(String),
+        Quantity(StringOf<u32>),
+        BigQuantity(StringOf<u128>),
         Fixed(String),
         Store(Metadata),
     }
@@ -334,8 +334,8 @@ mod assets {
             use AssetValue::{BigQuantity, Fixed, Quantity, Store};
 
             match val {
-                Quantity(x) => Self::Quantity(x.to_string()),
-                BigQuantity(x) => Self::BigQuantity(x.to_string()),
+                Quantity(x) => Self::Quantity(x.into()),
+                BigQuantity(x) => Self::BigQuantity(x.into()),
                 Fixed(x) => Self::Fixed(f64::from(x).to_string()),
                 Store(x) => Self::Store(x),
             }
@@ -564,8 +564,8 @@ mod asset_definitions {
 
 mod peer {
     use super::{
-        get, web, AppData, Paginated, PaginationQueryParams, QueryBuilder, Scope, Serialize,
-        WebError,
+        etc::StringOf, get, web, AppData, Paginated, PaginationQueryParams, QueryBuilder, Scope,
+        Serialize, WebError,
     };
     use iroha_data_model::prelude::{FindAllPeers, Peer, PeerId};
     use iroha_telemetry::metrics::Status;
@@ -579,8 +579,51 @@ mod peer {
         }
     }
 
+    #[derive(Serialize)]
+    pub struct StatusDTO {
+        peers: StringOf<u64>,
+        blocks: StringOf<u64>,
+        txs_accepted: StringOf<u64>,
+        txs_rejected: StringOf<u64>,
+        view_changes: StringOf<u64>,
+        uptime: UptimeDTO,
+    }
+
+    #[derive(Serialize)]
+    pub struct UptimeDTO {
+        secs: StringOf<u64>,
+        nanos: StringOf<u32>,
+    }
+
+    impl From<Status> for StatusDTO {
+        fn from(
+            Status {
+                peers,
+                blocks,
+                txs_accepted,
+                txs_rejected,
+                view_changes,
+                ..
+            }: Status,
+        ) -> Self {
+            Self {
+                peers: peers.into(),
+                blocks: blocks.into(),
+                txs_accepted: txs_accepted.into(),
+                txs_rejected: txs_rejected.into(),
+                view_changes: view_changes.into(),
+
+                // FIXME: https://github.com/hyperledger/iroha/issues/2716
+                uptime: UptimeDTO {
+                    secs: 0.into(),
+                    nanos: 0.into(),
+                },
+            }
+        }
+    }
+
     #[get("/peers")]
-    async fn peers(
+    async fn index_peers(
         data: web::Data<AppData>,
         pagination: web::Query<PaginationQueryParams>,
     ) -> Result<web::Json<Paginated<Vec<PeerDTO>>>, WebError> {
@@ -596,13 +639,15 @@ mod peer {
     }
 
     #[get("/status")]
-    async fn status(data: web::Data<AppData>) -> Result<web::Json<Status>, WebError> {
+    async fn index_status(data: web::Data<AppData>) -> Result<web::Json<StatusDTO>, WebError> {
         let status = data.iroha_client.get_status().await?;
-        Ok(web::Json(status))
+        Ok(web::Json(status.into()))
     }
 
     pub fn scope() -> Scope {
-        web::scope("/peer").service(peers).service(status)
+        web::scope("/peer")
+            .service(index_peers)
+            .service(index_status)
     }
 }
 
