@@ -90,11 +90,16 @@ export interface PublicKey {
 export interface Status {
   peers: string;
   blocks: string;
-  txs: string;
+  txs_accepted: string,
+  txs_rejected: string,
+  view_changes: string,
+  /**
+   * note: zeros for now
+   * https://github.com/hyperledger/iroha/issues/2716
+   */
   uptime: {
-    // Despite the fact that u64 is here, the value will not exceed the allowable number in js
-    secs: number; 
-    nanos: number;
+    secs: string; 
+    nanos: string;
   };
 }
 
