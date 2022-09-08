@@ -149,6 +149,7 @@ export type Transaction =
   | Tagged<"Rejected", RejectedTransaction>;
 
 export interface CommittedTransaction {
+  hash: string
   /**
    * WIP zeroed
    */

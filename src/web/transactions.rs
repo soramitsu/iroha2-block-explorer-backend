@@ -6,11 +6,11 @@ use super::{
     etc::{SerScaleHex, SignatureDTO, Timestamp},
     get, web, AppData, Paginated, PaginationQueryParams, Scope, WebError,
 };
-use color_eyre::{eyre::Context, Report, Result};
+use color_eyre::{eyre::Context, Result};
 use iroha_core::tx::{
-    Executable, RejectedTransaction, TransactionRejectionReason, TransactionValue,
+    Executable, RejectedTransaction, TransactionRejectionReason, TransactionValue, Txn,
 };
-use iroha_crypto::{Hash, Signature};
+use iroha_crypto::{Hash, HashOf, Signature};
 use iroha_data_model::prelude::{
     FindAllTransactions, FindTransactionByHash, Instruction, Payload, Transaction,
     UnlimitedMetadata,
@@ -31,36 +31,46 @@ impl TryFrom<TransactionValue> for TransactionDTO {
         match tx {
             TransactionValue::Transaction(versioned) => {
                 let tx = versioned.into_v1();
-                Ok(Self::Committed(
-                    tx.try_into()
-                        .wrap_err("Failed to make CommittedTransactiondTO")?,
-                ))
+                let base = TransactionBase::new(tx.hash(), tx.payload, tx.signatures)
+                    .wrap_err("Failed to make TransactionBase")?;
+                Ok(Self::Committed(CommittedTransactionDTO { base }))
             }
             TransactionValue::RejectedTransaction(versioned) => {
                 let tx = versioned.into_v1();
-                Ok(Self::Rejected(
-                    tx.try_into()
-                        .wrap_err("Failed to make RejectedTransactionDTO")?,
-                ))
+                let hash = tx.hash();
+                let RejectedTransaction {
+                    payload,
+                    signatures,
+                    rejection_reason,
+                } = tx;
+                let base = TransactionBase::new(hash, payload, signatures)
+                    .wrap_err("Failed to make TransactionBase")?;
+                Ok(Self::Rejected(RejectedTransactionDTO {
+                    base,
+                    rejection_reason: rejection_reason.into(),
+                }))
             }
         }
     }
 }
 
 #[derive(Serialize)]
-pub struct CommittedTransactionDTO {
+struct TransactionBase {
+    hash: SerScaleHex<HashOf<Transaction>>,
     block_hash: SerScaleHex<Hash>,
     payload: TransactionPayloadDTO,
     signatures: BTreeSet<SignatureDTO>,
 }
 
-impl CommittedTransactionDTO {
-    fn from_payload_and_signatures<T, U>(payload: Payload, signatures: T) -> Result<Self>
+impl TransactionBase {
+    fn new<T, U>(hash: HashOf<Transaction>, payload: Payload, signatures: T) -> Result<Self>
     where
         T: IntoIterator<Item = U>,
         U: Into<Signature>,
     {
         Ok(Self {
+            hash: hash.into(),
+
             // FIXME https://github.com/hyperledger/iroha/issues/2301
             block_hash: Hash::zeroed().into(),
 
@@ -74,34 +84,18 @@ impl CommittedTransactionDTO {
     }
 }
 
-impl TryFrom<Transaction> for CommittedTransactionDTO {
-    type Error = Report;
-
-    fn try_from(value: Transaction) -> Result<Self, Self::Error> {
-        Self::from_payload_and_signatures(value.payload, value.signatures)
-    }
+#[derive(Serialize)]
+pub struct CommittedTransactionDTO {
+    #[serde(flatten)]
+    base: TransactionBase,
 }
 
 /// Just as [`CommittedTransactionDTO`], but with rejection reason
 #[derive(Serialize)]
 pub struct RejectedTransactionDTO {
     #[serde(flatten)]
-    base: CommittedTransactionDTO,
+    base: TransactionBase,
     rejection_reason: SerScaleHex<TransactionRejectionReason>,
-}
-
-impl TryFrom<RejectedTransaction> for RejectedTransactionDTO {
-    type Error = Report;
-
-    fn try_from(value: RejectedTransaction) -> Result<Self, Self::Error> {
-        Ok(Self {
-            base: CommittedTransactionDTO::from_payload_and_signatures(
-                value.payload,
-                value.signatures,
-            )?,
-            rejection_reason: value.rejection_reason.into(),
-        })
-    }
 }
 
 #[derive(Serialize)]
