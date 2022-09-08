@@ -18,12 +18,12 @@ export interface Asset {
   value: AssetValue;
 }
 
-// There is no need to work with values as with numbers on the frontend. 
+// There is no need to work with values as with numbers on the frontend.
 // Some values may exceed the allowable number sizes in js
 export type AssetValue =
   | Tagged<"Quantity", string>
   | Tagged<"BigQuantity", string>
-  | Tagged<"Fixed", string> 
+  | Tagged<"Fixed", string>
   | Tagged<"Store", any>;
 
 export type AssetValueType = "Quantity" | "BigQuantity" | "Fixed" | "Store";
@@ -85,20 +85,20 @@ export interface PublicKey {
   payload: string;
 }
 
-// There is no need to work with values as with numbers on the frontend. 
+// There is no need to work with values as with numbers on the frontend.
 // Some values may exceed the allowable number sizes in js
 export interface Status {
   peers: string;
   blocks: string;
-  txs_accepted: string,
-  txs_rejected: string,
-  view_changes: string,
+  txs_accepted: string;
+  txs_rejected: string;
+  view_changes: string;
   /**
    * note: zeros for now
    * https://github.com/hyperledger/iroha/issues/2716
    */
   uptime: {
-    secs: string; 
+    secs: string;
     nanos: string;
   };
 }
