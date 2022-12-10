@@ -232,7 +232,7 @@ mod domains {
         AppData, Paginated, PaginationQueryParams, QueryBuilder, Scope, Serialize, WebError,
     };
     use iroha_data_model::prelude::{
-        Domain, DomainId, FindAllDomains, FindDomainById, HasMetadata, Identifiable, Metadata,
+        Domain, DomainId, FindAllDomains, FindDomainById, Identifiable, Metadata,
     };
 
     #[derive(Serialize)]

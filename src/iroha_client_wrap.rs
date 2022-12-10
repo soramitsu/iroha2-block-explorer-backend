@@ -9,6 +9,7 @@ use iroha_client::{
     client::{Client as IrohaClient, ClientQueryError, ClientQueryOutput, ResponseHandler},
     http::Response as RespIroha,
 };
+use iroha_data_model::prelude::Sorting;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
@@ -88,7 +89,7 @@ mod request_builder {
 
             let resp = req
                 .await
-                .map_err(|x| eyre!("Failed to make HTTP request: {}", x))?;
+                .map_err(|x| eyre!("Failed to make HTTP request: {:?}", x))?;
 
             let resp = ResponseWrapper::new(resp)
                 .into_iroha_response()
@@ -241,6 +242,7 @@ impl IrohaClientWrap {
             .prepare_query_request(
                 query.request,
                 query.pagination.unwrap_or_default(),
+                Sorting::default(),
                 query.filter.unwrap_or_default(),
             )
             .wrap_err("Failed to prepare query request")?;

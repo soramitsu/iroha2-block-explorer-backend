@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use color_eyre::eyre::ContextCompat;
 use color_eyre::Result;
 use iroha_crypto::{Hash, HashOf, PublicKey, Signature};
 use parity_scale_codec::Encode;
@@ -23,7 +24,8 @@ impl TryFrom<u128> for Timestamp {
     fn try_from(unix_time: u128) -> Result<Self> {
         let secs: i64 = (unix_time / 1_000).try_into()?;
         let nano_secs: u32 = ((unix_time % 1_000) * 1_000_000).try_into()?;
-        let naive_dt = chrono::NaiveDateTime::from_timestamp(secs, nano_secs);
+        let naive_dt = chrono::NaiveDateTime::from_timestamp_opt(secs, nano_secs)
+            .wrap_err("Failed to construct NaiveDateTime")?;
         let dt = DateTime::<Utc>::from_utc(naive_dt, Utc);
 
         Ok(Self(dt))
