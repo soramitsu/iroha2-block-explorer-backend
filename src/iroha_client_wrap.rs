@@ -89,7 +89,7 @@ mod request_builder {
 
             let resp = req
                 .await
-                .map_err(|x| eyre!("Failed to make HTTP request: {:?}", x))?;
+                .map_err(|x| eyre!("Failed to make HTTP request: {}", x))?;
 
             let resp = ResponseWrapper::new(resp)
                 .into_iroha_response()
