@@ -1,4 +1,4 @@
-FROM  nwtgck/rust-musl-builder:1.60.0 AS builder
+FROM  nwtgck/rust-musl-builder:1.65.0 AS builder
 
 COPY  src src
 COPY  tools tools
