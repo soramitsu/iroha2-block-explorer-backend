@@ -112,7 +112,7 @@ impl RandomWorkState {
                     AssetValueType::Fixed => AssetDefinition::fixed(definition_id),
                     AssetValueType::Store => AssetDefinition::store(definition_id),
                 };
-                let create_asset = RegisterBox::new(new_asset_definition.build());
+                let create_asset = RegisterBox::new(new_asset_definition);
 
                 logger::info!("Create asset: {:?}", create_asset);
 

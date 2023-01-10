@@ -12,8 +12,7 @@ use iroha_core::tx::{
 };
 use iroha_crypto::{Hash, HashOf, Signature};
 use iroha_data_model::prelude::{
-    FindAllTransactions, FindTransactionByHash, Instruction, Payload, Transaction,
-    UnlimitedMetadata,
+    FindAllTransactions, FindTransactionByHash, Instruction, Payload, SignedTransaction, UnlimitedMetadata,
 };
 use serde::Serialize;
 
@@ -56,14 +55,14 @@ impl TryFrom<TransactionValue> for TransactionDTO {
 
 #[derive(Serialize)]
 struct TransactionBase {
-    hash: SerScaleHex<HashOf<Transaction>>,
+    hash: SerScaleHex<HashOf<SignedTransaction>>,
     block_hash: SerScaleHex<Hash>,
     payload: TransactionPayloadDTO,
     signatures: BTreeSet<SignatureDTO>,
 }
 
 impl TransactionBase {
-    fn new<T, U>(hash: HashOf<Transaction>, payload: Payload, signatures: T) -> Result<Self>
+    fn new<T, U>(hash: HashOf<SignedTransaction>, payload: Payload, signatures: T) -> Result<Self>
     where
         T: IntoIterator<Item = U>,
         U: Into<Signature>,
@@ -176,7 +175,7 @@ async fn index(
 
     let data = data
         .into_iter()
-        .map(TryInto::try_into)
+        .map(|x| TryInto::try_into(x.tx_value))
         .collect::<Result<Vec<_>>>()
         .wrap_err("Failed to construct TransactionDTO")?;
 

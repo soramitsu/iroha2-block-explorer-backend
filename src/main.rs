@@ -30,7 +30,8 @@ mod logger {
 mod args {
     use clap::Parser;
     use color_eyre::{eyre::Context as _, Help as _, Result};
-    use iroha_client::{client::Client as IrohaClient, Configuration as IrohaClientConfiguration};
+    use iroha_client::client::Client as IrohaClient;
+    use iroha_config::client::Configuration as IrohaClientConfiguration;
 
     #[derive(Debug, Parser)]
     #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
