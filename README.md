@@ -1,4 +1,34 @@
-# iroha2-block-explorer-backend
+# Iroha 2 Blockchain Explorer Backend
+
+This readme provides an overview of the Iroha 2 blockchain explorer backend and instructions on how to install, run, and utilize the explorer's backend features.
+
+## Installation
+
+To set up the Iroha 2 blockchain explorer backend, follow these steps:
+
+1. Install Rust.
+2. For full functionality of the explorer backend, build [Iroha_RC.9](https://github.com/hyperledger/iroha/tree/ea45b5053018acd48340024800786ff5a3d0904d) and ensure it is running.
+
+3. Build the explorer backend binary by running the following command:
+```bash
+cargo build --release 
+```
+
+4. Prepare Iroha Client config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md)). **Define target peer location here**.
+Or copy the configuration file from  [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool) Config Files
+
+## Run
+
+To run the Iroha 2 blockchain explorer backend, execute the following command:
+
+
+```bash
+./target/release/iroha2_explorer_web
+ -c /path/to/client_config.json
+ -p 8080  # may be env PORT, default is 4000
+ 
+```
+or 
 
 ```
 $ cargo run -- -h
@@ -22,36 +52,26 @@ OPTIONS:
             Print version information
 ```
 
-Check:
+
+## Check the API
+
+Ensure that the explorer backend is functioning correctly by executing the following command:
 
 ```bash
-> curl http://localhost:4000
+> curl http://localhost:4000/api/v1
 Welcome to Iroha 2 Block Explorer!
 ```
-
-## Deploy
-
-- [Install Rust](https://www.rust-lang.org/tools/install)
-- Build binary:
-
-  ```bash
-  cargo build --release
-  ```
-
-- Prepare Iroha Client config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md)). **Define target peer location here**.
-
-- Run web server:
-
-  ```bash
-  ./target/release/iroha2_explorer_web \
-      -c /path/to/client_config.json \
-      -p 8080 # may be env PORT, default is 4000
-  ```
 
 ## API
 
 Refer to [Block Explorer API](api.md).
 
+
 ## Tools
 
-- [genesis-gen](./tools/genesis-gen/README.md) - genesis generator
+The following tools are available in conjunction with the Iroha 2 blockchain explorer :
+
+ - [genesis-gen](./tools/genesis-gen/README.md): Genesis generator (a tool to generate sample data).
+- [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool): A tool for automating the deployment of Iroha and the explorer.
+
+
