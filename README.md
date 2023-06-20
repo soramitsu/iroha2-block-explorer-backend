@@ -71,7 +71,7 @@ Refer to [Block Explorer API](api.md).
 
 The following tools are available in conjunction with the Iroha 2 blockchain explorer :
 
- - [genesis-gen](./tools/genesis-gen/README.md): Genesis generator (a tool to generate sample data).
+- [genesis-gen](./tools/genesis-gen/README.md): Genesis generator (a tool to generate sample data).
 - [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool): A tool for automating the deployment of Iroha and the explorer.
 
 
