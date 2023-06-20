@@ -10,6 +10,7 @@ To set up the Iroha 2 blockchain explorer backend, follow these steps:
 2. For full functionality of the explorer backend, build [Iroha_RC.9](https://github.com/hyperledger/iroha/tree/ea45b5053018acd48340024800786ff5a3d0904d) and ensure it is running.
 
 3. Build the explorer backend binary by running the following command:
+
 ```bash
 cargo build --release 
 ```
