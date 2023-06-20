@@ -21,14 +21,14 @@ Or copy the configuration file from  [explorer-deploy-dev-tool](https://github.c
 
 To run the Iroha 2 blockchain explorer backend, execute the following command:
 
-
 ```bash
-./target/release/iroha2_explorer_web
- -c /path/to/client_config.json
- -p 8080  # may be env PORT, default is 4000
- 
+./target/release/iroha2_explorer_web \
+  -c /path/to/client_config.json \
+  -p 8080  # may be env PORT, default is 4000
 ```
-or 
+
+or
+
 
 ```
 $ cargo run -- -h
