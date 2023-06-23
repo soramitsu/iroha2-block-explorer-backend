@@ -53,7 +53,7 @@ Here is a breakdown of the options you can use:
 
 - `-h, --help`: Prints the help information, which provides an overview of the available options.
 
-- `-p, --port <PORT>`: Allows you to specify the port number on which the server will listen. You can set the port by providing the value after the flag, for example, `-p 8080`. If you don't provide this flag, the default port used will be 4000. Additionally, you can set the `PORT` environment variable to specify the port.
+- `-p, --port <PORT>`: Allows you to specify the port number on which the server will listen. You can set the port by providing the value after the flag, for example, `-p 8080`. If you don't provide this flag, the default 4000 port will be used. Additionally, you can set the `PORT` environment variable to specify the port.
 
 - `-V, --version`: Prints the version information of the Iroha 2 Explorer Backend.
 
