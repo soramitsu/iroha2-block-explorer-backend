@@ -29,7 +29,7 @@ cargo build --release
 
 To run the Iroha 2 blockchain explorer backend, you have two options:
 
-```Option 1:```
+**Option 1:**
 Execute the following command in your terminal:
 ```bash
 ./target/release/iroha2_explorer_web \
