@@ -8,6 +8,7 @@ To set up the Iroha 2 blockchain explorer backend, follow these steps:
 
 1. Install Rust ```1.7.0```
 2. For full functionality of the explorer backend, build [Iroha `v2.0.0-pre-rc.9`](https://github.com/hyperledger/iroha/tree/ea45b5053018acd48340024800786ff5a3d0904d) and ensure it is running.
+Build instructions for [Iroha](https://hyperledger.github.io/iroha-2-docs/guide/build.html)
 
 3. Build the explorer backend binary:
 
