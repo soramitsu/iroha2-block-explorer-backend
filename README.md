@@ -38,7 +38,7 @@ Execute the following command in your terminal:
 ```
 
 
-```Option 2:```
+**Option 2:**
 Alternatively, you can use the `cargo run` command with additional options.
 This command will display the help information, including the available options and their descriptions.
 
