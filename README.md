@@ -77,7 +77,7 @@ Refer to [Block Explorer API](api.md).
 
 ## Tools
 
-The following tools are available in conjunction with the Iroha 2 blockchain explorer :
+The following tools are available in conjunction with the Iroha 2 blockchain explorer:
 
 | Tool Name                        | Description                                                 |
 |----------------------------------|-------------------------------------------------------------|
