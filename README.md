@@ -6,7 +6,7 @@ This readme provides an overview of the Iroha 2 blockchain explorer backend and 
 
 To set up the Iroha 2 blockchain explorer backend, follow these steps:
 
-1. Install Rust.
+1. Install Rust ```1.7.0```
 2. For full functionality of the explorer backend, build [Iroha `v2.0.0-pre-rc.9`](https://github.com/hyperledger/iroha/tree/ea45b5053018acd48340024800786ff5a3d0904d) and ensure it is running.
 
 3. Build the explorer backend binary:
@@ -15,18 +15,18 @@ To set up the Iroha 2 blockchain explorer backend, follow these steps:
 cargo build --release 
 ```
 
-4.To prepare the Iroha client configuration, you have two options:
+4. To prepare the Iroha client configuration, you have two options:
 
-```Option 1:``` Define the client configuration manually
-
-Prepare Iroha client_config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md))
-
-You can also refer to the Iroha docs for this: https://hyperledger.github.io/iroha-2-docs/guide/configure/client-configuration.html
-
-
-
-```Option 2:``` Copy the configuration file 
-from  [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool) 
+  ```Option 1:``` Define the client configuration manually
+  
+  Prepare Iroha client_config ([reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md))
+  
+  You can also refer to the Iroha docs for this: https://hyperledger.github.io/iroha-2-docs/guide/configure/client-configuration.html
+  
+  
+  
+  ```Option 2:``` Copy the configuration file 
+  from  [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool) 
 
 
 ## Running the Backend
