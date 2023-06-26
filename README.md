@@ -12,18 +12,17 @@ To set up the Iroha 2 blockchain explorer backend, follow these steps:
 3. Build the explorer backend binary:
 
 ```bash
-cargo build --release 
+cargo build --release
 ```
 
 4. To prepare the Iroha client configuration, you have two options:
 
    **Option 1:** Define the client configuration manually.
-  
+
    To configure Iroha client, refer to [Configuration Reference](https://github.com/hyperledger/iroha/blob/ea45b5053018acd48340024800786ff5a3d0904d/docs/source/references/config.md) or [Iroha documentation](https://hyperledger.github.io/iroha-2-docs/guide/configure/client-configuration.html).
 
-   **Option 2:** Copy the configuration file 
-   from  [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool). 
-
+   **Option 2:** Copy the configuration file
+   from [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool).
 
 ## Running the Backend
 
@@ -31,20 +30,19 @@ To run the Iroha 2 blockchain explorer backend, you have two options:
 
 **Option 1:**
 Execute the following command in your terminal:
+
 ```bash
 ./target/release/iroha2_explorer_web \
   -c /path/to/client_config.json \
   -p 8080  # may be env PORT, default is 4000
 ```
 
-
 **Option 2:**
 Alternatively, you can use the `cargo run` command with additional options.
 This command will display the help information, including the available options and their descriptions.
 
-
 ```bash
-cargo run -- -h 
+cargo run -- -h
 ```
 
 Here is a breakdown of the options you can use:
@@ -59,8 +57,6 @@ Here is a breakdown of the options you can use:
 
 Feel free to adjust the command and options according to your specific setup and requirements.
 
-
-
 ## Check the API
 
 Ensure that the explorer backend is functioning correctly by executing the following command:
@@ -74,13 +70,11 @@ Welcome to Iroha 2 Block Explorer!
 
 Refer to [Block Explorer API](api.md).
 
-
 ## Tools
 
 The following tools are available in conjunction with the Iroha 2 blockchain explorer:
 
-| Tool Name                        | Description                                                 |
-|----------------------------------|-------------------------------------------------------------|
-| [genesis-gen](./tools/genesis-gen/README.md) | Genesis generator (a tool to generate sample data).        |
-| [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool) | A tool for automating the deployment of Iroha and the explorer. |
-
+| Tool Name                                                                        | Description                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [genesis-gen](./tools/genesis-gen/README.md)                                     | Genesis generator (a tool to generate sample data).                                                                                                                                                                                                                              |
+| [explorer-deploy-dev-tool](https://github.com/0x009922/explorer-deploy-dev-tool) | A tool for automating the deployment of Iroha and the explorer. ( This tool is provided as a reference for setting up the project locally, but please note that it may be out of date and its functionality might not align with the current version of Iroha and the Explorer) |
