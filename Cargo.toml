@@ -29,7 +29,6 @@ chrono = { version = "0.4.19", features = ["serde"] }
 hex = "0.4.3"
 parity-scale-codec = "3.2.1"
 thiserror = "1.0"
-bytes = "1.4.0"
 rand = { workspace = true, optional = true }
 faker_rand = { workspace = true, optional = true }
 clap = { workspace = true, features = ["derive", "env"] }
