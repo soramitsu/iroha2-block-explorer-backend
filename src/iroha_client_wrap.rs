@@ -6,14 +6,14 @@ use color_eyre::{
     Result,
 };
 use iroha_client::{
-    client::{Client as IrohaClient, ClientQueryError, ClientQueryOutput, ResponseHandler},
+    client::{Client as IrohaClient, ClientQueryError, ClientQueryRequest, ResponseHandler},
     http::Response as RespIroha,
 };
 use iroha_data_model::prelude::Sorting;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{Instruction, Pagination, Query, QueryBox, Value},
+    prelude::{InstructionBox, Pagination, Query, QueryBox, Value},
 };
 use iroha_telemetry::metrics::Status;
 
@@ -232,7 +232,7 @@ impl IrohaClientWrap {
     pub async fn request<R>(
         &self,
         query: QueryBuilder<R>,
-    ) -> Result<ClientQueryOutput<R>, ClientQueryError>
+    ) -> Result<ClientQueryRequest<R>, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
         <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
@@ -260,22 +260,22 @@ impl IrohaClientWrap {
         resp_handler.handle(resp)
     }
 
-    pub async fn submit(&self, instruction: impl Into<Instruction> + Debug) -> Result<()> {
-        let (req, _, resp_handler) = self
-            .iroha
-            .prepare_transaction_request::<ActixReqBuilder>(
-                self.iroha
-                    .build_transaction(
-                        (vec![instruction.into()]).into_iter().into(),
-                        UnlimitedMetadata::new(),
-                    )
-                    .wrap_err("Failed to build transaction")?,
-            )
-            .wrap_err("Failed to prepare transaction request")?;
+    // pub async fn submit(&self, instruction: impl Into<InstructionBox> + Debug) -> Result<()> {
+    //     let (req, _, resp_handler) = self
+    //         .iroha
+    //         .prepare_transaction_request::<ActixReqBuilder>(
+    //             self.iroha
+    //                 .build_transaction(
+    //                     (vec![instruction.into()]).into_iter().into(),
+    //                     UnlimitedMetadata::new(),
+    //                 )
+    //                 .wrap_err("Failed to build transaction")?,
+    //         )
+    //         .wrap_err("Failed to prepare transaction request")?;
 
-        let resp = req.send(&self.http).await?;
-        resp_handler.handle(resp)?;
+    //     let resp = req.send(&self.http).await?;
+    //     resp_handler.handle(resp)?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

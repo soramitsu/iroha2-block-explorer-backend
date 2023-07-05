@@ -8,13 +8,17 @@ use super::{
 };
 use color_eyre::{eyre::Context, Result};
 use iroha_core::tx::{
-    Executable, RejectedTransaction, TransactionRejectionReason, TransactionValue, Txn,
+    Executable, AcceptedTransaction, TransactionValue, 
 };
-use iroha_crypto::{Hash, HashOf, Signature};
+use iroha_crypto::{Hash, HashOf, Signature,SignaturesOf};
 use iroha_data_model::prelude::{
-    FindAllTransactions, FindTransactionByHash, Instruction, Payload, SignedTransaction, UnlimitedMetadata,
+    FindAllTransactions, FindTransactionByHash, InstructionBox,TransactionQueryResult,   UnlimitedMetadata,
 };
+use iroha_data_model::transaction::model::SignedTransaction;
+use iroha_data_model::transaction::model::TransactionPayload;
+use iroha_data_model::transaction::error::model::TransactionRejectionReason;
 use serde::Serialize;
+use core::num::{NonZeroU64,NonZeroU32};
 
 #[derive(Serialize)]
 #[serde(tag = "t", content = "c")]
@@ -23,46 +27,65 @@ pub enum TransactionDTO {
     Rejected(RejectedTransactionDTO),
 }
 
-impl TryFrom<TransactionValue> for TransactionDTO {
+impl TryFrom<TransactionQueryResult> for TransactionDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(tx: TransactionValue) -> Result<Self> {
-        match tx {
-            TransactionValue::Transaction(versioned) => {
-                let tx = versioned.into_v1();
-                let base = TransactionBase::new(tx.hash(), tx.payload, tx.signatures)
-                    .wrap_err("Failed to make TransactionBase")?;
-                Ok(Self::Committed(CommittedTransactionDTO { base }))
-            }
-            TransactionValue::RejectedTransaction(versioned) => {
-                let tx = versioned.into_v1();
-                let hash = tx.hash();
-                let RejectedTransaction {
-                    payload,
-                    signatures,
-                    rejection_reason,
-                } = tx;
-                let base = TransactionBase::new(hash, payload, signatures)
-                    .wrap_err("Failed to make TransactionBase")?;
-                Ok(Self::Rejected(RejectedTransactionDTO {
-                    base,
-                    rejection_reason: rejection_reason.into(),
-                }))
-            }
+    // fn try_from(tx: TransactionValue) -> Result<Self> {
+    //     match tx {
+    //         TransactionValue::Transaction(versioned) => {
+    //             let tx = versioned.into_v1();
+    //             let base = TransactionBase::new(tx.hash(), tx.payload, tx.signatures)
+    //                 .wrap_err("Failed to make TransactionBase")?;
+    //             Ok(Self::Committed(CommittedTransactionDTO { base }))
+    //         }
+    //         TransactionValue::AcceptedTransaction(versioned) => {
+    //             let tx = versioned.into_v1();
+    //             let hash = tx.hash();
+    //             let AcceptedTransaction {
+    //                 payload,
+    //                 signatures,
+    //                 rejection_reason,
+    //             } = tx;
+    //             let base = TransactionBase::new(hash, payload, signatures)
+    //                 .wrap_err("Failed to make TransactionBase")?;
+    //             Ok(Self::Rejected(RejectedTransactionDTO {
+    //                 base,
+    //                 rejection_reason: rejection_reason.into(),
+    //             }))
+    //         }
+    //     }
+    // }
+
+    fn try_from(tx_result: TransactionQueryResult) -> Result<Self> {
+        // transactionQueryResult -> transactionValue
+        let tx_value = tx_result.transaction();
+        // transactionValue -> {VersionedSignedTransaction,error}
+        let TransactionValue { tx, error } = tx_value;
+        let hash = tx.hash();
+        let base = TransactionBase::new(hash, tx.payload(), tx.signatures())
+            .wrap_err("Failed to make TransactionBase")?;
+
+        match error {
+            Some(rejection_reason) => Ok(Self::Rejected(RejectedTransactionDTO {
+                base,
+                rejection_reason: rejection_reason.into(),
+            })),
+            None => Ok(Self::Committed(CommittedTransactionDTO { base })),
         }
     }
 }
 
 #[derive(Serialize)]
 struct TransactionBase {
-    hash: SerScaleHex<HashOf<SignedTransaction>>,
+    hash: SerScaleHex<HashOf<VersionedSignedTransaction>>,
     block_hash: SerScaleHex<Hash>,
-    payload: TransactionPayloadDTO,
-    signatures: BTreeSet<SignatureDTO>,
+    // payload: TransactionPayloadDTO,
+    payload: TransactionPayload,
+    signatures: SignaturesOf<TransactionPayload>,
 }
 
 impl TransactionBase {
-    fn new<T, U>(hash: HashOf<SignedTransaction>, payload: Payload, signatures: T) -> Result<Self>
+    fn new<T, U>(hash: HashOf<SignedTransaction>, payload: TransactionPayload, signatures: T) -> Result<Self>
     where
         T: IntoIterator<Item = U>,
         U: Into<Signature>,
@@ -102,19 +125,21 @@ pub struct TransactionPayloadDTO {
     account_id: String,
     instructions: ExecutableDTO,
     creation_time: Timestamp,
-    time_to_live_ms: u32,
-    nonce: Option<u32>,
+    time_to_live_ms:  Option<NonZeroU64>,
+    nonce: Option<NonZeroU32>,
     metadata: UnlimitedMetadata,
 }
 
-impl TryFrom<Payload> for TransactionPayloadDTO {
+
+
+impl TryFrom<TransactionPayload> for TransactionPayloadDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(payload: Payload) -> Result<Self, Self::Error> {
+    fn try_from(payload: TransactionPayload) -> Result<Self, Self::Error> {
         Ok(Self {
-            account_id: payload.account_id.to_string(),
+            account_id: payload.authority.to_string(),
             instructions: payload.instructions.into(),
-            creation_time: Timestamp::try_from(payload.creation_time)
+            creation_time: Timestamp::try_from(payload.creation_time_ms)
                 .wrap_err("Failed to map creation_time")?,
             time_to_live_ms: payload.time_to_live_ms.try_into()?,
             nonce: payload.nonce,
@@ -127,7 +152,7 @@ impl TryFrom<Payload> for TransactionPayloadDTO {
 #[derive(Serialize)]
 #[serde(tag = "t", content = "c")]
 pub enum ExecutableDTO {
-    Instructions(Vec<SerScaleHex<Instruction>>),
+    Instructions(Vec<SerScaleHex< InstructionBox>>),
     /// WASM binary content is omitted for frontend
     Wasm,
 }
@@ -151,7 +176,7 @@ async fn show(
     let hash = hash.into_inner().0;
     let tx = app
         .iroha_client
-        .request(QueryBuilder::new(FindTransactionByHash::new(hash)))
+        .request(QueryBuilder::new(FindTransactionByHash::new(HashOf::from_untyped_unchecked(hash)))) // deprecated 
         .await
         .map_err(WebError::expect_iroha_find_error)?
         .only_output();
@@ -175,7 +200,7 @@ async fn index(
 
     let data = data
         .into_iter()
-        .map(|x| TryInto::try_into(x.tx_value))
+        .map(|x| TryInto::try_into(x)) // transactionQueryResult returned 
         .collect::<Result<Vec<_>>>()
         .wrap_err("Failed to construct TransactionDTO")?;
 

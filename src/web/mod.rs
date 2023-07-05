@@ -5,7 +5,7 @@ use actix_web::{
 };
 use color_eyre::eyre::{eyre, Context};
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
-use iroha_core::smartcontracts::isi::query::Error as IrohaQueryError;
+use iroha_data_model::query::error::model::QueryExecutionFail as IrohaQueryError;
 use pagination::{Paginated, PaginationQueryParams};
 use serde::Serialize;
 use std::{
@@ -425,7 +425,7 @@ mod asset_definitions {
     use iroha_data_model::{
         asset::Mintable,
         prelude::{
-            AccountId, AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
+            AccountId, AssetDefinition,AssetDefinitionEvent, AssetDefinitionId, AssetValueType,
             FindAccountsWithAsset, FindAllAssetsDefinitions, FindAssetDefinitionById, Identifiable,
         },
     };
@@ -448,7 +448,7 @@ mod asset_definitions {
     impl AssetDefinitionDTO {
         pub fn vec_from_map<T>(map: T) -> Vec<Self>
         where
-            T: ExactSizeIterator + Iterator<Item = AssetDefinitionEntry>,
+            T: ExactSizeIterator + Iterator<Item = AssetDefinitionEvent>,
         {
             map.into_iter()
                 .map(|def| def.definition().clone().into())
