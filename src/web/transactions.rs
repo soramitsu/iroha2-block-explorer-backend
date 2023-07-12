@@ -8,15 +8,18 @@ use super::{
 };
 use color_eyre::{eyre::Context, Result};
 use iroha_core::tx::{
-    Executable, AcceptedTransaction, TransactionValue, 
+    Executable, AcceptedTransaction, TransactionValue,VersionedSignedTransaction 
 };
 use iroha_crypto::{Hash, HashOf, Signature,SignaturesOf};
 use iroha_data_model::prelude::{
     FindAllTransactions, FindTransactionByHash, InstructionBox,TransactionQueryResult,   UnlimitedMetadata,
 };
-use iroha_data_model::transaction::model::SignedTransaction;
-use iroha_data_model::transaction::model::TransactionPayload;
-use iroha_data_model::transaction::error::model::TransactionRejectionReason;
+use iroha_data_model::transaction::{
+model::{SignedTransaction,TransactionPayload},
+error::model::TransactionRejectionReason};
+
+use iroha_data_model::SignatureOf;
+
 use serde::Serialize;
 use core::num::{NonZeroU64,NonZeroU32};
 
@@ -68,7 +71,7 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
         match error {
             Some(rejection_reason) => Ok(Self::Rejected(RejectedTransactionDTO {
                 base,
-                rejection_reason: rejection_reason.into(),
+                rejection_reason: (*rejection_reason).into(),
             })),
             None => Ok(Self::Committed(CommittedTransactionDTO { base })),
         }
@@ -77,34 +80,33 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
 
 #[derive(Serialize)]
 struct TransactionBase {
-    hash: SerScaleHex<HashOf<VersionedSignedTransaction>>,
-    block_hash: SerScaleHex<Hash>,
-    // payload: TransactionPayloadDTO,
+    hash: HashOf<VersionedSignedTransaction>,
+    // block_hash: SerScaleHex<Hash>,
     payload: TransactionPayload,
-    signatures: SignaturesOf<TransactionPayload>,
+    signatures: SignaturesOf<&TransactionPayload>
 }
 
 impl TransactionBase {
-    fn new<T, U>(hash: HashOf<SignedTransaction>, payload: TransactionPayload, signatures: T) -> Result<Self>
+    fn new<'a, T, U>(hash: HashOf<VersionedSignedTransaction>, payload: TransactionPayload, signatures: T) -> Result<Self>
     where
         T: IntoIterator<Item = U>,
-        U: Into<Signature>,
+        U: Into<iroha_crypto::Signature> + std::convert::From<&'a SignatureOf<TransactionPayload>>,
     {
         Ok(Self {
-            hash: hash.into(),
-
+            hash: hash,
             // FIXME https://github.com/hyperledger/iroha/issues/2301
-            block_hash: Hash::zeroed().into(),
+            // block_hash: Hash::zeroed().into(),
 
             payload: payload.try_into().wrap_err("Failed to map Payload")?,
             signatures: signatures
                 .into_iter()
-                .map(Into::<Signature>::into)
+                .map(Into::<iroha_crypto::Signature>::into)
                 .map(Into::into)
                 .collect(),
         })
     }
 }
+
 
 #[derive(Serialize)]
 pub struct CommittedTransactionDTO {
