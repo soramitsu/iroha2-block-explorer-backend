@@ -5,7 +5,7 @@ use actix_web::{
 };
 use color_eyre::eyre::{eyre, Context};
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
-use iroha_data_model::query::error::model::QueryExecutionFail as IrohaQueryError;
+use iroha_data_model::query::error::model::ValidationFail as IrohaQueryError;
 use pagination::{Paginated, PaginationQueryParams};
 use serde::Serialize;
 use std::{
@@ -13,6 +13,7 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+use iroha_data_model::HasMetadata;
 
 mod blocks;
 mod etc;
@@ -57,8 +58,8 @@ impl WebError {
     /// Otherwise, constructs [`WebError::Internal`].
     fn expect_iroha_find_error(client_error: IrohaClientQueryError) -> Self {
         match client_error {
-            IrohaClientQueryError::QueryError(IrohaQueryError::Find(_err)) => Self::NotFound,
-            IrohaClientQueryError::QueryError(other) => {
+            IrohaClientQueryError::Validation(IrohaQueryError::Find(_err)) => Self::NotFound,
+            IrohaClientQueryError::Validation(other) => {
                 Self::Internal(eyre!("FindError expected, got: {other}"))
             }
             IrohaClientQueryError::Other(other) => {
@@ -70,7 +71,7 @@ impl WebError {
     /// Constructs [`WebError::Internal`] from [`IrohaClientQueryError`].
     fn expect_iroha_any_error(client_error: IrohaClientQueryError) -> Self {
         match client_error {
-            IrohaClientQueryError::QueryError(any) => {
+            IrohaClientQueryError::Validation(any) => {
                 Self::Internal(eyre!("Iroha query error: {any}"))
             }
             IrohaClientQueryError::Other(other) => {
@@ -211,7 +212,7 @@ mod accounts {
     ) -> Result<web::Json<Paginated<Vec<AccountDTO>>>, WebError> {
         let paginated: Paginated<_> = data
             .iroha_client
-            .request(QueryBuilder::new(FindAllAccounts::new()).with_pagination(pagination.into()))
+            .request(QueryBuilder::new(FindAllAccounts).with_pagination(pagination.into()))
             .await
             .wrap_err("Failed to request for accounts")?
             .try_into()?;
@@ -258,7 +259,7 @@ mod domains {
                         AccountDTO::from(acc.clone()))
                     .collect(),
                 logo: domain.logo().as_ref().map(|x| x.as_ref().to_owned()),
-                metadata: domain.metadata().clone(), // FIXME clone
+                metadata: domain.metadata.clone(), // FIXME clone
                 asset_definitions: AssetDefinitionDTO::vec_from_map(
                     domain
                         // FIXME clone
@@ -293,7 +294,7 @@ mod domains {
         let paginated: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllDomains::new())
+                QueryBuilder::new(FindAllDomains)
                     .with_pagination(pagination.into_inner().into()),
             )
             .await
@@ -386,7 +387,7 @@ mod assets {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssets::new())
+                QueryBuilder::new(FindAllAssets)
                     .with_pagination(pagination.into_inner().into()),
             )
             .await
@@ -459,9 +460,9 @@ mod asset_definitions {
     impl From<AssetDefinition> for AssetDefinitionDTO {
         fn from(definition: AssetDefinition) -> Self {
             Self {
-                id: definition.id().into(),
-                value_type: AssetValueTypeDTO(*definition.value_type()),
-                mintable: *definition.mintable(),
+                id: definition.id.into(),
+                value_type: AssetValueTypeDTO(definition.value_type),
+                mintable: definition.mintable,
             }
         }
     }
@@ -544,7 +545,7 @@ mod asset_definitions {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssetsDefinitions::new())
+                QueryBuilder::new(FindAllAssetsDefinitions)
                     .with_pagination(pagination.0.into()),
             )
             .await
@@ -629,7 +630,7 @@ mod peer {
     ) -> Result<web::Json<Paginated<Vec<PeerDTO>>>, WebError> {
         let data: Paginated<_> = data
             .iroha_client
-            .request(QueryBuilder::new(FindAllPeers::new()).with_pagination(pagination.0.into()))
+            .request(QueryBuilder::new(FindAllPeers).with_pagination(pagination.0.into()))
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;
