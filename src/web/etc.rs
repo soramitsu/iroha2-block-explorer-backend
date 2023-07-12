@@ -76,6 +76,13 @@ impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
         hash.into()
     }
 }
+// implementation for payload
+impl From<&[u8]> for SerScaleHex<Vec<u8>> {
+    fn from(value: &[u8]) -> Self {
+        SerScaleHex(value.to_vec())
+    }
+}
+
 
 /// Wrap that serializes into string. It's purpose is to add semantics
 /// to serializable structures about **what** a particular data
