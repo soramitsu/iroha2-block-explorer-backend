@@ -8,12 +8,12 @@ members = [".", "tools/genesis-gen"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace.dependencies]
-iroha_client = { git = "https://github.com/hyperledger/iroha.git", branch='iroha2-dev' }
-iroha_data_model = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev' }
-iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", branch='iroha2-dev'}
-iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev'}
-iroha_core = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev'}
-iroha_config = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev' }
+iroha_client = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+iroha_core = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+iroha_config = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
@@ -36,19 +36,18 @@ iroha_crypto = { workspace = true }
 iroha_telemetry = { workspace = true }
 iroha_core = { workspace = true }
 iroha_config = { workspace = true }
-rand = { workspace = true, optional = true }
-faker_rand = { workspace = true, optional = true }
-clap = { workspace = true}
-serde = { workspace = true }
-color-eyre = { workspace = true }
-serde_json = { workspace = true }
 futures = "0.3.21"
 http = "0.2.6"
 chrono = { version = "0.4.19", features = ["serde"] }
 hex = "0.4.3"
 parity-scale-codec = "3.2.1"
 thiserror = "1.0"
-bytes = "1.4.0"
+rand = { workspace = true, optional = true }
+faker_rand = { workspace = true, optional = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { workspace = true }
+color-eyre = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = ["dev_actor"]
