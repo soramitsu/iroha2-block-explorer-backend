@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use super::{Debug, Serialize};
 use color_eyre::eyre::{eyre, Context, Result};
-use iroha_client::client::ClientQueryOutput;
+use iroha_client::client::ClientQueryRequest;
 use iroha_data_model::prelude::{Pagination as IrohaPagination, Query, QueryBox, Value};
 use serde::Deserialize;
 
@@ -27,7 +27,7 @@ impl<T> Paginated<T> {
     }
 }
 
-impl<R> TryFrom<ClientQueryOutput<R>> for Paginated<R::Output>
+impl<R> TryFrom<ClientQueryRequest<R>> for Paginated<R::Output>
 where
     R: Query + Into<QueryBox> + Debug,
     <R::Output as TryFrom<Value>>::Error: Into<color_eyre::eyre::Error>,
@@ -35,12 +35,12 @@ where
     type Error = color_eyre::Report;
 
     fn try_from(
-        ClientQueryOutput {
+        ClientQueryRequest {
             output,
             pagination,
             total,
             ..
-        }: ClientQueryOutput<R>,
+        }: ClientQueryRequest<R>,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             pagination: PaginationDTO::try_from(IrohaPaginationWithTotal { pagination, total })

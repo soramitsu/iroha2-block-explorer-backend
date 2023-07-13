@@ -20,6 +20,7 @@ use rand::{
     Rng,
 };
 use std::{str::FromStr, sync::Arc};
+use iroha_data_model::NumericValue;
 
 const DEV_ACTOR_WORK_INTERVAL_MS: u64 = 1500;
 
@@ -91,7 +92,7 @@ impl RandomWorkState {
                     .find(|asset| matches!(asset.value(), AssetValue::Quantity(_)));
 
                 if let Some(asset) = asset {
-                    let value = Value::U32(rng.gen());
+                    let value = Value::Numeric(NumericValue::U32(rng.gen()));
                     let mint = MintBox::new(value, IdBox::AssetId(asset.id().clone()));
 
                     logger::info!("Minting: {:?}", mint);

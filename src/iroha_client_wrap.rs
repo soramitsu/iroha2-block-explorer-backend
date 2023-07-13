@@ -1,3 +1,5 @@
+use url::Url;
+
 use std::{fmt::Debug, sync::Arc};
 
 use awc::{Client as ActixClient, ClientResponse as RespActix};
@@ -6,26 +8,32 @@ use color_eyre::{
     Result,
 };
 use iroha_client::{
-    client::{Client as IrohaClient, ClientQueryError, ClientQueryOutput, ResponseHandler},
+    client::{Client as IrohaClient, ClientQueryError, ClientQueryRequest, ResponseHandler},
     http::Response as RespIroha,
 };
 use iroha_data_model::prelude::Sorting;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{Instruction, Pagination, Query, QueryBox, Value},
+    prelude::{Instruction,InstructionBox, Pagination, Query, QueryBox, Value},
 };
 use iroha_telemetry::metrics::Status;
+use iroha_crypto::HashOf;
+use iroha_data_model::prelude::TransactionPayload;
+use iroha_core::tx::Executable;
 
 use request_builder::ActixReqBuilder;
 
 mod request_builder {
+
     use std::{collections::HashMap, str::FromStr};
 
     use super::{eyre, Context, RespActix, RespIroha, Result};
     use awc::{Client, ClientRequest};
     use http::header::{HeaderMap, HeaderName};
     use iroha_client::http::{Method, RequestBuilder};
+
+    use url::Url;
 
     trait HeaderMapConsumerExt {
         fn set_headers(self, headers: HeaderMap) -> Result<Self>
@@ -60,6 +68,7 @@ mod request_builder {
     }
 
     impl ActixReqBuilder {
+
         pub async fn send(self, client: &Client) -> Result<RespIroha<Vec<u8>>> {
             let Self {
                 headers,
@@ -101,7 +110,7 @@ mod request_builder {
     }
 
     impl RequestBuilder for ActixReqBuilder {
-        fn new(method: Method, url: impl AsRef<str>) -> Self {
+        fn new(method: Method, url: Url) -> Self {
             Self {
                 method,
                 url: url.as_ref().to_owned(),
@@ -232,7 +241,7 @@ impl IrohaClientWrap {
     pub async fn request<R>(
         &self,
         query: QueryBuilder<R>,
-    ) -> Result<ClientQueryOutput<R>, ClientQueryError>
+    ) -> Result<ClientQueryRequest<R>, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
         <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
@@ -260,22 +269,20 @@ impl IrohaClientWrap {
         resp_handler.handle(resp)
     }
 
-    pub async fn submit(&self, instruction: impl Into<Instruction> + Debug) -> Result<()> {
-        let (req, _, resp_handler) = self
-            .iroha
-            .prepare_transaction_request::<ActixReqBuilder>(
-                self.iroha
-                    .build_transaction(
-                        (vec![instruction.into()]).into_iter().into(),
-                        UnlimitedMetadata::new(),
-                    )
-                    .wrap_err("Failed to build transaction")?,
-            )
-            .wrap_err("Failed to prepare transaction request")?;
+pub async fn submit(&self, instruction: impl Into<InstructionBox> + Debug) -> Result<()> {
+    let instructions = Executable::Instructions(vec![instruction.into()]);
 
-        let resp = req.send(&self.http).await?;
-        resp_handler.handle(resp)?;
+    let (req, _, resp_handler) = self
+        .iroha
+        .prepare_transaction_request::<ActixReqBuilder>(
+            &self.iroha
+                .build_transaction(instructions, UnlimitedMetadata::new())
+                .wrap_err("Failed to build transaction")?,
+        );
 
-        Ok(())
-    }
+    let resp = req.send(&self.http).await?;
+    resp_handler.handle(resp)?;
+
+    Ok(())
+}     
 }
