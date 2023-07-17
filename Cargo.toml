@@ -7,6 +7,19 @@ edition = "2021"
 members = [".", "tools/genesis-gen"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace.dependencies]
+iroha_client = { git = "https://github.com/hyperledger/iroha.git", branch='iroha2-dev' }
+iroha_data_model = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev' }
+iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", branch='iroha2-dev'}
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev'}
+iroha_core = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev'}
+iroha_config = { git = "https://github.com/hyperledger/iroha.git",branch='iroha2-dev' }
+color-eyre = "0.5"
+serde = "1.0"
+serde_json = "1.0"
+clap = { version = "3.1.12", features = ["derive", "env"] }
+rand = { version = "0.8.5" }
+faker_rand = { version = "0.1" }
 
 [dependencies]
 actix = "0.13.0"
@@ -29,6 +42,12 @@ chrono = { version = "0.4.19", features = ["serde"] }
 hex = "0.4.3"
 parity-scale-codec = "3.2.1"
 thiserror = "1.0"
+rand = { workspace = true, optional = true }
+faker_rand = { workspace = true, optional = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { workspace = true }
+color-eyre = { workspace = true }
+serde_json = { workspace = true }
 rand = { workspace = true, optional = true }
 faker_rand = { workspace = true, optional = true }
 clap = { workspace = true, features = ["derive", "env"] }
