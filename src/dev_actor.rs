@@ -6,6 +6,7 @@ use actix::{
 };
 use color_eyre::{eyre::eyre, Result};
 use core::time::Duration;
+use iroha_data_model::NumericValue;
 use iroha_data_model::{
     prelude::{
         Account, AccountId, AssetDefinition, AssetDefinitionId, AssetValue, AssetValueType, Domain,
@@ -20,7 +21,6 @@ use rand::{
     Rng,
 };
 use std::{str::FromStr, sync::Arc};
-use iroha_data_model::NumericValue;
 
 const DEV_ACTOR_WORK_INTERVAL_MS: u64 = 1500;
 

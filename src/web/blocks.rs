@@ -12,13 +12,13 @@ use color_eyre::{
 };
 use iroha_core::tx::{Pagination, VersionedSignedTransaction};
 use iroha_crypto::Hash;
-use iroha_data_model::prelude::{FindAllBlocks,TransactionValue};
-use iroha_data_model::{block::CommittedBlock,SignaturesOf};
+use iroha_crypto::{HashOf, MerkleTree};
 use iroha_data_model::block::VersionedCommittedBlock;
+use iroha_data_model::prelude::{FindAllBlocks, TransactionValue};
+use iroha_data_model::{block::CommittedBlock, SignaturesOf};
+use serde::Serialize;
 use std::convert::TryInto;
 use std::num::NonZeroU64;
-use serde::Serialize;
-use iroha_crypto::{HashOf,MerkleTree};
 
 /// Block DTO intended to be lightweight and to have only simple aggregated data.
 /// Detailed data is contained within [`BlockDTO`]
@@ -30,19 +30,19 @@ pub struct BlockShallowDTO {
     block_hash: SerScaleHex<Hash>,
     transactions: u32,
     // rejected_transactions: u32,
-    signature: SignaturesOf<CommittedBlock>
+    signature: SignaturesOf<CommittedBlock>,
 }
 impl TryFrom<VersionedCommittedBlock> for BlockShallowDTO {
     type Error = color_eyre::Report;
     fn try_from(block: VersionedCommittedBlock) -> Result<Self> {
         let committed_block = block.into_v1();
         Ok(Self {
-            height:  committed_block.header.height.try_into()?,
-            block_hash:  committed_block.hash().into(),
-            timestamp: Timestamp::try_from( committed_block.header.timestamp)?,
-            transactions:  committed_block.transactions.len().try_into()?,
+            height: committed_block.header.height.try_into()?,
+            block_hash: committed_block.hash().into(),
+            timestamp: Timestamp::try_from(committed_block.header.timestamp)?,
+            transactions: committed_block.transactions.len().try_into()?,
             // rejected_transactions:  committed_block.rejected_transactions.len().try_into()?,
-            signature:  committed_block.signatures.into(),
+            signature: committed_block.signatures,
         })
     }
 }
@@ -54,11 +54,11 @@ pub struct BlockDTO {
     height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
-    parent_block_hash:Option<HashOf<VersionedCommittedBlock>>,
+    parent_block_hash: Option<HashOf<VersionedCommittedBlock>>,
     transactions_merkle_root_hash: Option<HashOf<MerkleTree<VersionedSignedTransaction>>>,
     rejected_transactions_merkle_root_hash: Option<HashOf<MerkleTree<VersionedSignedTransaction>>>,
     // invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
-    transactions:  Vec<TransactionValue>,
+    transactions: Vec<TransactionValue>,
     // rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
     // view_change_proofs: Vec<SerScaleHex<Hash>>,
 }
@@ -73,16 +73,22 @@ impl TryFrom<VersionedCommittedBlock> for BlockDTO {
             height: committed_block.header.height.try_into()?,
             timestamp: Timestamp::try_from(committed_block.header.timestamp)?,
             block_hash: committed_block.hash().into(),
-            parent_block_hash: committed_block.header.previous_block_hash.into(),
-            transactions_merkle_root_hash:  committed_block.header.transactions_hash.into(),
-            rejected_transactions_merkle_root_hash:  committed_block.header.rejected_transactions_hash.into(),
+            parent_block_hash: committed_block.header.previous_block_hash,
+            transactions_merkle_root_hash: committed_block.header.transactions_hash,
+            rejected_transactions_merkle_root_hash: committed_block
+                .header
+                .rejected_transactions_hash,
             // invalidated_blocks_hashes:  committed_block
             //     .header
             //     .invalidated_blocks_hashescl
             //     .into_iter()
             //     .map(Into::into)
             //     .collect(),
-            transactions:  committed_block.transactions.into_iter().map(Into::into).collect(),
+            transactions: committed_block
+                .transactions
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             // rejected_transactions:  committed_block
             //     .rejected_transactions
             //     .into_iter()
