@@ -1,5 +1,3 @@
-use url::Url;
-
 use std::{fmt::Debug, sync::Arc};
 
 use awc::{Client as ActixClient, ClientResponse as RespActix};
@@ -11,16 +9,14 @@ use iroha_client::{
     client::{Client as IrohaClient, ClientQueryError, ClientQueryRequest, ResponseHandler},
     http::Response as RespIroha,
 };
+use iroha_core::tx::Executable;
 use iroha_data_model::prelude::Sorting;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{Instruction,InstructionBox, Pagination, Query, QueryBox, Value},
+    prelude::{InstructionBox, Pagination, Query, QueryBox, Value},
 };
 use iroha_telemetry::metrics::Status;
-use iroha_crypto::HashOf;
-use iroha_data_model::prelude::TransactionPayload;
-use iroha_core::tx::Executable;
 
 use request_builder::ActixReqBuilder;
 
@@ -68,7 +64,6 @@ mod request_builder {
     }
 
     impl ActixReqBuilder {
-
         pub async fn send(self, client: &Client) -> Result<RespIroha<Vec<u8>>> {
             let Self {
                 headers,
@@ -269,20 +264,19 @@ impl IrohaClientWrap {
         resp_handler.handle(resp)
     }
 
-pub async fn submit(&self, instruction: impl Into<InstructionBox> + Debug) -> Result<()> {
-    let instructions = Executable::Instructions(vec![instruction.into()]);
+    pub async fn submit(&self, instruction: impl Into<InstructionBox> + Debug) -> Result<()> {
+        let instructions = Executable::Instructions(vec![instruction.into()]);
 
-    let (req, _, resp_handler) = self
-        .iroha
-        .prepare_transaction_request::<ActixReqBuilder>(
-            &self.iroha
+        let (req, _, resp_handler) = self.iroha.prepare_transaction_request::<ActixReqBuilder>(
+            &self
+                .iroha
                 .build_transaction(instructions, UnlimitedMetadata::new())
                 .wrap_err("Failed to build transaction")?,
         );
 
-    let resp = req.send(&self.http).await?;
-    resp_handler.handle(resp)?;
+        let resp = req.send(&self.http).await?;
+        resp_handler.handle(resp)?;
 
-    Ok(())
-}     
+        Ok(())
+    }
 }
