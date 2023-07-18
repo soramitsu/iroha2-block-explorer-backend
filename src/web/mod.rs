@@ -5,7 +5,6 @@ use actix_web::{
 };
 use color_eyre::eyre::{eyre, Context};
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
-use iroha_data_model::query::error::model::ValidationFail as IrohaQueryError;
 use pagination::{Paginated, PaginationQueryParams};
 use serde::Serialize;
 use std::{
@@ -13,8 +12,6 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-use iroha_data_model::HasMetadata;
-
 mod blocks;
 mod etc;
 mod pagination;
@@ -58,12 +55,10 @@ impl WebError {
     /// Otherwise, constructs [`WebError::Internal`].
     fn expect_iroha_find_error(client_error: IrohaClientQueryError) -> Self {
         match client_error {
-            IrohaClientQueryError::Validation(IrohaQueryError::Find(_err)) => Self::NotFound,
-            IrohaClientQueryError::Validation(other) => {
-                Self::Internal(eyre!("FindError expected, got: {other}"))
-            }
+            IrohaClientQueryError::Validation(_err) => Self::NotFound,
+
             IrohaClientQueryError::Other(other) => {
-                Self::Internal(other.wrap_err("Unexpected query error"))
+                Self::Internal(other.wrap_err("Unexpected query error:{other}"))
             }
         }
     }
@@ -142,7 +137,6 @@ mod accounts {
         fn from(account: Account) -> Self {
             let assets: Vec<AssetDTO> = account
                 .assets()
-                .into_iter()
                 .map(|asset|
                     // FIXME clone
                     AssetDTO::from(asset.clone()
@@ -155,7 +149,7 @@ mod accounts {
                 metadata:
                 // FIXME clone
                 account.metadata().clone(),
-                roles: account.roles().into_iter().map(StringOf::from).collect(),
+                roles: account.roles().map(StringOf::from).collect(),
             }
         }
     }
@@ -253,7 +247,6 @@ mod domains {
                 id: domain.id().into(),
                 accounts: domain
                     .accounts()
-                    .into_iter()
                     .map(|acc|
                         // FIXME clone
                         AccountDTO::from(acc.clone()))
@@ -294,8 +287,7 @@ mod domains {
         let paginated: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllDomains)
-                    .with_pagination(pagination.into_inner().into()),
+                QueryBuilder::new(FindAllDomains).with_pagination(pagination.into_inner().into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
@@ -387,8 +379,7 @@ mod assets {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssets)
-                    .with_pagination(pagination.into_inner().into()),
+                QueryBuilder::new(FindAllAssets).with_pagination(pagination.into_inner().into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
@@ -426,8 +417,8 @@ mod asset_definitions {
     use iroha_data_model::{
         asset::Mintable,
         prelude::{
-            AccountId, AssetDefinition,AssetDefinitionEvent, AssetDefinitionId, AssetValueType,
-            FindAccountsWithAsset, FindAllAssetsDefinitions, FindAssetDefinitionById, Identifiable,
+            AccountId, AssetDefinition, AssetDefinitionId, AssetValueType, FindAccountsWithAsset,
+            FindAllAssetsDefinitions, FindAssetDefinitionById, Identifiable,
         },
     };
     use serde::de;
@@ -449,11 +440,9 @@ mod asset_definitions {
     impl AssetDefinitionDTO {
         pub fn vec_from_map<T>(map: T) -> Vec<Self>
         where
-            T: ExactSizeIterator + Iterator<Item = AssetDefinitionEvent>,
+            T: ExactSizeIterator + Iterator<Item = AssetDefinition>,
         {
-            map.into_iter()
-                .map(|def| def.definition().clone().into())
-                .collect()
+            map.into_iter().map(|def| def.into()).collect()
         }
     }
 
@@ -545,8 +534,7 @@ mod asset_definitions {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssetsDefinitions)
-                    .with_pagination(pagination.0.into()),
+                QueryBuilder::new(FindAllAssetsDefinitions).with_pagination(pagination.0.into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
