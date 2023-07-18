@@ -48,12 +48,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true }
 color-eyre = { workspace = true }
 serde_json = { workspace = true }
-rand = { workspace = true, optional = true }
-faker_rand = { workspace = true, optional = true }
-clap = { workspace = true, features = ["derive", "env"] }
-serde = { workspace = true }
-color-eyre = { workspace = true }
-serde_json = { workspace = true }
+url = "2.4.0"
 
 [features]
 default = ["dev_actor"]
