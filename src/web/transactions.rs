@@ -6,7 +6,8 @@ use super::{
 };
 use color_eyre::{eyre::Context, Result};
 use iroha_core::tx::{Executable, TransactionValue, VersionedSignedTransaction};
-use iroha_crypto::{HashOf, SignaturesOf};
+use iroha_crypto::{Hash,HashOf, SignaturesOf};
+use iroha_data_model::block::CommittedBlock;
 use iroha_data_model::prelude::{
     FindAllTransactions, FindTransactionByHash, InstructionBox, TransactionQueryResult,
     UnlimitedMetadata,
@@ -29,10 +30,9 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
     type Error = color_eyre::Report;
 
     fn try_from(tx_result: TransactionQueryResult) -> Result<Self> {
-        let tx_value = tx_result.transaction();
-        let TransactionValue { tx, error } = tx_value;
-        let hash = tx.hash();
-        let base = TransactionBase::new(hash, tx.payload().clone(), tx.signatures().clone())
+        let TransactionValue { tx, error } = tx_result.transaction();
+        let block_hash = tx_result.block_hash();
+        let base = TransactionBase::new(tx.hash(), block_hash, tx.payload(), tx.signatures())
             .wrap_err("Failed to make TransactionBase")?;
 
         match error {
@@ -47,7 +47,8 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
 
 #[derive(Serialize)]
 struct TransactionBase {
-    hash: HashOf<VersionedSignedTransaction>,
+    hash: SerScaleHex<HashOf<VersionedSignedTransaction>>,
+    block_hash: SerScaleHex<HashOf<CommittedBlock>>,
     payload: TransactionPayload,
     signatures: Vec<SignaturesOf<TransactionPayload>>,
 }
@@ -55,14 +56,16 @@ struct TransactionBase {
 impl TransactionBase {
     fn new(
         hash: HashOf<VersionedSignedTransaction>,
-        payload: TransactionPayload,
-        signatures: SignaturesOf<TransactionPayload>,
+        block_hash: &HashOf<CommittedBlock>,
+        payload: &TransactionPayload,
+        signatures: &SignaturesOf<TransactionPayload>,
     ) -> Result<Self> {
-        let signatures: Vec<SignaturesOf<TransactionPayload>> = vec![signatures];
+        let signatures: Vec<SignaturesOf<TransactionPayload>> = vec![signatures.clone()];
 
         Ok(Self {
-            hash,
-            payload,
+            hash: hash.into(),
+            block_hash: block_hash.clone().into(),
+            payload: payload.clone(),
             signatures,
         })
     }
