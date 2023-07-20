@@ -4,22 +4,25 @@ use super::{
     etc::{HashDeser, SerScaleHex, Timestamp},
     get,
     pagination::{Paginated, PaginationQueryParams},
-    web, AppData, Scope, WebError,
+    web,
+    AppData,
+    Scope,
+    WebError,
 };
 use color_eyre::{
     eyre::{eyre, Context},
     Result,
 };
 use iroha_core::tx::{Pagination, VersionedSignedTransaction};
-use iroha_crypto::{Hash, HashOf, MerkleTree};
+use iroha_crypto::{Hash,HashOf, MerkleTree};
 use iroha_data_model::{
-    block::{CommittedBlock, VersionedCommittedBlock},
+    block::{VersionedCommittedBlock, CommittedBlock},
     prelude::{FindAllBlocks, TransactionValue},
     SignaturesOf,
 };
 
 use serde::Serialize;
-use std::{convert::TryInto, num::NonZeroU64};
+use std::{convert::TryInto,num::NonZeroU64};
 
 /// Block DTO intended to be lightweight and to have only simple aggregated data.
 /// Detailed data is contained within [`BlockDTO`]
@@ -57,10 +60,8 @@ pub struct BlockDTO {
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
     parent_block_hash: SerScaleHex<Option<HashOf<VersionedCommittedBlock>>>,
-    transactions_merkle_root_hash:
-        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
-    rejected_transactions_merkle_root_hash:
-        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
+    transactions_merkle_root_hash: SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
+    rejected_transactions_merkle_root_hash: SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
     invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
     transactions: Vec<SerScaleHex<TransactionValue>>,
     rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
