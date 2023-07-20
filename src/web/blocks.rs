@@ -11,14 +11,15 @@ use color_eyre::{
     Result,
 };
 use iroha_core::tx::{Pagination, VersionedSignedTransaction};
-use iroha_crypto::Hash;
-use iroha_crypto::{HashOf, MerkleTree};
-use iroha_data_model::block::VersionedCommittedBlock;
-use iroha_data_model::prelude::{FindAllBlocks, TransactionValue};
-use iroha_data_model::{block::CommittedBlock, SignaturesOf};
+use iroha_crypto::{Hash, HashOf, MerkleTree};
+use iroha_data_model::{
+    block::{CommittedBlock, VersionedCommittedBlock},
+    prelude::{FindAllBlocks, TransactionValue},
+    SignaturesOf,
+};
+
 use serde::Serialize;
-use std::convert::TryInto;
-use std::num::NonZeroU64;
+use std::{convert::TryInto, num::NonZeroU64};
 
 /// Block DTO intended to be lightweight and to have only simple aggregated data.
 /// Detailed data is contained within [`BlockDTO`]
@@ -29,20 +30,21 @@ pub struct BlockShallowDTO {
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
     transactions: u32,
-    // rejected_transactions: u32,
-    signature: SignaturesOf<CommittedBlock>,
+    rejected_transactions: u32,
 }
+
 impl TryFrom<VersionedCommittedBlock> for BlockShallowDTO {
     type Error = color_eyre::Report;
+
     fn try_from(block: VersionedCommittedBlock) -> Result<Self> {
-        let committed_block = block.into_v1();
+        let block = block.into_v1();
         Ok(Self {
-            height: committed_block.header.height.try_into()?,
-            block_hash: committed_block.hash().into(),
-            timestamp: Timestamp::try_from(committed_block.header.timestamp)?,
-            transactions: committed_block.transactions.len().try_into()?,
-            // rejected_transactions:  committed_block.rejected_transactions.len().try_into()?,
-            signature: committed_block.signatures,
+            height: block.header.height.try_into()?,
+            block_hash: block.hash().into(),
+            timestamp: Timestamp::try_from(block.header.timestamp)?,
+            transactions: block.transactions.len().try_into()?,
+            /// rejected_transactions are interleaved in iroha2-dev branch
+            rejected_transactions: 0,
         })
     }
 }
@@ -54,49 +56,39 @@ pub struct BlockDTO {
     height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
-    parent_block_hash: Option<HashOf<VersionedCommittedBlock>>,
-    transactions_merkle_root_hash: Option<HashOf<MerkleTree<VersionedSignedTransaction>>>,
-    rejected_transactions_merkle_root_hash: Option<HashOf<MerkleTree<VersionedSignedTransaction>>>,
-    // invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
-    transactions: Vec<TransactionValue>,
-    // rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
-    // view_change_proofs: Vec<SerScaleHex<Hash>>,
+    parent_block_hash: SerScaleHex<Option<HashOf<VersionedCommittedBlock>>>,
+    transactions_merkle_root_hash:
+        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
+    rejected_transactions_merkle_root_hash:
+        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
+    invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
+    transactions: Vec<SerScaleHex<TransactionValue>>,
+    rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
+    view_change_proofs: Vec<SerScaleHex<Hash>>,
+    signature: SignaturesOf<CommittedBlock>,
 }
 
 impl TryFrom<VersionedCommittedBlock> for BlockDTO {
     type Error = color_eyre::Report;
 
     fn try_from(block: VersionedCommittedBlock) -> Result<Self> {
-        let committed_block = block.into_v1();
-        // the querybox output is  VersionedCommittedBlock -> committedBlock
+        let block = block.into_v1();
         Ok(Self {
-            height: committed_block.header.height.try_into()?,
-            timestamp: Timestamp::try_from(committed_block.header.timestamp)?,
-            block_hash: committed_block.hash().into(),
-            parent_block_hash: committed_block.header.previous_block_hash,
-            transactions_merkle_root_hash: committed_block.header.transactions_hash,
-            rejected_transactions_merkle_root_hash: committed_block
-                .header
-                .rejected_transactions_hash,
-            // invalidated_blocks_hashes:  committed_block
-            //     .header
-            //     .invalidated_blocks_hashescl
-            //     .into_iter()
-            //     .map(Into::into)
-            //     .collect(),
-            transactions: committed_block
-                .transactions
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            // rejected_transactions:  committed_block
-            //     .rejected_transactions
-            //     .into_iter()
-            //     .map(Into::into)
-            //     .collect(),
+            height: block.header.height.try_into()?,
+            timestamp: Timestamp::try_from(block.header.timestamp)?,
+            block_hash: block.hash().into(),
+            parent_block_hash: block.header.previous_block_hash.into(),
+            transactions_merkle_root_hash: block.header.transactions_hash.into(),
+            rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash.into(),
+            /// There is no concept of rejection as rejected_transactions are interleaved in iroha2-dev branch
+            invalidated_blocks_hashes: Vec::new(),
+            transactions: block.transactions.into_iter().map(Into::into).collect(),
+            /// rejected_transactions are interleaved in iroha2-dev branch
+            rejected_transactions: Vec::new(),
 
             // FIXME https://github.com/hyperledger/iroha/issues/2277
-            // view_change_proofs: Vec::new(),
+            view_change_proofs: Vec::new(),
+            signature: block.signatures,
         })
     }
 }
