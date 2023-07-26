@@ -6,7 +6,7 @@ use super::{
 };
 use color_eyre::{eyre::Context, Result};
 use iroha_core::tx::{Executable, TransactionValue, VersionedSignedTransaction};
-use iroha_crypto::{Hash,HashOf, SignaturesOf};
+use iroha_crypto::{HashOf, SignaturesOf};
 use iroha_data_model::block::CommittedBlock;
 use iroha_data_model::prelude::{
     FindAllTransactions, FindTransactionByHash, InstructionBox, TransactionQueryResult,
@@ -22,8 +22,12 @@ use serde::Serialize;
 #[derive(Serialize)]
 #[serde(tag = "t", content = "c")]
 pub enum TransactionDTO {
-    Committed(CommittedTransactionDTO),
-    Rejected(RejectedTransactionDTO),
+    SingleTransactionDTO {
+        #[serde(flatten)]
+        base: TransactionBase,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rejection_reason: Option<SerScaleHex<TransactionRejectionReason>>,
+    },
 }
 
 impl TryFrom<TransactionQueryResult> for TransactionDTO {
@@ -36,11 +40,14 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
             .wrap_err("Failed to make TransactionBase")?;
 
         match error {
-            Some(rejection_reason) => Ok(Self::Rejected(RejectedTransactionDTO {
+            Some(rejection_reason) => Ok(Self::SingleTransactionDTO {
                 base,
-                rejection_reason: (*rejection_reason).clone().into(),
-            })),
-            None => Ok(Self::Committed(CommittedTransactionDTO { base })),
+                rejection_reason: Some((*rejection_reason).clone().into()),
+            }),
+            None => Ok(Self::SingleTransactionDTO {
+                base,
+                rejection_reason: None,
+            }),
         }
     }
 }
@@ -64,25 +71,11 @@ impl TransactionBase {
 
         Ok(Self {
             hash: hash.into(),
-            block_hash: block_hash.clone().into(),
+            block_hash: (*block_hash).into(),
             payload: payload.clone(),
             signatures,
         })
     }
-}
-
-#[derive(Serialize)]
-pub struct CommittedTransactionDTO {
-    #[serde(flatten)]
-    base: TransactionBase,
-}
-
-/// Just as [`CommittedTransactionDTO`], but with rejection reason
-#[derive(Serialize)]
-pub struct RejectedTransactionDTO {
-    #[serde(flatten)]
-    base: TransactionBase,
-    rejection_reason: SerScaleHex<TransactionRejectionReason>,
 }
 
 #[derive(Serialize)]
@@ -141,7 +134,7 @@ async fn show(
         .iroha_client
         .request(QueryBuilder::new(FindTransactionByHash::new(
             HashOf::from_untyped_unchecked(hash),
-        ))) // deprecated
+        )))
         .await
         .map_err(WebError::expect_iroha_find_error)?
         .only_output();
