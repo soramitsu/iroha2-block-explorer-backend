@@ -20,14 +20,13 @@ use core::num::{NonZeroU32, NonZeroU64};
 use serde::Serialize;
 
 #[derive(Serialize)]
-#[serde(tag = "t", content = "c")]
-pub enum TransactionDTO {
-    SingleTransactionDTO {
-        #[serde(flatten)]
-        base: TransactionBase,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        rejection_reason: Option<SerScaleHex<TransactionRejectionReason>>,
-    },
+pub struct TransactionDTO {
+    hash: SerScaleHex<HashOf<VersionedSignedTransaction>>,
+    block_hash: SerScaleHex<HashOf<CommittedBlock>>,
+    payload: TransactionPayloadDTO,
+    signatures: Vec<SignaturesOf<TransactionPayload>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rejection_reason: Option<TransactionRejectionReason>, // Removed SerScaleHex here
 }
 
 impl TryFrom<TransactionQueryResult> for TransactionDTO {
@@ -36,44 +35,29 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
     fn try_from(tx_result: TransactionQueryResult) -> Result<Self> {
         let TransactionValue { tx, error } = tx_result.transaction();
         let block_hash = tx_result.block_hash();
-        let base = TransactionBase::new(tx.hash(), block_hash, tx.payload(), tx.signatures())
-            .wrap_err("Failed to make TransactionBase")?;
 
-        match error {
-            Some(rejection_reason) => Ok(Self::SingleTransactionDTO {
-                base,
-                rejection_reason: Some((*rejection_reason).clone().into()),
-            }),
-            None => Ok(Self::SingleTransactionDTO {
-                base,
-                rejection_reason: None,
-            }),
-        }
+        Self::new(tx.hash(), block_hash, tx.payload().clone(), tx.signatures().clone(), error.clone())
+            .wrap_err("Failed to make TransactionDTO")
     }
 }
 
-#[derive(Serialize)]
-struct TransactionBase {
-    hash: SerScaleHex<HashOf<VersionedSignedTransaction>>,
-    block_hash: SerScaleHex<HashOf<CommittedBlock>>,
-    payload: TransactionPayload,
-    signatures: Vec<SignaturesOf<TransactionPayload>>,
-}
 
-impl TransactionBase {
+impl TransactionDTO {
     fn new(
         hash: HashOf<VersionedSignedTransaction>,
         block_hash: &HashOf<CommittedBlock>,
-        payload: &TransactionPayload,
-        signatures: &SignaturesOf<TransactionPayload>,
+        payload: TransactionPayload,
+        signatures: SignaturesOf<TransactionPayload>,
+        rejection_reason: Option<TransactionRejectionReason>,
     ) -> Result<Self> {
-        let signatures: Vec<SignaturesOf<TransactionPayload>> = vec![signatures.clone()];
+        let signatures: Vec<SignaturesOf<TransactionPayload>> = vec![signatures];
 
         Ok(Self {
             hash: hash.into(),
             block_hash: (*block_hash).into(),
-            payload: payload.clone(),
+            payload: payload.try_into().wrap_err("Failed to map Payload")?,
             signatures,
+            rejection_reason: rejection_reason.into(),
         })
     }
 }
