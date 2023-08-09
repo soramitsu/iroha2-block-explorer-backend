@@ -4,13 +4,7 @@ use crate::{iroha_client_wrap::QueryBuilder, web::etc::HashDeser};
 
 use super::{
     etc::{SerScaleHex, Timestamp},
-    get,
-    web,
-    AppData,
-    Paginated,
-    PaginationQueryParams,
-    Scope,
-    WebError,
+    get, web, AppData, Paginated, PaginationQueryParams, Scope, WebError,
 };
 use crate::web::etc::SignatureDTO;
 use color_eyre::{eyre::Context, Result};
@@ -48,7 +42,7 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
         Self::new(
             tx.hash(),
             block_hash,
-            tx.payload(),
+            tx.payload().clone(),
             tx.signatures().clone(),
             error.clone(),
         )
@@ -60,7 +54,7 @@ impl TransactionDTO {
     fn new(
         hash: HashOf<VersionedSignedTransaction>,
         block_hash: &HashOf<CommittedBlock>,
-        payload: &TransactionPayload,
+        payload: TransactionPayload,
         signatures: SignaturesOf<TransactionPayload>,
         rejection_reason: Option<TransactionRejectionReason>,
     ) -> Result<Self> {
@@ -88,18 +82,18 @@ pub struct TransactionPayloadDTO {
     metadata: UnlimitedMetadata,
 }
 
-impl TryFrom<&TransactionPayload> for TransactionPayloadDTO {
+impl TryFrom<TransactionPayload> for TransactionPayloadDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(payload: &TransactionPayload) -> Result<Self, Self::Error> {
+    fn try_from(payload: TransactionPayload) -> Result<Self, Self::Error> {
         Ok(Self {
             account_id: payload.authority.to_string(),
-            instructions: payload.instructions.clone().into(),
+            instructions: payload.instructions.into(),
             creation_time: Timestamp::try_from(payload.creation_time_ms)
                 .wrap_err("Failed to map creation_time")?,
             time_to_live_ms: payload.time_to_live_ms,
             nonce: payload.nonce,
-            metadata: payload.metadata.clone(),
+            metadata: payload.metadata,
         })
     }
 }

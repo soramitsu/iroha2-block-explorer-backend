@@ -58,7 +58,7 @@ impl WebError {
             IrohaClientQueryError::Validation(_err) => Self::NotFound,
 
             IrohaClientQueryError::Other(other) => {
-                Self::Internal(other.wrap_err("Unexpected query error:{other}"))
+                Self::Internal(other.wrap_err("Unexpected query error: {other}"))
             }
         }
     }

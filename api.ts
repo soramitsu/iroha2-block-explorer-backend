@@ -149,11 +149,11 @@ export interface TransactionDTO {
   block_hash: string;
   payload: TransactionPayload;
   signatures: Signature[];
- /**
+  /**
    * If the transactionQueryResults in error, this field will contain the rejection reason as a string.
    * If not, this field will not be present (undefined or null).
    */
- rejection_reason?: string | null;
+  rejection_reason?: string;
 }
 
 export interface TransactionPayload {

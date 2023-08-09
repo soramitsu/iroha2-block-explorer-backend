@@ -10,18 +10,16 @@ use iroha_client::{
     http::Response as RespIroha,
 };
 use iroha_core::tx::Executable;
-use iroha_data_model::prelude::Sorting;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{InstructionBox, Pagination, Query, QueryBox, Value},
+    prelude::{InstructionBox, Pagination, Query, QueryBox, Sorting, Value},
 };
 use iroha_telemetry::metrics::Status;
 
 use request_builder::ActixReqBuilder;
 
 mod request_builder {
-
     use std::{collections::HashMap, str::FromStr};
 
     use super::{eyre, Context, RespActix, RespIroha, Result};
