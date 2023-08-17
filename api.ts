@@ -149,9 +149,11 @@ export interface TransactionDTO {
   block_hash: string;
   payload: TransactionPayload;
   signatures: Signature[];
-  /**
-   * If the transactionQueryResults in error, this field will contain the rejection reason as a string.
-   * If not, this field will not be present (undefined or null).
+ /**
+   * If the transaction results in an error, this field will contain the rejection reason as a string.
+   * If the transaction is successful, this field will not be present (undefined).
+   * A stringified rejection reason indicates that the transaction is rejected.
+   * The absence of this field indicates that the transaction is committed.
    */
   rejection_reason?: string;
 }
