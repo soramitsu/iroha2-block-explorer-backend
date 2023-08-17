@@ -13,9 +13,8 @@ use color_eyre::{
 use iroha_core::tx::{Pagination, VersionedSignedTransaction};
 use iroha_crypto::{Hash, HashOf, MerkleTree};
 use iroha_data_model::{
-    block::{CommittedBlock, VersionedCommittedBlock},
+    block::{VersionedCommittedBlock},
     prelude::{FindAllBlocks, TransactionValue},
-    SignaturesOf,
 };
 
 use serde::Serialize;
@@ -65,7 +64,6 @@ pub struct BlockDTO {
     transactions: Vec<SerScaleHex<TransactionValue>>,
     rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
     view_change_proofs: Vec<SerScaleHex<Hash>>,
-    // signature: SignaturesOf<CommittedBlock>,
 }
 
 impl TryFrom<VersionedCommittedBlock> for BlockDTO {
@@ -88,7 +86,6 @@ impl TryFrom<VersionedCommittedBlock> for BlockDTO {
 
             // FIXME https://github.com/hyperledger/iroha/issues/2277
             view_change_proofs: Vec::new(),
-            // signature: block.signatures,
         })
     }
 }
