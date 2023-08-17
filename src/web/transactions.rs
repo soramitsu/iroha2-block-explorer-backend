@@ -41,7 +41,7 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
 
         Self::new(
             tx.hash(),
-            block_hash,
+            block_hash.clone(),
             tx.payload().clone(),
             tx.signatures().clone(),
             error.clone(),
@@ -53,14 +53,14 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
 impl TransactionDTO {
     fn new(
         hash: HashOf<VersionedSignedTransaction>,
-        block_hash: &HashOf<CommittedBlock>,
+        block_hash: HashOf<CommittedBlock>,
         payload: TransactionPayload,
         signatures: SignaturesOf<TransactionPayload>,
         rejection_reason: Option<TransactionRejectionReason>,
     ) -> Result<Self> {
         Ok(Self {
             hash: hash.into(),
-            block_hash: (*block_hash).into(),
+            block_hash: block_hash.into(),
             payload: payload.try_into().wrap_err("Failed to map Payload")?,
             signatures: signatures
                 .into_iter()
