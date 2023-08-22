@@ -119,6 +119,7 @@ impl From<Executable> for ExecutableDTO {
 }
 
 #[get("/{hash}")]
+#[allow(deprecated)]
 async fn show(
     app: web::Data<AppData>,
     hash: web::Path<HashDeser>,

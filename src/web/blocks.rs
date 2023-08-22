@@ -13,7 +13,7 @@ use color_eyre::{
 use iroha_core::tx::{Pagination, VersionedSignedTransaction};
 use iroha_crypto::{Hash, HashOf, MerkleTree};
 use iroha_data_model::{
-    block::{VersionedCommittedBlock},
+    block::VersionedCommittedBlock,
     prelude::{FindAllBlocks, TransactionValue},
 };
 
