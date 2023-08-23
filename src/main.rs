@@ -65,12 +65,12 @@ mod args {
             let file = &args.client_config;
 
             let file_opened: File = File::open(file)
-                .wrap_err_with(|| format!("failed to open client config file: {}", file))
+                .wrap_err_with(|| format!("failed to open client config file: {file}"))
                 .with_suggestion(|| {
                     "try to specify another file with `-c` or `--client-config` argument"
                 })?;
             let cfg: IrohaClientConfiguration = serde_json::from_reader(file_opened)
-                .wrap_err_with(|| format!("failed to parse client config file: {}", file))?;
+                .wrap_err_with(|| format!("failed to parse client config file: {file}"))?;
             Ok(Self(cfg))
         }
     }

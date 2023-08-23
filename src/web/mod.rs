@@ -442,7 +442,7 @@ mod asset_definitions {
         where
             T: ExactSizeIterator + Iterator<Item = AssetDefinition>,
         {
-            map.into_iter().map(|def| def.into()).collect()
+            map.into_iter().map(Into::into).collect()
         }
     }
 

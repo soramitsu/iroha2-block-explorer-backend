@@ -184,7 +184,7 @@ impl From<Signature> for SignatureDTO {
     fn from(value: Signature) -> Self {
         Self {
             public_key: value.public_key().clone(),
-            payload: value.payload().clone().into(),
+            payload: value.payload().into(),
         }
     }
 }

@@ -41,7 +41,7 @@ impl TryFrom<TransactionQueryResult> for TransactionDTO {
 
         Self::new(
             tx.hash(),
-            block_hash.clone(),
+            *block_hash,
             tx.payload().clone(),
             tx.signatures().clone(),
             error.clone(),
@@ -119,7 +119,6 @@ impl From<Executable> for ExecutableDTO {
 }
 
 #[get("/{hash}")]
-#[allow(deprecated)]
 async fn show(
     app: web::Data<AppData>,
     hash: web::Path<HashDeser>,
@@ -128,6 +127,7 @@ async fn show(
     let tx = app
         .iroha_client
         .request(QueryBuilder::new(FindTransactionByHash::new(
+            #[allow(deprecated)]
             HashOf::from_untyped_unchecked(hash),
         )))
         .await
