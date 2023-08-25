@@ -10,14 +10,15 @@ use color_eyre::{
     eyre::{eyre, Context},
     Result,
 };
-use iroha_core::{
-    prelude::VersionedValidTransaction,
-    tx::{Pagination, VersionedRejectedTransaction},
+use iroha_core::tx::{Pagination, VersionedSignedTransaction};
+use iroha_crypto::{Hash, HashOf, MerkleTree};
+use iroha_data_model::{
+    block::VersionedCommittedBlock,
+    prelude::{FindAllBlocks, TransactionValue},
 };
-use iroha_crypto::Hash;
-use iroha_data_model::prelude::{BlockValue, FindAllBlocks};
+
 use serde::Serialize;
-use std::num::NonZeroU64;
+use std::{convert::TryInto, num::NonZeroU64};
 
 /// Block DTO intended to be lightweight and to have only simple aggregated data.
 /// Detailed data is contained within [`BlockDTO`]
@@ -31,16 +32,18 @@ pub struct BlockShallowDTO {
     rejected_transactions: u32,
 }
 
-impl TryFrom<BlockValue> for BlockShallowDTO {
+impl TryFrom<VersionedCommittedBlock> for BlockShallowDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(block: BlockValue) -> Result<Self> {
+    fn try_from(block: VersionedCommittedBlock) -> Result<Self> {
+        let block = block.into_v1();
         Ok(Self {
             height: block.header.height.try_into()?,
-            block_hash: block.header.current_block_hash.into(),
+            block_hash: block.hash().into(),
             timestamp: Timestamp::try_from(block.header.timestamp)?,
             transactions: block.transactions.len().try_into()?,
-            rejected_transactions: block.rejected_transactions.len().try_into()?,
+            // FIXME: rejected transactions are interleaved in iroha2-dev branch
+            rejected_transactions: 0,
         })
     }
 }
@@ -52,38 +55,34 @@ pub struct BlockDTO {
     height: u32,
     timestamp: Timestamp,
     block_hash: SerScaleHex<Hash>,
-    parent_block_hash: SerScaleHex<Hash>,
-    transactions_merkle_root_hash: SerScaleHex<Hash>,
-    rejected_transactions_merkle_root_hash: SerScaleHex<Hash>,
+    parent_block_hash: SerScaleHex<Option<HashOf<VersionedCommittedBlock>>>,
+    transactions_merkle_root_hash:
+        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
+    rejected_transactions_merkle_root_hash:
+        SerScaleHex<Option<HashOf<MerkleTree<VersionedSignedTransaction>>>>,
     invalidated_blocks_hashes: Vec<SerScaleHex<Hash>>,
-    transactions: Vec<SerScaleHex<VersionedValidTransaction>>,
-    rejected_transactions: Vec<SerScaleHex<VersionedRejectedTransaction>>,
+    transactions: Vec<SerScaleHex<TransactionValue>>,
+    rejected_transactions: Vec<SerScaleHex<VersionedSignedTransaction>>,
     view_change_proofs: Vec<SerScaleHex<Hash>>,
 }
 
-impl TryFrom<BlockValue> for BlockDTO {
+impl TryFrom<VersionedCommittedBlock> for BlockDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(block: BlockValue) -> Result<Self> {
+    fn try_from(block: VersionedCommittedBlock) -> Result<Self> {
+        let block = block.into_v1();
         Ok(Self {
             height: block.header.height.try_into()?,
             timestamp: Timestamp::try_from(block.header.timestamp)?,
-            block_hash: block.header.current_block_hash.into(),
+            block_hash: block.hash().into(),
             parent_block_hash: block.header.previous_block_hash.into(),
             transactions_merkle_root_hash: block.header.transactions_hash.into(),
             rejected_transactions_merkle_root_hash: block.header.rejected_transactions_hash.into(),
-            invalidated_blocks_hashes: block
-                .header
-                .invalidated_blocks_hashes
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            // FIXME: There is no concept of invalidated block hashes as rejected_transactions are interleaved in iroha2-dev branch
+            invalidated_blocks_hashes: Vec::new(),
             transactions: block.transactions.into_iter().map(Into::into).collect(),
-            rejected_transactions: block
-                .rejected_transactions
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            /// FIXME: rejected_transactions are interleaved in iroha2-dev branch
+            rejected_transactions: Vec::new(),
 
             // FIXME https://github.com/hyperledger/iroha/issues/2277
             view_change_proofs: Vec::new(),

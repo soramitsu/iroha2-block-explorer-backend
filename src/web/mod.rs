@@ -5,7 +5,6 @@ use actix_web::{
 };
 use color_eyre::eyre::{eyre, Context};
 use iroha_client::client::ClientQueryError as IrohaClientQueryError;
-use iroha_core::smartcontracts::isi::query::Error as IrohaQueryError;
 use pagination::{Paginated, PaginationQueryParams};
 use serde::Serialize;
 use std::{
@@ -13,7 +12,6 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-
 mod blocks;
 mod etc;
 mod pagination;
@@ -57,12 +55,10 @@ impl WebError {
     /// Otherwise, constructs [`WebError::Internal`].
     fn expect_iroha_find_error(client_error: IrohaClientQueryError) -> Self {
         match client_error {
-            IrohaClientQueryError::QueryError(IrohaQueryError::Find(_err)) => Self::NotFound,
-            IrohaClientQueryError::QueryError(other) => {
-                Self::Internal(eyre!("FindError expected, got: {other}"))
-            }
+            IrohaClientQueryError::Validation(_err) => Self::NotFound,
+
             IrohaClientQueryError::Other(other) => {
-                Self::Internal(other.wrap_err("Unexpected query error"))
+                Self::Internal(other.wrap_err("Unexpected query error: {other}"))
             }
         }
     }
@@ -70,7 +66,7 @@ impl WebError {
     /// Constructs [`WebError::Internal`] from [`IrohaClientQueryError`].
     fn expect_iroha_any_error(client_error: IrohaClientQueryError) -> Self {
         match client_error {
-            IrohaClientQueryError::QueryError(any) => {
+            IrohaClientQueryError::Validation(any) => {
                 Self::Internal(eyre!("Iroha query error: {any}"))
             }
             IrohaClientQueryError::Other(other) => {
@@ -141,7 +137,6 @@ mod accounts {
         fn from(account: Account) -> Self {
             let assets: Vec<AssetDTO> = account
                 .assets()
-                .into_iter()
                 .map(|asset|
                     // FIXME clone
                     AssetDTO::from(asset.clone()
@@ -154,7 +149,7 @@ mod accounts {
                 metadata:
                 // FIXME clone
                 account.metadata().clone(),
-                roles: account.roles().into_iter().map(StringOf::from).collect(),
+                roles: account.roles().map(StringOf::from).collect(),
             }
         }
     }
@@ -211,7 +206,7 @@ mod accounts {
     ) -> Result<web::Json<Paginated<Vec<AccountDTO>>>, WebError> {
         let paginated: Paginated<_> = data
             .iroha_client
-            .request(QueryBuilder::new(FindAllAccounts::new()).with_pagination(pagination.into()))
+            .request(QueryBuilder::new(FindAllAccounts).with_pagination(pagination.into()))
             .await
             .wrap_err("Failed to request for accounts")?
             .try_into()?;
@@ -252,13 +247,12 @@ mod domains {
                 id: domain.id().into(),
                 accounts: domain
                     .accounts()
-                    .into_iter()
                     .map(|acc|
                         // FIXME clone
                         AccountDTO::from(acc.clone()))
                     .collect(),
                 logo: domain.logo().as_ref().map(|x| x.as_ref().to_owned()),
-                metadata: domain.metadata().clone(), // FIXME clone
+                metadata: domain.metadata.clone(), // FIXME clone
                 asset_definitions: AssetDefinitionDTO::vec_from_map(
                     domain
                         // FIXME clone
@@ -293,8 +287,7 @@ mod domains {
         let paginated: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllDomains::new())
-                    .with_pagination(pagination.into_inner().into()),
+                QueryBuilder::new(FindAllDomains).with_pagination(pagination.into_inner().into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
@@ -386,8 +379,7 @@ mod assets {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssets::new())
-                    .with_pagination(pagination.into_inner().into()),
+                QueryBuilder::new(FindAllAssets).with_pagination(pagination.into_inner().into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
@@ -425,8 +417,8 @@ mod asset_definitions {
     use iroha_data_model::{
         asset::Mintable,
         prelude::{
-            AccountId, AssetDefinition, AssetDefinitionEntry, AssetDefinitionId, AssetValueType,
-            FindAccountsWithAsset, FindAllAssetsDefinitions, FindAssetDefinitionById, Identifiable,
+            AccountId, AssetDefinition, AssetDefinitionId, AssetValueType, FindAccountsWithAsset,
+            FindAllAssetsDefinitions, FindAssetDefinitionById, Identifiable,
         },
     };
     use serde::de;
@@ -448,20 +440,18 @@ mod asset_definitions {
     impl AssetDefinitionDTO {
         pub fn vec_from_map<T>(map: T) -> Vec<Self>
         where
-            T: ExactSizeIterator + Iterator<Item = AssetDefinitionEntry>,
+            T: ExactSizeIterator + Iterator<Item = AssetDefinition>,
         {
-            map.into_iter()
-                .map(|def| def.definition().clone().into())
-                .collect()
+            map.into_iter().map(Into::into).collect()
         }
     }
 
     impl From<AssetDefinition> for AssetDefinitionDTO {
         fn from(definition: AssetDefinition) -> Self {
             Self {
-                id: definition.id().into(),
-                value_type: AssetValueTypeDTO(*definition.value_type()),
-                mintable: *definition.mintable(),
+                id: definition.id.into(),
+                value_type: AssetValueTypeDTO(definition.value_type),
+                mintable: definition.mintable,
             }
         }
     }
@@ -544,8 +534,7 @@ mod asset_definitions {
         let data: Paginated<_> = data
             .iroha_client
             .request(
-                QueryBuilder::new(FindAllAssetsDefinitions::new())
-                    .with_pagination(pagination.0.into()),
+                QueryBuilder::new(FindAllAssetsDefinitions).with_pagination(pagination.0.into()),
             )
             .await
             .map_err(WebError::expect_iroha_any_error)?
@@ -629,7 +618,7 @@ mod peer {
     ) -> Result<web::Json<Paginated<Vec<PeerDTO>>>, WebError> {
         let data: Paginated<_> = data
             .iroha_client
-            .request(QueryBuilder::new(FindAllPeers::new()).with_pagination(pagination.0.into()))
+            .request(QueryBuilder::new(FindAllPeers).with_pagination(pagination.0.into()))
             .await
             .map_err(WebError::expect_iroha_any_error)?
             .try_into()?;

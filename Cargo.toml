@@ -8,12 +8,13 @@ members = [".", "tools/genesis-gen"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace.dependencies]
-iroha_client = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
-iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
-iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
-iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
-iroha_core = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
-iroha_config = { git = "https://github.com/hyperledger/iroha.git", rev = "e3cd89bd2b6bef0d822900eb71a1854c7b86e2aa" }
+# Iroha_dev Version: RC_16 
+iroha_client = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+iroha_core = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+iroha_config = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
@@ -48,6 +49,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true }
 color-eyre = { workspace = true }
 serde_json = { workspace = true }
+url = "2.4.0"
 
 [features]
 default = ["dev_actor"]

@@ -2,6 +2,10 @@
 
 This readme provides an overview of the Iroha 2 blockchain explorer backend and instructions on how to install, run, and utilize the explorer's backend features.
 
+## Demo
+
+Check out the Hyperledger Iroha 2 Blockchain Explorer Demo video [here](https://www.youtube.com/watch?v=aze3jwW6d-U).
+
 ## Installation
 
 To set up the Iroha 2 blockchain explorer backend, follow these steps:

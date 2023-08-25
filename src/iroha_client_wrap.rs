@@ -6,14 +6,14 @@ use color_eyre::{
     Result,
 };
 use iroha_client::{
-    client::{Client as IrohaClient, ClientQueryError, ClientQueryOutput, ResponseHandler},
+    client::{Client as IrohaClient, ClientQueryError, ClientQueryRequest, ResponseHandler},
     http::Response as RespIroha,
 };
-use iroha_data_model::prelude::Sorting;
+use iroha_core::tx::Executable;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{Instruction, Pagination, Query, QueryBox, Value},
+    prelude::{InstructionBox, Pagination, Query, QueryBox, Sorting, Value},
 };
 use iroha_telemetry::metrics::Status;
 
@@ -26,6 +26,8 @@ mod request_builder {
     use awc::{Client, ClientRequest};
     use http::header::{HeaderMap, HeaderName};
     use iroha_client::http::{Method, RequestBuilder};
+
+    use url::Url;
 
     trait HeaderMapConsumerExt {
         fn set_headers(self, headers: HeaderMap) -> Result<Self>
@@ -101,7 +103,7 @@ mod request_builder {
     }
 
     impl RequestBuilder for ActixReqBuilder {
-        fn new(method: Method, url: impl AsRef<str>) -> Self {
+        fn new(method: Method, url: Url) -> Self {
             Self {
                 method,
                 url: url.as_ref().to_owned(),
@@ -232,7 +234,7 @@ impl IrohaClientWrap {
     pub async fn request<R>(
         &self,
         query: QueryBuilder<R>,
-    ) -> Result<ClientQueryOutput<R>, ClientQueryError>
+    ) -> Result<ClientQueryRequest<R>, ClientQueryError>
     where
         R: Query + Into<QueryBox> + Debug,
         <R::Output as TryFrom<Value>>::Error: Into<eyre::Error>,
@@ -260,18 +262,15 @@ impl IrohaClientWrap {
         resp_handler.handle(resp)
     }
 
-    pub async fn submit(&self, instruction: impl Into<Instruction> + Debug) -> Result<()> {
-        let (req, _, resp_handler) = self
-            .iroha
-            .prepare_transaction_request::<ActixReqBuilder>(
-                self.iroha
-                    .build_transaction(
-                        (vec![instruction.into()]).into_iter().into(),
-                        UnlimitedMetadata::new(),
-                    )
-                    .wrap_err("Failed to build transaction")?,
-            )
-            .wrap_err("Failed to prepare transaction request")?;
+    pub async fn submit(&self, instruction: impl Into<InstructionBox> + Debug) -> Result<()> {
+        let instructions = Executable::Instructions(vec![instruction.into()]);
+
+        let (req, _, resp_handler) = self.iroha.prepare_transaction_request::<ActixReqBuilder>(
+            &self
+                .iroha
+                .build_transaction(instructions, UnlimitedMetadata::new())
+                .wrap_err("Failed to build transaction")?,
+        );
 
         let resp = req.send(&self.http).await?;
         resp_handler.handle(resp)?;

@@ -6,6 +6,7 @@ use actix::{
 };
 use color_eyre::{eyre::eyre, Result};
 use core::time::Duration;
+use iroha_data_model::NumericValue;
 use iroha_data_model::{
     prelude::{
         Account, AccountId, AssetDefinition, AssetDefinitionId, AssetValue, AssetValueType, Domain,
@@ -91,7 +92,7 @@ impl RandomWorkState {
                     .find(|asset| matches!(asset.value(), AssetValue::Quantity(_)));
 
                 if let Some(asset) = asset {
-                    let value = Value::U32(rng.gen());
+                    let value = Value::Numeric(NumericValue::U32(rng.gen()));
                     let mint = MintBox::new(value, IdBox::AssetId(asset.id().clone()));
 
                     logger::info!("Minting: {:?}", mint);
@@ -103,7 +104,7 @@ impl RandomWorkState {
                 let domain_id = self.account_id.domain_id.clone();
                 let asset_name: Username = rng.gen();
                 let definition_id =
-                    AssetDefinitionId::from_str(format!("{}#{}", asset_name, domain_id).as_ref())?;
+                    AssetDefinitionId::from_str(format!("{asset_name}#{domain_id}").as_ref())?;
                 let asset_value_type = RandomAssetValueType::new(&mut rng)?.0;
 
                 let new_asset_definition = match asset_value_type {
@@ -122,7 +123,7 @@ impl RandomWorkState {
                 let domain_id = self.account_id.domain_id.clone();
                 let account_name: FirstName = rng.gen();
 
-                let account_id: AccountId = format!("{}@{}", account_name, domain_id).parse()?;
+                let account_id: AccountId = format!("{account_name}@{domain_id}").parse()?;
                 let create_account = RegisterBox::new(Account::new(account_id, []));
 
                 client.submit(create_account).await?;

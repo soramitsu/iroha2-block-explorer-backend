@@ -144,25 +144,16 @@ export interface Block {
   view_change_proofs: string[];
 }
 
-export type Transaction =
-  | Tagged<"Committed", CommittedTransaction>
-  | Tagged<"Rejected", RejectedTransaction>;
-
-export interface CommittedTransaction {
-  hash: string
-  /**
-   * WIP zeroed
-   */
+export interface TransactionDTO {
+  hash: string;
   block_hash: string;
   payload: TransactionPayload;
   signatures: Signature[];
-}
-
-export interface RejectedTransaction extends CommittedTransaction {
-  /**
-   * List of serialized {@link @iroha2/data-model#TransactionRejectionReason}
+ /**
+   * If the transaction results in an error, this field will contain the rejection reason as a string.
+   * If the transaction is successful, this field will not be present (undefined).
    */
-  rejection_reason: string;
+  rejection_reason?: string;
 }
 
 export interface TransactionPayload {

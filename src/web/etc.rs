@@ -77,6 +77,12 @@ impl<T> From<HashOf<T>> for SerScaleHex<Hash> {
     }
 }
 
+impl From<&[u8]> for SerScaleHex<Vec<u8>> {
+    fn from(value: &[u8]) -> Self {
+        SerScaleHex(value.to_vec())
+    }
+}
+
 /// Wrap that serializes into string. It's purpose is to add semantics
 /// to serializable structures about **what** a particular data
 /// is a string of.
@@ -178,7 +184,7 @@ impl From<Signature> for SignatureDTO {
     fn from(value: Signature) -> Self {
         Self {
             public_key: value.public_key().clone(),
-            payload: value.payload().clone().into(),
+            payload: value.payload().into(),
         }
     }
 }
