@@ -8,11 +8,11 @@ use super::{
 };
 use crate::web::etc::SignatureDTO;
 use color_eyre::{eyre::Context, Result};
-use iroha_core::tx::{Executable, TransactionValue, VersionedSignedTransaction};
+use iroha_core::tx::{Executable, TransactionValue,TransactionQueryOutput, VersionedSignedTransaction};
 use iroha_crypto::{HashOf, Signature, SignaturesOf};
 use iroha_data_model::block::CommittedBlock;
 use iroha_data_model::prelude::{
-    FindAllTransactions, FindTransactionByHash, InstructionBox, TransactionQueryResult,
+    FindAllTransactions, FindTransactionByHash, InstructionBox, 
     UnlimitedMetadata,
 };
 use iroha_data_model::transaction::{
@@ -32,10 +32,10 @@ pub struct TransactionDTO {
     rejection_reason: Option<SerScaleHex<TransactionRejectionReason>>,
 }
 
-impl TryFrom<TransactionQueryResult> for TransactionDTO {
+impl TryFrom<TransactionQueryOutput> for TransactionDTO {
     type Error = color_eyre::Report;
 
-    fn try_from(tx_result: TransactionQueryResult) -> Result<Self> {
+    fn try_from(tx_result: TransactionQueryOutput) -> Result<Self> {
         let TransactionValue { tx, error } = tx_result.transaction();
         let block_hash = tx_result.block_hash();
 

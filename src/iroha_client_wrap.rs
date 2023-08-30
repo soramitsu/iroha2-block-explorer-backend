@@ -13,8 +13,11 @@ use iroha_core::tx::Executable;
 use iroha_data_model::{
     metadata::UnlimitedMetadata,
     predicate::PredicateBox,
-    prelude::{InstructionBox, Pagination, Query, QueryBox, Sorting, Value},
+    prelude::{InstructionBox,QueryBox,Value},
 };
+use iroha_data_model::query::Pagination;
+use iroha_data_model::query::Query;
+use iroha_data_model::query::Sorting;
 use iroha_telemetry::metrics::Status;
 
 use request_builder::ActixReqBuilder;

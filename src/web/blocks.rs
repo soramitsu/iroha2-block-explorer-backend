@@ -10,7 +10,8 @@ use color_eyre::{
     eyre::{eyre, Context},
     Result,
 };
-use iroha_core::tx::{Pagination, VersionedSignedTransaction};
+use iroha_core::tx::VersionedSignedTransaction;
+use iroha_data_model::query::Pagination;
 use iroha_crypto::{Hash, HashOf, MerkleTree};
 use iroha_data_model::{
     block::VersionedCommittedBlock,

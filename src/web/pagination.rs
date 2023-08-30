@@ -3,7 +3,9 @@ use std::num::NonZeroU32;
 use super::{Debug, Serialize};
 use color_eyre::eyre::{eyre, Context, Result};
 use iroha_client::client::ClientQueryRequest;
-use iroha_data_model::prelude::{Pagination as IrohaPagination, Query, QueryBox, Value};
+use iroha_data_model::prelude::{QueryBox, Value};
+use iroha_data_model::query::Query;
+use iroha_data_model::query::Pagination  as IrohaPagination;
 use serde::Deserialize;
 
 /// Represents some items list with its pagination data
