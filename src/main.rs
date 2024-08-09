@@ -49,6 +49,8 @@ pub struct Args {
         schema::AccountId,
         schema::IpfsPath,
         schema::Metadata,
+        schema::Pagination,
+        schema::DomainsPage,
     ))
 )]
 struct ApiDoc;

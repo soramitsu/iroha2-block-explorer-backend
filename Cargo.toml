@@ -28,3 +28,4 @@ reqwest = "0.12.5"
 tower-http = { version = "0.5.2", features = ["trace"] }
 utoipa = { version = "4.2.3", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.1.0", features = ["axum"] }
+nonzero_ext = "0.3.0"

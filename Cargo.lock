@@ -2064,6 +2064,7 @@ dependencies = [
  "iroha_crypto",
  "iroha_data_model",
  "iroha_telemetry",
+ "nonzero_ext",
  "parity-scale-codec",
  "reqwest",
  "serde",

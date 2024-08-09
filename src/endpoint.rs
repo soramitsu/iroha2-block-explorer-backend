@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
@@ -45,13 +45,31 @@ impl IntoResponse for AppError {
 }
 
 /// List all domains
-#[utoipa::path(get, path = "/api/v1/domains", responses(
-    (status = 200, description = "OK", body = [schema::Domain])
-))]
-async fn domains_index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
-    let domains = state.client.query(FindDomains).all().await?;
-    let dto: Vec<_> = domains.iter().map(schema::Domain::from).collect();
-    Ok(Json(dto).into_response())
+#[utoipa::path(
+    get,
+    path = "/api/v1/domains",
+    responses(
+        (status = 200, description = "OK", body = schema::DomainsPage)
+    ),
+    params(
+        schema::PaginationQueryParams
+    )
+)]
+async fn domains_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
+) -> Result<impl IntoResponse, AppError> {
+    let domains = state
+        .client
+        .query(FindDomains)
+        .paginate(pagination)
+        .all()
+        .await?;
+    let page = schema::Page::new(
+        domains.iter().map(schema::Domain::from).collect::<Vec<_>>(),
+        schema::Pagination::from_query(pagination),
+    );
+    Ok(Json(page).into_response())
 }
 
 /// Show a certain domain

@@ -3,7 +3,7 @@ use iroha_data_model::{
     account::AccountId,
     prelude::CompoundPredicate,
     query::{
-        parameters::{FetchSize, IterableQueryParams, Pagination},
+        parameters::{IterableQueryParams, Pagination},
         predicate::{projectors, AstPredicate, HasPredicateBox, HasPrototype},
         IterableQuery, IterableQueryBox, IterableQueryOutputBatchBox, IterableQueryWithFilter,
         IterableQueryWithFilterFor, IterableQueryWithParams, QueryRequest, QueryResponse,
@@ -11,6 +11,7 @@ use iroha_data_model::{
     ValidationFail,
 };
 use iroha_telemetry::metrics::Status;
+use nonzero_ext::nonzero;
 use parity_scale_codec::{DecodeAll as _, Encode};
 use reqwest::StatusCode;
 use url::Url;
@@ -27,6 +28,8 @@ pub enum Error {
     UnexpectedResponseCode(StatusCode),
     #[error("expected iterable query response")]
     ExpectedIterableResponse,
+    #[error("expected to got all data in a single request, got a forward cursor")]
+    UnexpectedContinuationCursor,
     #[error("failed to extract query output")]
     ExtractQueryOutput,
 }
@@ -97,6 +100,7 @@ pub struct QueryBuilder<'e, Q, P> {
     client: &'e Client,
     query: Q,
     filter: CompoundPredicate<P>,
+    pagination: Pagination,
 }
 
 impl<'a, Q, P> QueryBuilder<'a, Q, P> {
@@ -105,6 +109,7 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
             client,
             query,
             filter: CompoundPredicate::PASS,
+            pagination: Pagination::default(),
         }
     }
 
@@ -123,9 +128,10 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
         self
     }
 
-    // pub fn paginate(self, pagination: Pagination) -> Self {
-    //     unimplemented!()
-    // }
+    pub fn paginate(mut self, pagination: impl Into<Pagination>) -> Self {
+        self.pagination = pagination.into();
+        self
+    }
 }
 
 impl<Q, P> QueryBuilder<'_, Q, P>
@@ -139,28 +145,18 @@ where
     pub async fn all(self) -> Result<Vec<Q::Item>, Error> {
         let start = QueryRequest::StartIterable(IterableQueryWithParams::new(
             IterableQueryBox::from(IterableQueryWithFilter::new(self.query, self.filter)),
-            IterableQueryParams::default(),
+            IterableQueryParams::new(self.pagination, Default::default(), Default::default()),
         ));
 
         let QueryResponse::Iterable(response) = self.client.execute_query_request(start).await?
         else {
             return Err(Error::ExpectedIterableResponse);
         };
-        let (batch, mut cursor) = response.into_parts();
-
-        let mut items: Vec<Q::Item> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
-
-        while let Some(forward) = cursor {
-            let next = QueryRequest::ContinueIterable(forward);
-            let QueryResponse::Iterable(response) = self.client.execute_query_request(next).await?
-            else {
-                return Err(Error::ExpectedIterableResponse);
-            };
-            let (batch, new_cursor) = response.into_parts();
-            let batch: Vec<_> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
-            items.extend(batch);
-            cursor = new_cursor;
+        let (batch, cursor) = response.into_parts();
+        if cursor.is_some() {
+            return Err(Error::UnexpectedContinuationCursor);
         }
+        let items: Vec<Q::Item> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
 
         Ok(items)
     }
@@ -169,19 +165,28 @@ where
         let request = QueryRequest::StartIterable(IterableQueryWithParams::new(
             IterableQueryBox::from(IterableQueryWithFilter::new(self.query, self.filter)),
             IterableQueryParams::new(
-                // FIXME: how to construct pagination?
-                Pagination::default(),
+                // FIXME: construct directly
+                crate::schema::PaginationQueryParams {
+                    page: nonzero!(1u32),
+                    per_page: nonzero!(1u32),
+                }
+                .into(),
                 Default::default(),
-                FetchSize::new(Some(1.try_into().unwrap())),
+                Default::default(),
             ),
         ));
         let QueryResponse::Iterable(response) = self.client.execute_query_request(request).await?
         else {
             return Err(Error::ExpectedIterableResponse);
         };
-        let (batch, _cursor) = response.into_parts();
-        let items: Vec<Q::Item> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
-        let one = items.into_iter().take(1).next();
+        let (batch, cursor) = response.into_parts();
+        if cursor.is_some() {
+            return Err(Error::UnexpectedContinuationCursor);
+        }
+        let items: Vec<_> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
+        let mut items = items.into_iter();
+        let one = items.next();
+        assert!(items.next().is_none());
         Ok(one)
     }
 }
