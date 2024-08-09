@@ -1,8 +1,8 @@
 #![allow(clippy::module_name_repetitions)]
 
-mod dto;
 mod endpoint;
 mod iroha;
+mod schema;
 
 use crate::iroha::Client;
 
@@ -11,12 +11,13 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use color_eyre::{eyre::WrapErr, Result};
 use iroha_crypto::{KeyPair, PrivateKey};
 use iroha_data_model::account::AccountId;
-use tower_http::trace::{DefaultOnFailure, TraceLayer};
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use url::Url;
+use utoipa::OpenApi;
+use utoipa_scalar::{Scalar, Servable};
 
 #[derive(Debug, Parser)]
 #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
@@ -38,6 +39,20 @@ pub struct Args {
     pub torii_url: Url,
 }
 
+// TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
+#[derive(OpenApi)]
+#[openapi(
+    paths(endpoint::domains_index, endpoint::domains_show),
+    components(schemas(
+        schema::Domain,
+        schema::DomainId,
+        schema::AccountId,
+        schema::IpfsPath,
+        schema::Metadata,
+    ))
+)]
+struct ApiDoc;
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -55,6 +70,7 @@ async fn main() {
 
     // TODO: handle endpoint panics
     let app = Router::new()
+        .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
         .nest("/api/v1", endpoint::router(client))
         .layer(
             TraceLayer::new_for_http()

@@ -7,11 +7,10 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use iroha_data_model::{
-    domain::DomainId, prelude::FindDomains, query::error::QueryExecutionFail, ValidationFail,
-};
+use iroha_data_model::{prelude::FindDomains, query::error::QueryExecutionFail, ValidationFail};
 
 use crate::iroha::{Client, Error as IrohaError};
+use crate::schema;
 
 #[derive(Clone)]
 struct AppState {
@@ -45,6 +44,35 @@ impl IntoResponse for AppError {
     }
 }
 
+/// List all domains
+#[utoipa::path(get, path = "/api/v1/domains", responses(
+    (status = 200, description = "OK", body = [schema::Domain])
+))]
+async fn domains_index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+    let domains = state.client.query(FindDomains).all().await?;
+    let dto: Vec<_> = domains.iter().map(schema::Domain::from).collect();
+    Ok(Json(dto).into_response())
+}
+
+/// Show a certain domain
+#[utoipa::path(get, path = "/api/v1/domains/{id}", responses(
+    (status = 200, description = "Domain Found", body = schema::Domain),
+    (status = 404, description = "Domain Not Found")
+), params(("id", description = "Domain ID", example = "genesis")))]
+async fn domains_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::DomainId<'_>>,
+) -> Result<impl IntoResponse, AppError> {
+    let domain = state
+        .client
+        .query(FindDomains)
+        .filter(|domain| domain.id.eq(id.0.into_owned()))
+        .one()
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(schema::Domain::from(&domain)).into_response())
+}
+
 pub fn router(client: Client) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
@@ -52,23 +80,4 @@ pub fn router(client: Client) -> Router {
         .with_state(AppState {
             client: Arc::new(client),
         })
-}
-
-async fn domains_index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
-    let domains = state.client.query(FindDomains).all().await?;
-    Ok(Json(domains))
-}
-
-async fn domains_show(
-    State(state): State<AppState>,
-    Path(id): Path<DomainId>,
-) -> Result<impl IntoResponse, AppError> {
-    let domain = state
-        .client
-        .query(FindDomains)
-        .filter(|domain| domain.id.eq(id))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(domain))
 }
