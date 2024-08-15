@@ -47,7 +47,9 @@ pub struct Args {
         endpoint::domains_index,
         endpoint::domains_show,
         endpoint::blocks_index,
-        endpoint::blocks_show
+        endpoint::blocks_show,
+        endpoint::transactions_index,
+        endpoint::transactions_show,
     ),
     components(schemas(
         schema::Domain,
@@ -62,6 +64,7 @@ pub struct Args {
         schema::BlockSignature,
         schema::Executable,
         schema::Instruction,
+        schema::TransactionWithHash,
         schema::Transaction,
         schema::TransactionPayload,
         schema::TransactionRejectionReason,

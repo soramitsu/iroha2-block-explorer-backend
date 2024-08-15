@@ -19,6 +19,7 @@ mod iroha {
         ipfs::IpfsPath,
         isi::InstructionBox,
         metadata::Metadata,
+        query::TransactionQueryOutput,
         transaction::{error::TransactionRejectionReason, Executable},
         ChainId,
     };
@@ -242,9 +243,28 @@ impl TimeStamp {
     }
 }
 
+/// Like [`Transaction`], but with a block hash included
+#[derive(Serialize, ToSchema)]
+pub struct TransactionWithHash<'a> {
+    #[serde(flatten)]
+    base: Transaction<'a>,
+    block_hash: Hash,
+}
+
+impl<'a> From<&'a iroha::TransactionQueryOutput> for TransactionWithHash<'a> {
+    fn from(value: &'a iroha::TransactionQueryOutput) -> Self {
+        Self {
+            base: Transaction::from(value.as_ref()),
+            block_hash: Hash::from(*value.block_hash()),
+        }
+    }
+}
+
 /// Transaction
 #[derive(Serialize, ToSchema)]
 pub struct Transaction<'a> {
+    /// Transaction hash
+    hash: Hash,
     /// Transaction payload
     payload: TransactionPayload<'a>,
     /// Transaction signature
@@ -258,6 +278,7 @@ impl<'a> From<&'a iroha::CommittedTransaction> for Transaction<'a> {
         let signed: &iroha::SignedTransaction = value.as_ref();
 
         Self {
+            hash: signed.hash().into(),
             payload: TransactionPayload {
                 chain: signed.chain(),
                 authority: AccountId(signed.authority()),
@@ -399,9 +420,9 @@ impl From<&iroha::BlockHeader> for BlockHeader {
 }
 
 /// Hex-encoded hash
-#[derive(Serialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 #[schema(value_type = String, example = "1B0A52DBDC11EAE39DD0524AD5146122351527CE00D161EA8263EA7ADE4164AF")]
-pub struct Hash(iroha::Hash);
+pub struct Hash(pub iroha::Hash);
 
 impl<T> From<iroha_crypto::HashOf<T>> for Hash {
     fn from(value: iroha_crypto::HashOf<T>) -> Self {

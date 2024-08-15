@@ -9,7 +9,9 @@ use axum::{
 };
 use iroha_crypto::HashOf;
 use iroha_data_model::{
-    prelude::{FindBlockHeaderByHash, FindBlocks, FindDomains},
+    prelude::{
+        FindBlockHeaderByHash, FindBlocks, FindDomains, FindTransactionByHash, FindTransactions,
+    },
     query::{error::QueryExecutionFail, parameters::Pagination},
     ValidationFail,
 };
@@ -56,7 +58,7 @@ impl IntoResponse for AppError {
     }
 }
 
-/// List all domains
+/// List domains
 #[utoipa::path(
     get,
     path = "/api/v1/domains",
@@ -85,7 +87,7 @@ async fn domains_index(
     Ok(Json(page).into_response())
 }
 
-/// Show a certain domain
+/// Find a domain
 #[utoipa::path(get, path = "/api/v1/domains/{id}", responses(
     (status = 200, description = "Domain Found", body = schema::Domain),
     (status = 404, description = "Domain Not Found")
@@ -104,7 +106,7 @@ async fn domains_show(
     Ok(Json(schema::Domain::from(&domain)).into_response())
 }
 
-/// List blocks, starting from the latest ones
+/// List blocks
 // TODO: describe page number
 #[utoipa::path(
     get,
@@ -139,7 +141,7 @@ async fn blocks_index(
     Ok(Json(page).into_response())
 }
 
-/// Show a particular block by its height or hash
+/// Find a block by its hash/height
 #[utoipa::path(
     get,
     path = "/api/v1/blocks/{height_or_hash}",
@@ -183,12 +185,64 @@ async fn blocks_show(
     Ok(Json(schema::Block::from(&block)).into_response())
 }
 
+/// List transactions
+#[utoipa::path(
+    get,
+    path = "/api/v1/transactions",
+    params(schema::PaginationQueryParams),
+    responses(
+        (status = 200, description = "OK", body = [schema::Transaction])
+    )
+)]
+async fn transactions_index(
+    State(state): State<AppState>,
+    Query(pagination_query): Query<schema::PaginationQueryParams>,
+) -> Result<impl IntoResponse, AppError> {
+    let pagination = DirectPagination::from(pagination_query);
+    let items = state
+        .client
+        .query(FindTransactions)
+        .paginate(pagination)
+        .all()
+        .await?;
+    let page = schema::Page::new(
+        items
+            .iter()
+            .map(schema::TransactionWithHash::from)
+            .collect(),
+        pagination.into(),
+    );
+    Ok(Json(page).into_response())
+}
+
+/// Find a transaction by its hash
+#[utoipa::path(get, path = "/api/v1/transactions/{hash}", params(
+    ("hash", description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
+), responses(
+    (status = 200, description = "Transaction Found", body = schema::TransactionWithHash),
+    (status = 404, description = "Transaction Not Found")
+))]
+async fn transactions_show(
+    State(state): State<AppState>,
+    Path(hash): Path<iroha_crypto::Hash>,
+) -> Result<impl IntoResponse, AppError> {
+    let item = state
+        .client
+        .query_singular(FindTransactionByHash::new(HashOf::from_untyped_unchecked(
+            hash,
+        )))
+        .await?;
+    Ok(Json(schema::TransactionWithHash::from(&item)).into_response())
+}
+
 pub fn router(client: Client) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/:id", get(domains_show))
         .route("/blocks", get(blocks_index))
         .route("/blocks/:height_or_hash", get(blocks_show))
+        .route("/transactions", get(transactions_index))
+        .route("/transactions/:hash", get(transactions_show))
         .with_state(AppState {
             client: Arc::new(client),
         })
