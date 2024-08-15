@@ -3,15 +3,15 @@ use iroha_data_model::{
     account::AccountId,
     prelude::CompoundPredicate,
     query::{
-        parameters::{IterableQueryParams, Pagination},
+        parameters::{Pagination, QueryParams},
         predicate::{projectors, AstPredicate, HasPredicateBox, HasPrototype},
-        IterableQuery, IterableQueryBox, IterableQueryOutputBatchBox, IterableQueryWithFilter,
-        IterableQueryWithFilterFor, IterableQueryWithParams, QueryRequest, QueryResponse,
+        Query, QueryBox, QueryOutputBatchBox, QueryRequest, QueryResponse, QueryWithFilter,
+        QueryWithFilterFor, QueryWithParams, SingularQuery, SingularQueryBox,
+        SingularQueryOutputBox,
     },
     ValidationFail,
 };
 use iroha_telemetry::metrics::Status;
-use nonzero_ext::nonzero;
 use parity_scale_codec::{DecodeAll as _, Encode};
 use reqwest::StatusCode;
 use url::Url;
@@ -28,10 +28,14 @@ pub enum Error {
     UnexpectedResponseCode(StatusCode),
     #[error("expected iterable query response")]
     ExpectedIterableResponse,
+    #[error("expected singular query response")]
+    ExpectedSingularResponse,
     #[error("expected to got all data in a single request, got a forward cursor")]
     UnexpectedContinuationCursor,
     #[error("failed to extract query output")]
     ExtractQueryOutput,
+    #[error("expected one or zero elements in the result, got {got}")]
+    ExpectedOne { got: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -55,15 +59,50 @@ impl Client {
     pub fn query<Q>(
         &self,
         query: Q,
-    ) -> QueryBuilder<Q, <<Q as IterableQuery>::Item as HasPredicateBox>::PredicateBoxType>
+    ) -> QueryBuilder<Q, <<Q as Query>::Item as HasPredicateBox>::PredicateBoxType>
     where
-        Q: IterableQuery,
+        Q: Query,
     {
         QueryBuilder::new(&self, query)
     }
 
+    pub async fn query_singular<Q>(&self, query: Q) -> Result<<Q as SingularQuery>::Output, Error>
+    where
+        Q: SingularQuery,
+        SingularQueryBox: From<Q>,
+        Q::Output: TryFrom<SingularQueryOutputBox>,
+        <Q::Output as TryFrom<SingularQueryOutputBox>>::Error: std::fmt::Debug,
+    {
+        let QueryResponse::Singular(boxed) = self
+            .execute_query_request(QueryRequest::Singular(query.into()))
+            .await?
+        else {
+            return Err(Error::ExpectedSingularResponse);
+        };
+
+        Ok(boxed
+            .try_into()
+            .expect("BUG: iroha data model contract failed"))
+    }
+
     pub async fn status(&self) -> Result<Status, Error> {
-        todo!()
+        let response = self
+            .http
+            .get(self.torii_url.join("/status").unwrap())
+            .header(reqwest::header::ACCEPT, "application/x-parity-scale")
+            .send()
+            .await?;
+
+        let status = response.status();
+        let bytes = response.bytes().await?;
+
+        match status {
+            StatusCode::OK => {
+                let data = Status::decode_all(&mut bytes.as_ref())?;
+                Ok(data)
+            }
+            unknown => Err(Error::UnexpectedResponseCode(unknown)),
+        }
     }
 
     async fn execute_query_request(&self, request: QueryRequest) -> Result<QueryResponse, Error> {
@@ -136,16 +175,16 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
 
 impl<Q, P> QueryBuilder<'_, Q, P>
 where
-    Q: IterableQuery,
+    Q: Query,
     Q::Item: HasPredicateBox<PredicateBoxType = P>,
-    IterableQueryBox: From<IterableQueryWithFilterFor<Q>>,
-    Vec<Q::Item>: TryFrom<IterableQueryOutputBatchBox>,
-    <Vec<Q::Item> as TryFrom<IterableQueryOutputBatchBox>>::Error: core::fmt::Debug,
+    QueryBox: From<QueryWithFilterFor<Q>>,
+    Vec<Q::Item>: TryFrom<QueryOutputBatchBox>,
+    <Vec<Q::Item> as TryFrom<QueryOutputBatchBox>>::Error: core::fmt::Debug,
 {
     pub async fn all(self) -> Result<Vec<Q::Item>, Error> {
-        let start = QueryRequest::StartIterable(IterableQueryWithParams::new(
-            IterableQueryBox::from(IterableQueryWithFilter::new(self.query, self.filter)),
-            IterableQueryParams::new(self.pagination, Default::default(), Default::default()),
+        let start = QueryRequest::Start(QueryWithParams::new(
+            QueryBox::from(QueryWithFilter::new(self.query, self.filter)),
+            QueryParams::new(self.pagination, Default::default(), Default::default()),
         ));
 
         let QueryResponse::Iterable(response) = self.client.execute_query_request(start).await?
@@ -162,31 +201,12 @@ where
     }
 
     pub async fn one(self) -> Result<Option<Q::Item>, Error> {
-        let request = QueryRequest::StartIterable(IterableQueryWithParams::new(
-            IterableQueryBox::from(IterableQueryWithFilter::new(self.query, self.filter)),
-            IterableQueryParams::new(
-                // FIXME: construct directly
-                crate::schema::PaginationQueryParams {
-                    page: nonzero!(1u32),
-                    per_page: nonzero!(1u32),
-                }
-                .into(),
-                Default::default(),
-                Default::default(),
-            ),
-        ));
-        let QueryResponse::Iterable(response) = self.client.execute_query_request(request).await?
-        else {
-            return Err(Error::ExpectedIterableResponse);
-        };
-        let (batch, cursor) = response.into_parts();
-        if cursor.is_some() {
-            return Err(Error::UnexpectedContinuationCursor);
+        let all = self.all().await?;
+        if all.len() > 1 {
+            return Err(Error::ExpectedOne { got: all.len() });
         }
-        let items: Vec<_> = batch.try_into().map_err(|_| Error::ExtractQueryOutput)?;
-        let mut items = items.into_iter();
+        let mut items = all.into_iter();
         let one = items.next();
-        assert!(items.next().is_none());
         Ok(one)
     }
 }

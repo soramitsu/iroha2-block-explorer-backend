@@ -1,17 +1,26 @@
-use std::{
-    borrow::Cow,
-    num::{NonZero, NonZeroU32},
-};
+use std::{borrow::Cow, num::NonZero, str::FromStr};
 
+use chrono::Utc;
 use iroha_data_model::{HasMetadata as _, Identifiable as _};
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_with::DeserializeFromStr;
 use utoipa::{IntoParams, ToSchema};
 
+use crate::util::{DirectPagination, ReversePagination};
+
 mod iroha {
+    pub use iroha_crypto::Hash;
+    pub use iroha_data_model::prelude::*;
     pub use iroha_data_model::{
-        account::AccountId, domain::DomainId, ipfs::IpfsPath, metadata::Metadata,
+        account::AccountId,
+        block::{BlockHeader, SignedBlock},
+        domain::DomainId,
+        ipfs::IpfsPath,
+        isi::InstructionBox,
+        metadata::Metadata,
+        transaction::{error::TransactionRejectionReason, Executable},
+        ChainId,
     };
 }
 
@@ -63,7 +72,12 @@ pub struct AccountId<'a>(&'a iroha::AccountId);
 /// Key-value map with arbitrary data
 #[derive(Serialize, ToSchema)]
 #[schema(
-    value_type = Object
+    value_type = Object,
+    example = json!({
+        "test": {
+            "whatever": ["foo","bar"]
+        }
+    })
 )]
 pub struct Metadata<'a>(&'a iroha::Metadata);
 
@@ -71,6 +85,41 @@ pub struct Metadata<'a>(&'a iroha::Metadata);
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = String)]
 pub struct IpfsPath<'a>(&'a iroha::IpfsPath);
+
+/// Big integer numeric value.
+///
+/// Serialized as a **number** when safely fits into `f64` max safe integer
+/// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
+///
+/// On JavaScript side is recommended to parse with `BigInt`.
+#[derive(ToSchema)]
+// TODO set `value_type` to union of string and number
+#[schema(example = 42)]
+pub struct BigInt(u128);
+
+impl From<u64> for BigInt {
+    fn from(value: u64) -> Self {
+        Self(value as u128)
+    }
+}
+
+impl BigInt {
+    pub const MAX_SAFE_INTEGER: u128 = 2u128.pow(53) - 1;
+}
+
+impl Serialize for BigInt {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.0 > Self::MAX_SAFE_INTEGER {
+            // TODO: optimise
+            serializer.serialize_str(&self.0.to_string())
+        } else {
+            serializer.serialize_u128(self.0)
+        }
+    }
+}
 
 /// Information on data pagination
 #[derive(Serialize, ToSchema)]
@@ -83,22 +132,62 @@ pub struct IpfsPath<'a>(&'a iroha::IpfsPath);
 )]
 pub struct Pagination {
     /// Page number, starts from 1
-    page: NonZeroU32,
+    page: BigInt,
     /// Items per page, starts from 1
-    per_page: NonZeroU32,
-    /// Total amount of items. Infer pages count using this and `page_size`.
-    total_items: u32,
+    per_page: BigInt,
+    /// Total number of pages. Not always available.
+    total_pages: Option<BigInt>,
+    /// Total number of items. Not always available.
+    total_items: Option<BigInt>,
 }
 
 impl Pagination {
-    // FIXME: pass `total_items` too
-    pub fn from_query(params: PaginationQueryParams) -> Self {
+    pub fn new(
+        page: NonZero<u64>,
+        per_page: NonZero<u64>,
+        total_items: Option<u64>,
+        total_pages: Option<u64>,
+    ) -> Self {
         Self {
-            page: params.page,
-            per_page: params.per_page,
-            // FIXME
-            total_items: 999,
+            page: BigInt::from(page.get()),
+            per_page: BigInt::from(per_page.get()),
+            total_items: total_items.map(BigInt::from),
+            total_pages: total_pages.map(BigInt::from),
         }
+    }
+
+    pub fn for_empty_data(per_page: NonZero<u64>) -> Self {
+        Self {
+            // "there is one page, it's just empty"
+            page: BigInt(1),
+            per_page: BigInt::from(per_page.get()),
+            // "but there are zero pages of data"
+            total_pages: Some(BigInt(0)),
+            total_items: Some(BigInt(0)),
+        }
+    }
+}
+
+impl From<ReversePagination> for Pagination {
+    fn from(value: ReversePagination) -> Self {
+        Self::new(
+            value.page(),
+            value.per_page(),
+            Some(value.len().get()),
+            Some(
+                value
+                    .total_pages()
+                    .get()
+                    .try_into()
+                    .expect("should fit into u32"),
+            ),
+        )
+    }
+}
+
+impl From<DirectPagination> for Pagination {
+    fn from(value: DirectPagination) -> Self {
+        Self::new(value.page(), value.per_page(), None, None)
     }
 }
 
@@ -113,11 +202,14 @@ pub struct Page<T> {
 }
 
 impl<T> Page<T> {
-    pub fn new(items: impl Into<Vec<T>>, pagination: impl Into<Pagination>) -> Self {
-        Self {
-            pagination: pagination.into(),
-            items: items.into(),
-        }
+    pub fn new(items: Vec<T>, pagination: Pagination) -> Self {
+        Self { pagination, items }
+    }
+}
+
+impl Page<()> {
+    pub fn empty(per_page: NonZero<u64>) -> Self {
+        Self::new(vec![], Pagination::for_empty_data(per_page))
     }
 }
 
@@ -125,35 +217,296 @@ impl<T> Page<T> {
 /// Pagination query parameters
 #[derive(Deserialize, IntoParams, Clone, Copy)]
 pub struct PaginationQueryParams {
-    /// Page number
+    /// Page number, optional. Different endpoints interpret value absense differently.
     #[param(example = 3, minimum = 1)]
-    #[serde(default = "default_page")]
-    pub page: NonZero<u32>,
+    pub page: Option<NonZero<u64>>,
     /// Items per page
     #[param(example = 15, minimum = 1)]
     #[serde(default = "default_per_page")]
-    pub per_page: NonZeroU32,
+    pub per_page: NonZero<u64>,
 }
 
-fn default_page() -> NonZero<u32> {
-    const VALUE: NonZero<u32> = nonzero!(1u32);
-    VALUE
+const fn default_per_page() -> NonZero<u64> {
+    // FIXME: does it work as `const VAR = ...; VAR`?
+    const { nonzero!(10u64) }
 }
 
-fn default_per_page() -> NonZero<u32> {
-    const VALUE: NonZero<u32> = nonzero!(10u32);
-    VALUE
+/// Timestamp
+#[derive(Serialize, ToSchema, Debug)]
+#[schema(example = "2024-08-11T23:08:58Z")]
+pub struct TimeStamp(chrono::DateTime<Utc>);
+
+impl TimeStamp {
+    fn from_duration_as_epoch(value: std::time::Duration) -> Option<Self> {
+        chrono::DateTime::from_timestamp_millis(value.as_millis().try_into().ok()?).map(Self)
+    }
 }
 
-impl From<PaginationQueryParams> for iroha_data_model::query::parameters::Pagination {
-    fn from(value: PaginationQueryParams) -> Self {
-        let offset = NonZero::new((value.per_page.get() * (value.page.get() - 1)) as u64);
+/// Transaction
+#[derive(Serialize, ToSchema)]
+pub struct Transaction<'a> {
+    /// Transaction payload
+    payload: TransactionPayload<'a>,
+    /// Transaction signature
+    signature: Signature<'a>,
+    /// If exists, transaction has been rejected
+    error: Option<TransactionRejectionReason<'a>>,
+}
 
-        // FIXME: impossible to construct in otherway without enabling `transparent_api` feature of the data model
-        serde_json::from_value(json!({
-            "limit": value.per_page,
-            "start": offset
-        }))
-        .expect("should deserialize fine")
+impl<'a> From<&'a iroha::CommittedTransaction> for Transaction<'a> {
+    fn from(value: &'a iroha::CommittedTransaction) -> Self {
+        let signed: &iroha::SignedTransaction = value.as_ref();
+
+        Self {
+            payload: TransactionPayload {
+                chain: signed.chain(),
+                authority: AccountId(signed.authority()),
+                instructions: match signed.instructions() {
+                    iroha::Executable::Instructions(isis) => {
+                        Executable::Instructions(isis.iter().map(Instruction).collect())
+                    }
+                    iroha::Executable::Wasm(_) => Executable::Wasm,
+                },
+                nonce: signed.nonce(),
+                metadata: Metadata(signed.metadata()),
+                created_at: TimeStamp::from_duration_as_epoch(signed.creation_time())
+                    .expect("creation time should fit into date time"),
+                time_to_live: signed.time_to_live().map(Duration::from),
+            },
+            error: value.error().as_ref().map(TransactionRejectionReason),
+            signature: signed.signature().payload().into(),
+        }
+    }
+}
+
+/// Transaction rejection reason
+#[derive(Serialize, ToSchema)]
+#[schema(value_type = Object)]
+pub struct TransactionRejectionReason<'a>(&'a iroha::TransactionRejectionReason);
+
+/// Payload of transaction
+#[derive(Serialize, ToSchema)]
+pub struct TransactionPayload<'a> {
+    /// Unique id of the blockchain. used for simple replay attack protection.
+    chain: &'a iroha::ChainId,
+    /// The creator of the transactions
+    authority: AccountId<'a>,
+    /// Instructions of the transaction
+    instructions: Executable<'a>,
+    /// Random value to make different hashes for transactions
+    /// which occur repeatedly and simultaneously
+    nonce: Option<NonZero<u32>>,
+    /// Arbitrary additional information
+    metadata: Metadata<'a>,
+    /// Creation timestamp
+    created_at: TimeStamp,
+    /// After which time span since creation transaction is dismissed if not committed yet
+    time_to_live: Option<Duration>,
+}
+
+/// Operations executable on-chain
+#[derive(Serialize, ToSchema)]
+#[serde(tag = "kind", content = "value")]
+pub enum Executable<'a> {
+    /// Array of instructions
+    Instructions(Vec<Instruction<'a>>),
+    /// WebAssembly smart contract
+    Wasm,
+}
+
+/// Iroha Special Instruction (ISI)
+#[derive(Serialize, ToSchema)]
+#[schema(value_type = Object)]
+pub struct Instruction<'a>(&'a iroha::InstructionBox);
+
+/// Block
+#[derive(Serialize, ToSchema)]
+pub struct Block<'a> {
+    /// Block hash
+    hash: Hash,
+    /// Block header
+    header: BlockHeader,
+    /// Signatures of peers which approved this block
+    signatures: Vec<BlockSignature<'a>>,
+    /// Transactions which successfully passed validation & consensus step.
+    transactions: Vec<Transaction<'a>>,
+    // TODO event recommendations?
+}
+
+impl<'a> From<&'a iroha::SignedBlock> for Block<'a> {
+    fn from(value: &'a iroha::SignedBlock) -> Self {
+        Self {
+            hash: Hash(value.hash().into()),
+            header: BlockHeader::from(value.header()),
+            signatures: value
+                .signatures()
+                .map(|x| BlockSignature {
+                    topology_index: BigInt(x.index() as u128),
+                    payload: x.payload().into(),
+                })
+                .collect(),
+            transactions: value.transactions().map(Transaction::from).collect(),
+        }
+    }
+}
+
+/// Signature of block
+#[derive(Serialize, ToSchema)]
+pub struct BlockSignature<'a> {
+    /// Index of the peer in the topology
+    topology_index: BigInt,
+    /// The signature itself
+    payload: Signature<'a>,
+}
+
+/// Header of block
+#[derive(Serialize, ToSchema)]
+#[schema(
+    example = json!({
+        "height": 4,
+        "prev_block_hash": "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3",
+        "transactions_hash": "6D8C110F75E7447D1495FE419C212ABA5DA31F940B85C8598D76A11C5D60AEFB",
+        "created_at": "2024-08-15T00:40:02.324Z",
+        "consensus_estimation": {
+            "ms": 0
+        }
+    })
+)]
+pub struct BlockHeader {
+    /// Number of blocks in the chain including this block
+    height: NonZero<u64>,
+    /// Hash of the previous block in the chain
+    prev_block_hash: Option<Hash>,
+    /// Hash of merkle tree root of transactions' hashes
+    transactions_hash: Hash,
+    /// Timestamp of creation
+    created_at: TimeStamp,
+    /// Estimation of consensus duration
+    consensus_estimation: Duration,
+}
+
+impl From<&iroha::BlockHeader> for BlockHeader {
+    fn from(value: &iroha::BlockHeader) -> Self {
+        Self {
+            height: value.height(),
+            prev_block_hash: value.prev_block_hash().map(Hash::from),
+            transactions_hash: value.transactions_hash().into(),
+            created_at: TimeStamp::from_duration_as_epoch(value.creation_time())
+                .expect("creation time should fit into datetime"),
+            consensus_estimation: Duration::from(value.consensus_estimation()),
+        }
+    }
+}
+
+/// Hex-encoded hash
+#[derive(Serialize, ToSchema)]
+#[schema(value_type = String, example = "1B0A52DBDC11EAE39DD0524AD5146122351527CE00D161EA8263EA7ADE4164AF")]
+pub struct Hash(iroha::Hash);
+
+impl<T> From<iroha_crypto::HashOf<T>> for Hash {
+    fn from(value: iroha_crypto::HashOf<T>) -> Self {
+        Self(value.into())
+    }
+}
+
+/// Hex-encoded signature
+#[derive(Serialize, ToSchema)]
+#[schema(
+    value_type = Object,
+    example = json!({
+        "payload": "19569E8D7A44AE93972D66BFF9B5316587CC80907B52CB667BB525B152B1591D1B1E9D89E1A67F534CE040E1FB9F18DA3B546553E111020DEFF859094FEE7A0B"
+    })
+)]
+// FIXME: utoipa doesn't display example
+pub struct Signature<'a>(Cow<'a, iroha_crypto::Signature>);
+
+impl<T> From<iroha_crypto::SignatureOf<T>> for Signature<'_> {
+    fn from(value: iroha_crypto::SignatureOf<T>) -> Self {
+        Self(Cow::Owned(value.into()))
+    }
+}
+
+impl<'a, T> From<&'a iroha_crypto::SignatureOf<T>> for Signature<'a> {
+    fn from(value: &'a iroha_crypto::SignatureOf<T>) -> Self {
+        Self(Cow::Borrowed(value))
+    }
+}
+
+impl<'a> From<&'a iroha_crypto::Signature> for Signature<'a> {
+    fn from(value: &'a iroha_crypto::Signature) -> Self {
+        Self(Cow::Borrowed(value))
+    }
+}
+
+/// Duration
+#[derive(ToSchema, Serialize)]
+pub struct Duration {
+    /// Number of milliseconds
+    ms: BigInt,
+}
+
+impl From<std::time::Duration> for Duration {
+    fn from(value: std::time::Duration) -> Self {
+        Self {
+            ms: BigInt(value.as_millis()),
+        }
+    }
+}
+
+#[derive(DeserializeFromStr)]
+pub enum BlockHeightOrHash {
+    Height(NonZero<u64>),
+    Hash(iroha::Hash),
+}
+
+impl FromStr for BlockHeightOrHash {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(value) = s.parse::<NonZero<u64>>() {
+            return Ok(Self::Height(value));
+        }
+        if let Ok(value) = s.parse::<iroha::Hash>() {
+            return Ok(Self::Hash(value));
+        }
+        return Err("value should be either a non-zero positive integer or a hash");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn serialize_bigint() {
+        assert_eq!(json!(BigInt(0)), json!(0));
+        assert_eq!(json!(BigInt(9007199254740991)), json!(9007199254740991u64));
+        assert_eq!(
+            json!(BigInt(9007199254740991 + 1)),
+            json!("9007199254740992")
+        );
+        assert_eq!(
+            json!(BigInt(10_000_000_000_000_000_000_000u128)),
+            json!("10000000000000000000000")
+        )
+    }
+
+    #[test]
+    fn deserialize_block_height_or_hash() {
+        let BlockHeightOrHash::Height(value) =
+            serde_json::from_value(json!("412")).expect("should parse")
+        else {
+            panic!("should be height")
+        };
+        assert_eq!(value, nonzero!(412u64));
+
+        let BlockHeightOrHash::Hash(_) = serde_json::from_value(json!(
+            "3E75E5A0277C34756C2FF702963C4B9024A5E00C327CC682D9CA222EB5589DB1"
+        ))
+        .expect("should parse") else {
+            panic!("should be hash")
+        };
     }
 }

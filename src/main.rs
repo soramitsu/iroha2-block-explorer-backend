@@ -3,6 +3,7 @@
 mod endpoint;
 mod iroha;
 mod schema;
+mod util;
 
 use crate::iroha::Client;
 
@@ -42,7 +43,12 @@ pub struct Args {
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
 #[derive(OpenApi)]
 #[openapi(
-    paths(endpoint::domains_index, endpoint::domains_show),
+    paths(
+        endpoint::domains_index,
+        endpoint::domains_show,
+        endpoint::blocks_index,
+        endpoint::blocks_show
+    ),
     components(schemas(
         schema::Domain,
         schema::DomainId,
@@ -51,6 +57,19 @@ pub struct Args {
         schema::Metadata,
         schema::Pagination,
         schema::DomainsPage,
+        schema::Block,
+        schema::BlockHeader,
+        schema::BlockSignature,
+        schema::Executable,
+        schema::Instruction,
+        schema::Transaction,
+        schema::TransactionPayload,
+        schema::TransactionRejectionReason,
+        schema::TimeStamp,
+        schema::BigInt,
+        schema::Hash,
+        schema::Signature,
+        schema::Duration,
     ))
 )]
 struct ApiDoc;
