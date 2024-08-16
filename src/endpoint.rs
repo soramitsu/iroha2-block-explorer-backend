@@ -309,7 +309,7 @@ async fn assets_show(
     let asset = state
         .client
         .query(FindAssets)
-        .filter(|asset| asset.id.eq(id.into_owned()))
+        .filter(|asset| asset.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
@@ -351,7 +351,7 @@ async fn asset_definitions_show(
     let definition = state
         .client
         .query(FindAssetsDefinitions)
-        .filter(|definition| definition.id.eq(id.into_owned()))
+        .filter(|definition| definition.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;

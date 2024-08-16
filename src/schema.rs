@@ -92,7 +92,7 @@ pub struct AssetDefinition<'a> {
 impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
     fn from(value: &'a iroha::AssetDefinition) -> Self {
         Self {
-            id: AssetDefinitionId::from(value.id()),
+            id: AssetDefinitionId(Cow::Borrowed(value.id())),
             r#type: match value.type_() {
                 iroha::AssetType::Numeric(_spec) => AssetType::Numeric {
                     scale: None, // FIXME: private field, no access - spec.scale(),
@@ -111,32 +111,10 @@ impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
     }
 }
 
+/// Asset Definition ID. Represented in a form of `asset#domain`.
 #[derive(ToSchema, Serialize, Deserialize)]
-pub struct AssetDefinitionId<'a> {
-    domain: DomainId<'a>,
-    name: Cow<'a, str>,
-}
-
-impl<'a> AssetDefinitionId<'a> {
-    pub fn into_owned(self) -> iroha::AssetDefinitionId {
-        iroha::AssetDefinitionId::new(
-            self.domain.0.into_owned(),
-            self.name
-                .into_owned()
-                .parse()
-                .expect("it was constructed from name, reverse conversion should not fail"),
-        )
-    }
-}
-
-impl<'a> From<&'a iroha::AssetDefinitionId> for AssetDefinitionId<'a> {
-    fn from(value: &'a iroha::AssetDefinitionId) -> Self {
-        Self {
-            domain: DomainId(Cow::Borrowed(value.domain())),
-            name: Cow::Borrowed(value.name().as_ref()),
-        }
-    }
-}
+#[schema(value_type = String, example = "roses#wonderland")]
+pub struct AssetDefinitionId<'a>(pub Cow<'a, iroha::AssetDefinitionId>);
 
 #[derive(ToSchema, Serialize)]
 #[serde(tag = "kind")]
@@ -161,7 +139,7 @@ pub struct Asset<'a> {
 impl<'a> From<&'a iroha::Asset> for Asset<'a> {
     fn from(value: &'a iroha::Asset) -> Self {
         Self {
-            id: AssetId::from(value.id()),
+            id: AssetId(Cow::Borrowed(value.id())),
             value: match value.value() {
                 iroha::AssetValue::Numeric(numeric) => AssetValue::Numeric {
                     value: Decimal::from(numeric),
@@ -174,26 +152,15 @@ impl<'a> From<&'a iroha::Asset> for Asset<'a> {
     }
 }
 
+/// Asset ID. Union of [`AssetDefinitionId`] (`name#domain`) and [`AccountId`] (`signatory@domain`).
+///
+/// Represented as:
+///
+/// - `asset#asset_domain#signatory@account_domain`
+/// - `asset##signatory@domain` - when both the asset definition and the account are in the same domain
 #[derive(ToSchema, Serialize, Deserialize)]
-pub struct AssetId<'a> {
-    definition: AssetDefinitionId<'a>,
-    account: AccountId<'a>,
-}
-
-impl<'a> From<&'a iroha::AssetId> for AssetId<'a> {
-    fn from(value: &'a iroha::AssetId) -> Self {
-        AssetId {
-            account: AccountId(Cow::Borrowed(value.account())),
-            definition: AssetDefinitionId::from(value.definition()),
-        }
-    }
-}
-
-impl<'a> AssetId<'a> {
-    pub fn into_owned(self) -> iroha::AssetId {
-        iroha::AssetId::new(self.definition.into_owned(), self.account.0.into_owned())
-    }
-}
+#[schema(value_type = String, example = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland")]
+pub struct AssetId<'a>(pub Cow<'a, iroha::AssetId>);
 
 #[derive(ToSchema, Serialize)]
 #[serde(tag = "kind")]
@@ -703,13 +670,23 @@ mod test {
         };
     }
 
-    // TODO
     #[test]
     fn serialize_asset_id_canonically() {
-        let expected =
-            "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland";
-        let id = iroha::AssetId::from_str(expected).expect("input is valid");
-        let value = AssetId::from(&id);
+        let short = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland";
+        let full = "roses#looking_glass#ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland";
+        for expected in [short, full] {
+            let id = iroha::AssetId::from_str(expected).expect("input is valid");
+            let value = AssetId(Cow::Owned(id));
+            let serialized = serde_json::to_string(&value).expect("no possible errors expected");
+            assert_eq!(serialized, format!("\"{expected}\""));
+        }
+    }
+
+    #[test]
+    fn serialize_asset_definition_id_canonically() {
+        let expected = "rose#wonderland";
+        let id = iroha::AssetDefinitionId::from_str(expected).expect("input is valid");
+        let value = AssetDefinitionId(Cow::Owned(id));
         let serialized = serde_json::to_string(&value).expect("no possible errors expected");
         assert_eq!(serialized, format!("\"{expected}\""));
     }
