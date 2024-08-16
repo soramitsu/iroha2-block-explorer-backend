@@ -10,15 +10,18 @@ use axum::{
 use iroha_crypto::HashOf;
 use iroha_data_model::{
     prelude::{
-        FindBlockHeaderByHash, FindBlocks, FindDomains, FindTransactionByHash, FindTransactions,
+        FindAccounts, FindAssets, FindAssetsDefinitions, FindBlockHeaderByHash, FindBlocks,
+        FindDomains, FindTransactionByHash, FindTransactions,
     },
     query::{error::QueryExecutionFail, parameters::Pagination},
     ValidationFail,
 };
 use nonzero_ext::nonzero;
+use serde::Serialize;
 
 use crate::{
     iroha::{Client, Error as IrohaError},
+    schema::ToAppSchema,
     util::{DirectPagination, ReversePagination},
 };
 use crate::{schema, util::ReversePaginationError};
@@ -58,6 +61,17 @@ impl IntoResponse for AppError {
     }
 }
 
+fn util_page<'a, T>(
+    items: impl Iterator<Item = &'a T>,
+    pagination: impl Into<schema::Pagination>,
+) -> schema::Page<<T as ToAppSchema<'a>>::Output>
+where
+    T: ToAppSchema<'a> + Sized,
+    <T as ToAppSchema<'a>>::Output: Serialize,
+{
+    schema::Page::new(items.map(T::to_app_schema).collect(), pagination.into())
+}
+
 /// List domains
 #[utoipa::path(
     get,
@@ -80,18 +94,14 @@ async fn domains_index(
         .paginate(pagination)
         .all()
         .await?;
-    let page = schema::Page::new(
-        domains.iter().map(schema::Domain::from).collect(),
-        pagination.into(),
-    );
-    Ok(Json(page).into_response())
+    Ok(Json(util_page(domains.iter(), pagination)).into_response())
 }
 
 /// Find a domain
 #[utoipa::path(get, path = "/api/v1/domains/{id}", responses(
     (status = 200, description = "Domain Found", body = schema::Domain),
     (status = 404, description = "Domain Not Found")
-), params(("id", description = "Domain ID", example = "genesis")))]
+), params(("id" = schema::DomainId, description = "Domain ID", example = "genesis")))]
 async fn domains_show(
     State(state): State<AppState>,
     Path(id): Path<schema::DomainId<'_>>,
@@ -103,7 +113,7 @@ async fn domains_show(
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(schema::Domain::from(&domain)).into_response())
+    Ok(Json(domain.to_app_schema()).into_response())
 }
 
 /// List blocks
@@ -126,19 +136,13 @@ async fn blocks_index(
     };
     let pagination =
         ReversePagination::new(height, pagination_query.per_page, pagination_query.page)?;
-
     let blocks = state
         .client
         .query(FindBlocks)
         .paginate(pagination)
         .all()
         .await?;
-
-    let page = schema::Page::new(
-        blocks.iter().map(schema::Block::from).collect(),
-        pagination.into(),
-    );
-    Ok(Json(page).into_response())
+    Ok(Json(util_page(blocks.iter(), pagination)).into_response())
 }
 
 /// Find a block by its hash/height
@@ -182,7 +186,7 @@ async fn blocks_show(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    Ok(Json(schema::Block::from(&block)).into_response())
+    Ok(Json(block.to_app_schema()).into_response())
 }
 
 /// List transactions
@@ -205,14 +209,7 @@ async fn transactions_index(
         .paginate(pagination)
         .all()
         .await?;
-    let page = schema::Page::new(
-        items
-            .iter()
-            .map(schema::TransactionWithHash::from)
-            .collect(),
-        pagination.into(),
-    );
-    Ok(Json(page).into_response())
+    Ok(Json(util_page(items.iter(), pagination)).into_response())
 }
 
 /// Find a transaction by its hash
@@ -232,13 +229,145 @@ async fn transactions_show(
             hash,
         )))
         .await?;
-    Ok(Json(schema::TransactionWithHash::from(&item)).into_response())
+    Ok(Json(item.to_app_schema()).into_response())
+}
+
+/// List accounts
+#[utoipa::path(
+    get,
+    path = "/api/v1/accounts",
+    params(schema::PaginationQueryParams),
+    responses(
+        (status = 200, description = "OK", body = [schema::Account])
+    )
+)]
+async fn accounts_index(
+    State(state): State<AppState>,
+    Query(pagination_query): Query<schema::PaginationQueryParams>,
+) -> Result<impl IntoResponse, AppError> {
+    let pagination = DirectPagination::from(pagination_query);
+    let accounts = state
+        .client
+        .query(FindAccounts)
+        .paginate(pagination)
+        .all()
+        .await?;
+    Ok(Json(util_page(accounts.iter(), pagination)).into_response())
+}
+
+/// Find an account
+#[utoipa::path(get, path = "/api/v1/accounts/{id}", responses(
+    (status = 200, description = "Found", body = schema::Account),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::AccountId, description = "Account ID")))]
+async fn accounts_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::AccountId<'_>>,
+) -> Result<impl IntoResponse, AppError> {
+    let account = state
+        .client
+        .query(FindAccounts)
+        .filter(|account| account.id.eq(id.0.into_owned()))
+        .one()
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(account.to_app_schema()).into_response())
+}
+
+/// List assets
+#[utoipa::path(
+    get,
+    path = "/api/v1/assets",
+    params(schema::PaginationQueryParams),
+    responses(
+        (status = 200, description = "OK", body = [schema::Asset])
+    )
+)]
+async fn assets_index(
+    State(state): State<AppState>,
+    Query(pagination_query): Query<schema::PaginationQueryParams>,
+) -> Result<impl IntoResponse, AppError> {
+    let pagination = DirectPagination::from(pagination_query);
+    let assets = state
+        .client
+        .query(FindAssets)
+        .paginate(pagination)
+        .all()
+        .await?;
+    Ok(Json(util_page(assets.iter(), pagination)).into_response())
+}
+
+/// Find an asset
+#[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
+    (status = 200, description = "Found", body = schema::Asset),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::AssetId, description = "Asset ID")))]
+async fn assets_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::AssetId<'_>>,
+) -> Result<impl IntoResponse, AppError> {
+    let asset = state
+        .client
+        .query(FindAssets)
+        .filter(|asset| asset.id.eq(id.into_owned()))
+        .one()
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(asset.to_app_schema()).into_response())
+}
+
+/// List asset definitions
+#[utoipa::path(
+    get,
+    path = "/api/v1/asset-definitions",
+    params(schema::PaginationQueryParams),
+    responses(
+        (status = 200, description = "OK", body = [schema::AssetDefinition])
+    )
+)]
+async fn asset_definitions_index(
+    State(state): State<AppState>,
+    Query(pagination_query): Query<schema::PaginationQueryParams>,
+) -> Result<impl IntoResponse, AppError> {
+    let pagination = DirectPagination::from(pagination_query);
+    let items = state
+        .client
+        .query(FindAssetsDefinitions)
+        .paginate(pagination)
+        .all()
+        .await?;
+    Ok(Json(util_page(items.iter(), pagination)).into_response())
+}
+
+/// Find an asset definition
+#[utoipa::path(get, path = "/api/v1/asset-definitions/{id}", responses(
+    (status = 200, description = "Found", body = schema::AssetDefinition),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
+async fn asset_definitions_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::AssetDefinitionId<'_>>,
+) -> Result<impl IntoResponse, AppError> {
+    let definition = state
+        .client
+        .query(FindAssetsDefinitions)
+        .filter(|definition| definition.id.eq(id.into_owned()))
+        .one()
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(definition.to_app_schema()).into_response())
 }
 
 pub fn router(client: Client) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/:id", get(domains_show))
+        .route("/accounts", get(accounts_index))
+        .route("/accounts/:id", get(accounts_show))
+        .route("/asset-definitions", get(asset_definitions_index))
+        .route("/asset-definitions/:id", get(asset_definitions_show))
+        .route("/assets", get(assets_index))
+        .route("/assets/:id", get(assets_show))
         .route("/blocks", get(blocks_index))
         .route("/blocks/:height_or_hash", get(blocks_show))
         .route("/transactions", get(transactions_index))

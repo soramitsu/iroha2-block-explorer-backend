@@ -44,6 +44,12 @@ pub struct Args {
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        endpoint::accounts_index,
+        endpoint::accounts_show,
+        endpoint::assets_index,
+        endpoint::assets_show,
+        endpoint::asset_definitions_index,
+        endpoint::asset_definitions_show,
         endpoint::domains_index,
         endpoint::domains_show,
         endpoint::blocks_index,
@@ -54,6 +60,14 @@ pub struct Args {
     components(schemas(
         schema::Domain,
         schema::DomainId,
+        schema::Asset,
+        schema::AssetId,
+        schema::AssetDefinition,
+        schema::AssetDefinitionId,
+        schema::AssetType,
+        schema::AssetValue,
+        schema::Mintable,
+        schema::Account,
         schema::AccountId,
         schema::IpfsPath,
         schema::Metadata,
@@ -70,6 +84,7 @@ pub struct Args {
         schema::TransactionRejectionReason,
         schema::TimeStamp,
         schema::BigInt,
+        schema::Decimal,
         schema::Hash,
         schema::Signature,
         schema::Duration,

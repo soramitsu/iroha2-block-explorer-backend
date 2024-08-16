@@ -13,15 +13,8 @@ mod iroha {
     pub use iroha_crypto::Hash;
     pub use iroha_data_model::prelude::*;
     pub use iroha_data_model::{
-        account::AccountId,
         block::{BlockHeader, SignedBlock},
-        domain::DomainId,
         ipfs::IpfsPath,
-        isi::InstructionBox,
-        metadata::Metadata,
-        query::TransactionQueryOutput,
-        transaction::{error::TransactionRejectionReason, Executable},
-        ChainId,
     };
 }
 
@@ -52,7 +45,7 @@ impl<'a> From<&'a iroha_data_model::domain::Domain> for Domain<'a> {
             id: DomainId(Cow::Borrowed(value.id())),
             logo: value.logo().as_ref().map(IpfsPath),
             metadata: Metadata(value.metadata()),
-            owned_by: AccountId(value.owned_by()),
+            owned_by: AccountId(Cow::Borrowed(value.owned_by())),
         }
     }
 }
@@ -62,13 +55,163 @@ impl<'a> From<&'a iroha_data_model::domain::Domain> for Domain<'a> {
 #[schema(example = "genesis", value_type = String)]
 pub struct DomainId<'a>(pub Cow<'a, iroha::DomainId>);
 
+/// Account
+#[derive(Serialize, ToSchema)]
+pub struct Account<'a> {
+    id: AccountId<'a>,
+    metadata: Metadata<'a>,
+}
+
+impl<'a> From<&'a iroha::Account> for Account<'a> {
+    fn from(value: &'a iroha::Account) -> Self {
+        Self {
+            id: AccountId(Cow::Borrowed(value.id())),
+            metadata: Metadata(value.metadata()),
+        }
+    }
+}
+
 /// Account ID. Represented as `signatory@domain`.
-#[derive(ToSchema, Serialize)]
+#[derive(ToSchema, Serialize, Deserialize)]
 #[schema(
     example = "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
     value_type = String
 )]
-pub struct AccountId<'a>(&'a iroha::AccountId);
+pub struct AccountId<'a>(pub Cow<'a, iroha::AccountId>);
+
+#[derive(ToSchema, Serialize)]
+pub struct AssetDefinition<'a> {
+    id: AssetDefinitionId<'a>,
+    r#type: AssetType,
+    mintable: Mintable,
+    logo: Option<IpfsPath<'a>>,
+    metadata: Metadata<'a>,
+    owned_by: AccountId<'a>,
+}
+
+impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
+    fn from(value: &'a iroha::AssetDefinition) -> Self {
+        Self {
+            id: AssetDefinitionId::from(value.id()),
+            r#type: match value.type_() {
+                iroha::AssetType::Numeric(_spec) => AssetType::Numeric {
+                    scale: None, // FIXME: private field, no access - spec.scale(),
+                },
+                iroha::AssetType::Store => AssetType::Store,
+            },
+            mintable: match value.mintable() {
+                iroha::Mintable::Infinitely => Mintable::Infinitely,
+                iroha::Mintable::Once => Mintable::Once,
+                iroha::Mintable::Not => Mintable::Not,
+            },
+            logo: value.logo().as_ref().map(IpfsPath),
+            metadata: Metadata(value.metadata()),
+            owned_by: AccountId(Cow::Borrowed(value.owned_by())),
+        }
+    }
+}
+
+#[derive(ToSchema, Serialize, Deserialize)]
+pub struct AssetDefinitionId<'a> {
+    domain: DomainId<'a>,
+    name: Cow<'a, str>,
+}
+
+impl<'a> AssetDefinitionId<'a> {
+    pub fn into_owned(self) -> iroha::AssetDefinitionId {
+        iroha::AssetDefinitionId::new(
+            self.domain.0.into_owned(),
+            self.name
+                .into_owned()
+                .parse()
+                .expect("it was constructed from name, reverse conversion should not fail"),
+        )
+    }
+}
+
+impl<'a> From<&'a iroha::AssetDefinitionId> for AssetDefinitionId<'a> {
+    fn from(value: &'a iroha::AssetDefinitionId) -> Self {
+        Self {
+            domain: DomainId(Cow::Borrowed(value.domain())),
+            name: Cow::Borrowed(value.name().as_ref()),
+        }
+    }
+}
+
+#[derive(ToSchema, Serialize)]
+#[serde(tag = "kind")]
+pub enum AssetType {
+    Numeric { scale: Option<u32> },
+    Store,
+}
+
+#[derive(ToSchema, Serialize)]
+pub enum Mintable {
+    Infinitely,
+    Once,
+    Not,
+}
+
+#[derive(ToSchema, Serialize)]
+pub struct Asset<'a> {
+    id: AssetId<'a>,
+    value: AssetValue<'a>,
+}
+
+impl<'a> From<&'a iroha::Asset> for Asset<'a> {
+    fn from(value: &'a iroha::Asset) -> Self {
+        Self {
+            id: AssetId::from(value.id()),
+            value: match value.value() {
+                iroha::AssetValue::Numeric(numeric) => AssetValue::Numeric {
+                    value: Decimal::from(numeric),
+                },
+                iroha::AssetValue::Store(map) => AssetValue::Store {
+                    metadata: Metadata(map),
+                },
+            },
+        }
+    }
+}
+
+#[derive(ToSchema, Serialize, Deserialize)]
+pub struct AssetId<'a> {
+    definition: AssetDefinitionId<'a>,
+    account: AccountId<'a>,
+}
+
+impl<'a> From<&'a iroha::AssetId> for AssetId<'a> {
+    fn from(value: &'a iroha::AssetId) -> Self {
+        AssetId {
+            account: AccountId(Cow::Borrowed(value.account())),
+            definition: AssetDefinitionId::from(value.definition()),
+        }
+    }
+}
+
+impl<'a> AssetId<'a> {
+    pub fn into_owned(self) -> iroha::AssetId {
+        iroha::AssetId::new(self.definition.into_owned(), self.account.0.into_owned())
+    }
+}
+
+#[derive(ToSchema, Serialize)]
+#[serde(tag = "kind")]
+pub enum AssetValue<'a> {
+    Numeric { value: Decimal },
+    Store { metadata: Metadata<'a> },
+}
+
+// TODO: figure out how to represent decimal
+#[derive(ToSchema, Serialize)]
+pub struct Decimal(String);
+
+impl From<&iroha::Numeric> for Decimal {
+    fn from(value: &iroha::Numeric) -> Self {
+        // TODO check in tests
+        Self(format!("{value}"))
+    }
+}
 
 /// Key-value map with arbitrary data
 #[derive(Serialize, ToSchema)]
@@ -281,7 +424,7 @@ impl<'a> From<&'a iroha::CommittedTransaction> for Transaction<'a> {
             hash: signed.hash().into(),
             payload: TransactionPayload {
                 chain: signed.chain(),
-                authority: AccountId(signed.authority()),
+                authority: AccountId(Cow::Borrowed(signed.authority())),
                 instructions: match signed.instructions() {
                     iroha::Executable::Instructions(isis) => {
                         Executable::Instructions(isis.iter().map(Instruction).collect())
@@ -494,6 +637,35 @@ impl FromStr for BlockHeightOrHash {
     }
 }
 
+/// Shows a relationship between a type and its reflection
+pub trait ToAppSchema<'a>
+where
+    Self: 'a,
+{
+    type Output: From<&'a Self>;
+
+    /// Reflects the type in its app schema representation
+    fn to_app_schema(&'a self) -> Self::Output {
+        Self::Output::from(&self)
+    }
+}
+
+macro_rules! impl_to_app_schema {
+    ($from:ty => $into:tt) => {
+        impl<'a> ToAppSchema<'a> for $from {
+            type Output = $into<'a>;
+        }
+    };
+}
+
+impl_to_app_schema!(iroha::Domain => Domain);
+impl_to_app_schema!(iroha::Account => Account);
+impl_to_app_schema!(iroha::Asset => Asset);
+impl_to_app_schema!(iroha::AssetDefinition => AssetDefinition);
+impl_to_app_schema!(iroha::SignedBlock => Block);
+impl_to_app_schema!(iroha::CommittedTransaction => Transaction);
+impl_to_app_schema!(iroha::TransactionQueryOutput => TransactionWithHash);
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
@@ -529,5 +701,16 @@ mod test {
         .expect("should parse") else {
             panic!("should be hash")
         };
+    }
+
+    // TODO
+    #[test]
+    fn serialize_asset_id_canonically() {
+        let expected =
+            "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland";
+        let id = iroha::AssetId::from_str(expected).expect("input is valid");
+        let value = AssetId::from(&id);
+        let serialized = serde_json::to_string(&value).expect("no possible errors expected");
+        assert_eq!(serialized, format!("\"{expected}\""));
     }
 }
