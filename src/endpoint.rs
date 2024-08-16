@@ -10,14 +10,16 @@ use axum::{
 use iroha_crypto::HashOf;
 use iroha_data_model::{
     prelude::{
-        FindAccounts, FindAssets, FindAssetsDefinitions, FindBlockHeaderByHash, FindBlocks,
-        FindDomains, FindTransactionByHash, FindTransactions,
+        FindAccounts, FindAccountsWithAsset, FindAssets, FindAssetsDefinitions,
+        FindBlockHeaderByHash, FindBlocks, FindDomains, FindTransactionByHash, FindTransactions,
+        FindTransactionsByAccountId,
     },
     query::{error::QueryExecutionFail, parameters::Pagination},
     ValidationFail,
 };
 use nonzero_ext::nonzero;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use utoipa::IntoParams;
 
 use crate::{
     iroha::{Client, Error as IrohaError},
@@ -189,11 +191,17 @@ async fn blocks_show(
     Ok(Json(block.to_app_schema()).into_response())
 }
 
+#[derive(Deserialize, IntoParams)]
+struct TransactionsIndexFilter {
+    /// Select transactions created by account
+    account: Option<schema::AccountId<'static>>,
+}
+
 /// List transactions
 #[utoipa::path(
     get,
     path = "/api/v1/transactions",
-    params(schema::PaginationQueryParams),
+    params(schema::PaginationQueryParams, TransactionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Transaction])
     )
@@ -201,14 +209,24 @@ async fn blocks_show(
 async fn transactions_index(
     State(state): State<AppState>,
     Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<TransactionsIndexFilter>,
 ) -> Result<impl IntoResponse, AppError> {
     let pagination = DirectPagination::from(pagination_query);
-    let items = state
-        .client
-        .query(FindTransactions)
-        .paginate(pagination)
-        .all()
-        .await?;
+    let items = if let Some(id) = filter.account {
+        state
+            .client
+            .query(FindTransactionsByAccountId::new(id.0.into_owned()))
+            .paginate(pagination)
+            .all()
+            .await?
+    } else {
+        state
+            .client
+            .query(FindTransactions)
+            .paginate(pagination)
+            .all()
+            .await?
+    };
     Ok(Json(util_page(items.iter(), pagination)).into_response())
 }
 
@@ -232,11 +250,17 @@ async fn transactions_show(
     Ok(Json(item.to_app_schema()).into_response())
 }
 
+#[derive(IntoParams, Deserialize)]
+struct AccountsIndexFilter {
+    /// Select accounts owning specified asset
+    with_asset: Option<schema::AssetDefinitionId<'static>>,
+}
+
 /// List accounts
 #[utoipa::path(
     get,
     path = "/api/v1/accounts",
-    params(schema::PaginationQueryParams),
+    params(schema::PaginationQueryParams, AccountsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Account])
     )
@@ -244,14 +268,24 @@ async fn transactions_show(
 async fn accounts_index(
     State(state): State<AppState>,
     Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AccountsIndexFilter>,
 ) -> Result<impl IntoResponse, AppError> {
     let pagination = DirectPagination::from(pagination_query);
-    let accounts = state
-        .client
-        .query(FindAccounts)
-        .paginate(pagination)
-        .all()
-        .await?;
+    let accounts = if let Some(id) = filter.with_asset {
+        state
+            .client
+            .query(FindAccountsWithAsset::new(id.0.into_owned()))
+            .paginate(pagination)
+            .all()
+            .await?
+    } else {
+        state
+            .client
+            .query(FindAccounts)
+            .paginate(pagination)
+            .all()
+            .await?
+    };
     Ok(Json(util_page(accounts.iter(), pagination)).into_response())
 }
 
