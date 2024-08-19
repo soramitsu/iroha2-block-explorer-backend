@@ -7,7 +7,6 @@ edition = "2021"
 iroha_data_model = { path = "../iroha/data_model" }
 iroha_telemetry = { path = "../iroha/telemetry" }
 iroha_crypto = { path = "../iroha/crypto" }
-iroha_config = { path = "../iroha/config" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }

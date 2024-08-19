@@ -2069,7 +2069,6 @@ dependencies = [
  "futures",
  "hex",
  "http 0.2.12",
- "iroha_config",
  "iroha_crypto",
  "iroha_data_model",
  "iroha_telemetry",
