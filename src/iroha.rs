@@ -153,7 +153,13 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
     }
 
     #[must_use]
-    pub fn filter<B, O>(mut self, predicate_builder: B) -> Self
+    pub fn filter(mut self, filter: CompoundPredicate<P>) -> Self {
+        self.filter = self.filter.and(filter);
+        self
+    }
+
+    #[must_use]
+    pub fn filter_with<B, O>(self, predicate_builder: B) -> Self
     where
         P: HasPrototype,
         B: FnOnce(P::Prototype<projectors::BaseProjector<P>>) -> O,
@@ -161,10 +167,7 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
     {
         use iroha_data_model::query::predicate::predicate_ast_extensions::AstPredicateExt as _;
 
-        self.filter = self
-            .filter
-            .and(predicate_builder(Default::default()).normalize());
-        self
+        self.filter(predicate_builder(Default::default()).normalize())
     }
 
     pub fn paginate(mut self, pagination: impl Into<Pagination>) -> Self {

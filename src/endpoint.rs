@@ -10,6 +10,7 @@ use axum::{
 use iroha_crypto::HashOf;
 use iroha_data_model::{
     prelude::{
+        AccountPredicateBox, AssetDefinitionPredicateBox, AssetPredicateBox, CompoundPredicate,
         FindAccounts, FindAccountsWithAsset, FindAssets, FindAssetsDefinitions,
         FindBlockHeaderByHash, FindBlocks, FindDomains, FindTransactionByHash, FindTransactions,
         FindTransactionsByAccountId,
@@ -111,7 +112,7 @@ async fn domains_show(
     let domain = state
         .client
         .query(FindDomains)
-        .filter(|domain| domain.id.eq(id.0.into_owned()))
+        .filter_with(|domain| domain.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
@@ -254,6 +255,8 @@ async fn transactions_show(
 struct AccountsIndexFilter {
     /// Select accounts owning specified asset
     with_asset: Option<schema::AssetDefinitionId<'static>>,
+    /// Select accounts from specified domain
+    domain: Option<schema::DomainId<'static>>,
 }
 
 /// List accounts
@@ -271,10 +274,17 @@ async fn accounts_index(
     Query(filter): Query<AccountsIndexFilter>,
 ) -> Result<impl IntoResponse, AppError> {
     let pagination = DirectPagination::from(pagination_query);
+    // FIXME: find a more composable way to build a predicate
+    let predicate = if let Some(id) = filter.domain {
+        AccountPredicateBox::build(|account| account.id.domain_id.eq(id.0.into_owned()))
+    } else {
+        CompoundPredicate::PASS
+    };
     let accounts = if let Some(id) = filter.with_asset {
         state
             .client
             .query(FindAccountsWithAsset::new(id.0.into_owned()))
+            .filter(predicate)
             .paginate(pagination)
             .all()
             .await?
@@ -282,6 +292,7 @@ async fn accounts_index(
         state
             .client
             .query(FindAccounts)
+            .filter(predicate)
             .paginate(pagination)
             .all()
             .await?
@@ -301,18 +312,27 @@ async fn accounts_show(
     let account = state
         .client
         .query(FindAccounts)
-        .filter(|account| account.id.eq(id.0.into_owned()))
+        .filter_with(|account| account.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(account.to_app_schema()).into_response())
 }
 
+#[derive(Deserialize, IntoParams)]
+struct AssetsIndexFilter {
+    /// Filter by an owning account
+    owned_by: Option<schema::AccountId<'static>>,
+    // TODO: filter by owner/definition domain?
+    // /// Filter by the domain
+    // domain: Option<schema::DomainId<'static>>,
+}
+
 /// List assets
 #[utoipa::path(
     get,
     path = "/api/v1/assets",
-    params(schema::PaginationQueryParams),
+    params(schema::PaginationQueryParams, AssetsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Asset])
     )
@@ -320,12 +340,19 @@ async fn accounts_show(
 async fn assets_index(
     State(state): State<AppState>,
     Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetsIndexFilter>,
 ) -> Result<impl IntoResponse, AppError> {
     let pagination = DirectPagination::from(pagination_query);
+    let predicate = if let Some(owner) = filter.owned_by {
+        AssetPredicateBox::build(|asset| asset.id.account.eq(owner.0.into_owned()))
+    } else {
+        CompoundPredicate::PASS
+    };
     let assets = state
         .client
         .query(FindAssets)
         .paginate(pagination)
+        .filter(predicate)
         .all()
         .await?;
     Ok(Json(util_page(assets.iter(), pagination)).into_response())
@@ -343,18 +370,24 @@ async fn assets_show(
     let asset = state
         .client
         .query(FindAssets)
-        .filter(|asset| asset.id.eq(id.0.into_owned()))
+        .filter_with(|asset| asset.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(asset.to_app_schema()).into_response())
 }
 
+#[derive(IntoParams, Deserialize)]
+struct AssetDefinitionsIndexFilter {
+    /// Filter by domain
+    domain: Option<schema::DomainId<'static>>,
+}
+
 /// List asset definitions
 #[utoipa::path(
     get,
     path = "/api/v1/asset-definitions",
-    params(schema::PaginationQueryParams),
+    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::AssetDefinition])
     )
@@ -362,12 +395,19 @@ async fn assets_show(
 async fn asset_definitions_index(
     State(state): State<AppState>,
     Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetDefinitionsIndexFilter>,
 ) -> Result<impl IntoResponse, AppError> {
     let pagination = DirectPagination::from(pagination_query);
+    let predicate = if let Some(domain) = filter.domain {
+        AssetDefinitionPredicateBox::build(|def| def.id.domain_id.eq(domain.0.into_owned()))
+    } else {
+        CompoundPredicate::PASS
+    };
     let items = state
         .client
         .query(FindAssetsDefinitions)
         .paginate(pagination)
+        .filter(predicate)
         .all()
         .await?;
     Ok(Json(util_page(items.iter(), pagination)).into_response())
@@ -385,7 +425,7 @@ async fn asset_definitions_show(
     let definition = state
         .client
         .query(FindAssetsDefinitions)
-        .filter(|definition| definition.id.eq(id.0.into_owned()))
+        .filter_with(|definition| definition.id.eq(id.0.into_owned()))
         .one()
         .await?
         .ok_or(AppError::NotFound)?;
