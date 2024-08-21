@@ -94,8 +94,8 @@ impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
         Self {
             id: AssetDefinitionId(Cow::Borrowed(value.id())),
             r#type: match value.type_() {
-                iroha::AssetType::Numeric(_spec) => AssetType::Numeric {
-                    scale: None, // FIXME: private field, no access - spec.scale(),
+                iroha::AssetType::Numeric(spec) => AssetType::Numeric {
+                    scale: spec.scale(),
                 },
                 iroha::AssetType::Store => AssetType::Store,
             },
@@ -635,6 +635,7 @@ impl_to_app_schema!(iroha::TransactionQueryOutput => TransactionWithHash);
 
 #[cfg(test)]
 mod test {
+    use iroha_crypto::KeyPair;
     use serde_json::json;
 
     use super::*;
@@ -689,5 +690,16 @@ mod test {
         let value = AssetDefinitionId(Cow::Owned(id));
         let serialized = serde_json::to_string(&value).expect("no possible errors expected");
         assert_eq!(serialized, format!("\"{expected}\""));
+    }
+
+    #[test]
+    fn serialize_signature() {
+        let value = iroha_crypto::Signature::new(
+            KeyPair::from_seed(vec![1, 2, 3], iroha_crypto::Algorithm::Secp256k1).private_key(),
+            &[5, 4, 3, 2, 1],
+        );
+
+        expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
+            .assert_eq(&serde_json::to_string(&Signature(Cow::Owned(value))).unwrap())
     }
 }
