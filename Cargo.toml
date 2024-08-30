@@ -1,5 +1,5 @@
 [package]
-name = "iroha2_explorer_web"
+name = "iroha_explorer"
 version = "0.2.0"
 edition = "2021"
 
@@ -29,6 +29,8 @@ utoipa = { version = "4.2.3", features = ["axum_extras"] }
 utoipa-scalar = { version = "0.1.0", features = ["axum"] }
 nonzero_ext = "0.3.0"
 serde_with = "3.9.0"
+sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
+eyre = "0.6.12"
 
 [dev-dependencies]
 expect-test = "1.5.0"

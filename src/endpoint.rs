@@ -1,4 +1,4 @@
-use std::{num::NonZero, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
@@ -7,31 +7,21 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use iroha_crypto::HashOf;
-use iroha_data_model::{
-    prelude::{
-        AccountPredicateBox, AssetDefinitionPredicateBox, AssetPredicateBox, CompoundPredicate,
-        FindAccounts, FindAccountsWithAsset, FindAssets, FindAssetsDefinitions,
-        FindBlockHeaderByHash, FindBlocks, FindDomains, FindTransactionByHash, FindTransactions,
-        FindTransactionsByAccountId,
-    },
-    query::{error::QueryExecutionFail, parameters::Pagination},
-    ValidationFail,
-};
-use nonzero_ext::nonzero;
-use serde::{Deserialize, Serialize};
+use iroha_data_model::{query::error::QueryExecutionFail, ValidationFail};
+use serde::Deserialize;
 use utoipa::IntoParams;
 
+use crate::iroha::{Client, Error as IrohaError};
+use crate::schema::Page;
 use crate::{
-    iroha::{Client, Error as IrohaError},
-    schema::ToAppSchema,
-    util::{DirectPagination, ReversePagination},
+    repo::{self, Repo},
+    schema,
 };
-use crate::{schema, util::ReversePaginationError};
 
 #[derive(Clone)]
 struct AppState {
-    client: Arc<Client>,
+    iroha: Arc<Client>,
+    repo: Repo,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -40,8 +30,10 @@ enum AppError {
     IrohaClientError(#[from] crate::iroha::Error),
     #[error("not found")]
     NotFound,
-    #[error("invalid pagination: {0}")]
-    BadPage(#[from] ReversePaginationError),
+    // #[error("invalid pagination: {0}")]
+    // BadPage(#[from] ReversePaginationError),
+    #[error("database-related error: {0}")]
+    Repo(#[from] repo::Error),
 }
 
 impl IntoResponse for AppError {
@@ -59,20 +51,23 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
             AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
-            AppError::BadPage(x) => (StatusCode::BAD_REQUEST, format!("{x}")).into_response(),
+            AppError::Repo(repo::Error::Pagination(x)) => {
+                (StatusCode::BAD_REQUEST, format!("{x}")).into_response()
+            }
+            AppError::Repo(repo::Error::Sqlx(sqlx::Error::RowNotFound)) => {
+                (StatusCode::NOT_FOUND, "Not Found").into_response()
+            }
+            AppError::Repo(repo::Error::Sqlx(err)) => {
+                tracing::error!(%err, "sqlx error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
+            }
         }
     }
 }
 
-fn util_page<'a, T>(
-    items: impl Iterator<Item = &'a T>,
-    pagination: impl Into<schema::Pagination>,
-) -> schema::Page<<T as ToAppSchema<'a>>::Output>
-where
-    T: ToAppSchema<'a> + Sized,
-    <T as ToAppSchema<'a>>::Output: Serialize,
-{
-    schema::Page::new(items.map(T::to_app_schema).collect(), pagination.into())
+#[derive(IntoParams, Deserialize)]
+struct DomainsIndexFilter {
+    owned_by: Option<schema::AccountId>,
 }
 
 /// List domains
@@ -82,22 +77,23 @@ where
     responses(
         (status = 200, description = "OK", body = schema::DomainsPage)
     ),
-    params(
-        schema::PaginationQueryParams
-    )
+    params(schema::PaginationQueryParams, DomainsIndexFilter)
 )]
 async fn domains_index(
     State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
-) -> Result<impl IntoResponse, AppError> {
-    let pagination = DirectPagination::from(pagination_query);
+    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<DomainsIndexFilter>,
+) -> Result<Json<schema::Page<schema::Domain>>, AppError> {
     let domains = state
-        .client
-        .query(FindDomains)
-        .paginate(pagination)
-        .all()
-        .await?;
-    Ok(Json(util_page(domains.iter(), pagination)).into_response())
+        .repo
+        .list_domains(repo::ListDomainParams {
+            pagination,
+            owned_by: filter.owned_by.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Domain::from);
+
+    Ok(Json(domains))
 }
 
 /// Find a domain
@@ -107,16 +103,10 @@ async fn domains_index(
 ), params(("id" = schema::DomainId, description = "Domain ID", example = "genesis")))]
 async fn domains_show(
     State(state): State<AppState>,
-    Path(id): Path<schema::DomainId<'_>>,
-) -> Result<impl IntoResponse, AppError> {
-    let domain = state
-        .client
-        .query(FindDomains)
-        .filter_with(|domain| domain.id.eq(id.0.into_owned()))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(domain.to_app_schema()).into_response())
+    Path(id): Path<schema::DomainId>,
+) -> Result<Json<schema::Domain>, AppError> {
+    let domain = state.repo.find_domain(id.0).await?;
+    Ok(Json(schema::Domain::from(domain)))
 }
 
 /// List blocks
@@ -131,21 +121,14 @@ async fn domains_show(
 )]
 async fn blocks_index(
     State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
-) -> Result<impl IntoResponse, AppError> {
-    let height = state.client.status().await?.blocks;
-    let Some(height) = NonZero::new(height) else {
-        return Ok(Json(schema::Page::empty(pagination_query.per_page)).into_response());
-    };
-    let pagination =
-        ReversePagination::new(height, pagination_query.per_page, pagination_query.page)?;
+    Query(pagination): Query<schema::PaginationQueryParams>,
+) -> Result<Json<Page<schema::Block>>, AppError> {
     let blocks = state
-        .client
-        .query(FindBlocks)
-        .paginate(pagination)
-        .all()
-        .await?;
-    Ok(Json(util_page(blocks.iter(), pagination)).into_response())
+        .repo
+        .list_blocks(pagination)
+        .await?
+        .map(schema::Block::from);
+    Ok(Json(blocks))
 }
 
 /// Find a block by its hash/height
@@ -163,39 +146,24 @@ async fn blocks_index(
 async fn blocks_show(
     State(state): State<AppState>,
     Path(height_or_hash): Path<schema::BlockHeightOrHash>,
-) -> Result<impl IntoResponse, AppError> {
-    let height = match height_or_hash {
-        schema::BlockHeightOrHash::Height(height) => height,
-        schema::BlockHeightOrHash::Hash(hash) => state
-            .client
-            .query_singular(FindBlockHeaderByHash::new(HashOf::from_untyped_unchecked(
-                hash,
-            )))
-            .await?
-            .height(),
+) -> Result<Json<schema::Block>, AppError> {
+    let params = match height_or_hash {
+        schema::BlockHeightOrHash::Height(height) => {
+            repo::FindBlockParams::Height(height.get() as u32)
+        }
+        schema::BlockHeightOrHash::Hash(hash) => repo::FindBlockParams::Hash(hash),
     };
 
-    let max_height = state.client.status().await?.blocks;
-    let start = if height.get() > max_height {
-        return Err(AppError::NotFound);
-    } else {
-        max_height - height.get()
-    };
-    let block = state
-        .client
-        .query(FindBlocks)
-        .paginate(Pagination::new(start, Some(nonzero!(1u64))))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-
-    Ok(Json(block.to_app_schema()).into_response())
+    let block = state.repo.find_block(params).await?;
+    Ok(Json(block.into()))
 }
 
 #[derive(Deserialize, IntoParams)]
 struct TransactionsIndexFilter {
-    /// Select transactions created by account
-    account: Option<schema::AccountId<'static>>,
+    /// Select by authority
+    authority: Option<schema::AccountId>,
+    /// Select by block hash
+    block_hash: Option<schema::Hash>,
 }
 
 /// List transactions
@@ -209,54 +177,42 @@ struct TransactionsIndexFilter {
 )]
 async fn transactions_index(
     State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<TransactionsIndexFilter>,
-) -> Result<impl IntoResponse, AppError> {
-    let pagination = DirectPagination::from(pagination_query);
-    let items = if let Some(id) = filter.account {
-        state
-            .client
-            .query(FindTransactionsByAccountId::new(id.0.into_owned()))
-            .paginate(pagination)
-            .all()
-            .await?
-    } else {
-        state
-            .client
-            .query(FindTransactions)
-            .paginate(pagination)
-            .all()
-            .await?
-    };
-    Ok(Json(util_page(items.iter(), pagination)).into_response())
+) -> Result<Json<Page<schema::TransactionInList>>, AppError> {
+    let page = state
+        .repo
+        .list_transactions(repo::ListTransactionsParams {
+            pagination,
+            block_hash: filter.block_hash.map(|x| x.0),
+            authority: filter.authority.map(|x| x.0),
+        })
+        .await?
+        .map(schema::TransactionInList::from);
+    Ok(Json(page))
 }
 
 /// Find a transaction by its hash
 #[utoipa::path(get, path = "/api/v1/transactions/{hash}", params(
-    ("hash", description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
+    ("hash" = schema::Hash, description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
 ), responses(
     (status = 200, description = "Transaction Found", body = schema::TransactionWithHash),
     (status = 404, description = "Transaction Not Found")
 ))]
 async fn transactions_show(
     State(state): State<AppState>,
-    Path(hash): Path<iroha_crypto::Hash>,
-) -> Result<impl IntoResponse, AppError> {
-    let item = state
-        .client
-        .query_singular(FindTransactionByHash::new(HashOf::from_untyped_unchecked(
-            hash,
-        )))
-        .await?;
-    Ok(Json(item.to_app_schema()).into_response())
+    Path(hash): Path<schema::Hash>,
+) -> Result<Json<schema::TransactionDetailed>, AppError> {
+    let tx = state.repo.find_transaction_by_hash(hash.0).await?;
+    Ok(Json(tx.into()))
 }
 
 #[derive(IntoParams, Deserialize)]
 struct AccountsIndexFilter {
     /// Select accounts owning specified asset
-    with_asset: Option<schema::AssetDefinitionId<'static>>,
+    with_asset: Option<schema::AssetDefinitionId>,
     /// Select accounts from specified domain
-    domain: Option<schema::DomainId<'static>>,
+    domain: Option<schema::DomainId>,
 }
 
 /// List accounts
@@ -270,34 +226,19 @@ struct AccountsIndexFilter {
 )]
 async fn accounts_index(
     State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<AccountsIndexFilter>,
-) -> Result<impl IntoResponse, AppError> {
-    let pagination = DirectPagination::from(pagination_query);
-    // FIXME: find a more composable way to build a predicate
-    let predicate = if let Some(id) = filter.domain {
-        AccountPredicateBox::build(|account| account.id.domain_id.eq(id.0.into_owned()))
-    } else {
-        CompoundPredicate::PASS
-    };
-    let accounts = if let Some(id) = filter.with_asset {
-        state
-            .client
-            .query(FindAccountsWithAsset::new(id.0.into_owned()))
-            .filter(predicate)
-            .paginate(pagination)
-            .all()
-            .await?
-    } else {
-        state
-            .client
-            .query(FindAccounts)
-            .filter(predicate)
-            .paginate(pagination)
-            .all()
-            .await?
-    };
-    Ok(Json(util_page(accounts.iter(), pagination)).into_response())
+) -> Result<Json<Page<schema::Account>>, AppError> {
+    let page = state
+        .repo
+        .list_accounts(repo::ListAccountsParams {
+            pagination,
+            with_asset: filter.with_asset.map(|x| x.0),
+            domain: filter.domain.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Account::from);
+    Ok(Json(page))
 }
 
 /// Find an account
@@ -307,146 +248,140 @@ async fn accounts_index(
 ), params(("id" = schema::AccountId, description = "Account ID")))]
 async fn accounts_show(
     State(state): State<AppState>,
-    Path(id): Path<schema::AccountId<'_>>,
-) -> Result<impl IntoResponse, AppError> {
-    let account = state
-        .client
-        .query(FindAccounts)
-        .filter_with(|account| account.id.eq(id.0.into_owned()))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(account.to_app_schema()).into_response())
+    Path(id): Path<schema::AccountId>,
+) -> Result<Json<schema::Account>, AppError> {
+    Ok(Json(state.repo.find_account(id.0).await?.into()))
 }
 
-#[derive(Deserialize, IntoParams)]
-struct AssetsIndexFilter {
-    /// Filter by an owning account
-    owned_by: Option<schema::AccountId<'static>>,
-    // TODO: filter by owner/definition domain?
-    // /// Filter by the domain
-    // domain: Option<schema::DomainId<'static>>,
-}
+// #[derive(Deserialize, IntoParams)]
+// struct AssetsIndexFilter {
+//     /// Filter by an owning account
+//     owned_by: Option<schema::AccountId<'static>>,
+//     // TODO: filter by owner/definition domain?
+//     // /// Filter by the domain
+//     // domain: Option<schema::DomainId<'static>>,
+// }
+//
+// /// List assets
+// #[utoipa::path(
+//     get,
+//     path = "/api/v1/assets",
+//     params(schema::PaginationQueryParams, AssetsIndexFilter),
+//     responses(
+//         (status = 200, description = "OK", body = [schema::Asset])
+//     )
+// )]
+// async fn assets_index(
+//     State(state): State<AppState>,
+//     Query(pagination_query): Query<schema::PaginationQueryParams>,
+//     Query(filter): Query<AssetsIndexFilter>,
+// ) -> Result<impl IntoResponse, AppError> {
+//     let pagination = DirectPagination::from(pagination_query);
+//     let predicate = if let Some(owner) = filter.owned_by {
+//         AssetPredicateBox::build(|asset| asset.id.account.eq(owner.0.into_owned()))
+//     } else {
+//         CompoundPredicate::PASS
+//     };
+//     let assets = state
+//         .iroha
+//         .query(FindAssets)
+//         .paginate(pagination)
+//         .filter(predicate)
+//         .all()
+//         .await?;
+//     Ok(Json(util_page(assets.iter(), pagination)).into_response())
+// }
+//
+// /// Find an asset
+// #[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
+//     (status = 200, description = "Found", body = schema::Asset),
+//     (status = 404, description = "Not Found")
+// ), params(("id" = schema::AssetId, description = "Asset ID")))]
+// async fn assets_show(
+//     State(state): State<AppState>,
+//     Path(id): Path<schema::AssetId<'_>>,
+// ) -> Result<impl IntoResponse, AppError> {
+//     let asset = state
+//         .iroha
+//         .query(FindAssets)
+//         .filter_with(|asset| asset.id.eq(id.0.into_owned()))
+//         .one()
+//         .await?
+//         .ok_or(AppError::NotFound)?;
+//     Ok(Json(asset.to_app_schema()).into_response())
+// }
+//
+// #[derive(IntoParams, Deserialize)]
+// struct AssetDefinitionsIndexFilter {
+//     /// Filter by domain
+//     domain: Option<schema::DomainId<'static>>,
+// }
+//
+// /// List asset definitions
+// #[utoipa::path(
+//     get,
+//     path = "/api/v1/asset-definitions",
+//     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+//     responses(
+//         (status = 200, description = "OK", body = [schema::AssetDefinition])
+//     )
+// )]
+// async fn asset_definitions_index(
+//     State(state): State<AppState>,
+//     Query(pagination_query): Query<schema::PaginationQueryParams>,
+//     Query(filter): Query<AssetDefinitionsIndexFilter>,
+// ) -> Result<impl IntoResponse, AppError> {
+//     let pagination = DirectPagination::from(pagination_query);
+//     let predicate = if let Some(domain) = filter.domain {
+//         AssetDefinitionPredicateBox::build(|def| def.id.domain_id.eq(domain.0.into_owned()))
+//     } else {
+//         CompoundPredicate::PASS
+//     };
+//     let items = state
+//         .iroha
+//         .query(FindAssetsDefinitions)
+//         .paginate(pagination)
+//         .filter(predicate)
+//         .all()
+//         .await?;
+//     Ok(Json(util_page(items.iter(), pagination)).into_response())
+// }
+//
+// /// Find an asset definition
+// #[utoipa::path(get, path = "/api/v1/asset-definitions/{id}", responses(
+//     (status = 200, description = "Found", body = schema::AssetDefinition),
+//     (status = 404, description = "Not Found")
+// ), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
+// async fn asset_definitions_show(
+//     State(state): State<AppState>,
+//     Path(id): Path<schema::AssetDefinitionId<'_>>,
+// ) -> Result<impl IntoResponse, AppError> {
+//     let definition = state
+//         .iroha
+//         .query(FindAssetsDefinitions)
+//         .filter_with(|definition| definition.id.eq(id.0.into_owned()))
+//         .one()
+//         .await?
+//         .ok_or(AppError::NotFound)?;
+//     Ok(Json(definition.to_app_schema()).into_response())
+// }
 
-/// List assets
-#[utoipa::path(
-    get,
-    path = "/api/v1/assets",
-    params(schema::PaginationQueryParams, AssetsIndexFilter),
-    responses(
-        (status = 200, description = "OK", body = [schema::Asset])
-    )
-)]
-async fn assets_index(
-    State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<AssetsIndexFilter>,
-) -> Result<impl IntoResponse, AppError> {
-    let pagination = DirectPagination::from(pagination_query);
-    let predicate = if let Some(owner) = filter.owned_by {
-        AssetPredicateBox::build(|asset| asset.id.account.eq(owner.0.into_owned()))
-    } else {
-        CompoundPredicate::PASS
-    };
-    let assets = state
-        .client
-        .query(FindAssets)
-        .paginate(pagination)
-        .filter(predicate)
-        .all()
-        .await?;
-    Ok(Json(util_page(assets.iter(), pagination)).into_response())
-}
-
-/// Find an asset
-#[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
-    (status = 200, description = "Found", body = schema::Asset),
-    (status = 404, description = "Not Found")
-), params(("id" = schema::AssetId, description = "Asset ID")))]
-async fn assets_show(
-    State(state): State<AppState>,
-    Path(id): Path<schema::AssetId<'_>>,
-) -> Result<impl IntoResponse, AppError> {
-    let asset = state
-        .client
-        .query(FindAssets)
-        .filter_with(|asset| asset.id.eq(id.0.into_owned()))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(asset.to_app_schema()).into_response())
-}
-
-#[derive(IntoParams, Deserialize)]
-struct AssetDefinitionsIndexFilter {
-    /// Filter by domain
-    domain: Option<schema::DomainId<'static>>,
-}
-
-/// List asset definitions
-#[utoipa::path(
-    get,
-    path = "/api/v1/asset-definitions",
-    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
-    responses(
-        (status = 200, description = "OK", body = [schema::AssetDefinition])
-    )
-)]
-async fn asset_definitions_index(
-    State(state): State<AppState>,
-    Query(pagination_query): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<AssetDefinitionsIndexFilter>,
-) -> Result<impl IntoResponse, AppError> {
-    let pagination = DirectPagination::from(pagination_query);
-    let predicate = if let Some(domain) = filter.domain {
-        AssetDefinitionPredicateBox::build(|def| def.id.domain_id.eq(domain.0.into_owned()))
-    } else {
-        CompoundPredicate::PASS
-    };
-    let items = state
-        .client
-        .query(FindAssetsDefinitions)
-        .paginate(pagination)
-        .filter(predicate)
-        .all()
-        .await?;
-    Ok(Json(util_page(items.iter(), pagination)).into_response())
-}
-
-/// Find an asset definition
-#[utoipa::path(get, path = "/api/v1/asset-definitions/{id}", responses(
-    (status = 200, description = "Found", body = schema::AssetDefinition),
-    (status = 404, description = "Not Found")
-), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
-async fn asset_definitions_show(
-    State(state): State<AppState>,
-    Path(id): Path<schema::AssetDefinitionId<'_>>,
-) -> Result<impl IntoResponse, AppError> {
-    let definition = state
-        .client
-        .query(FindAssetsDefinitions)
-        .filter_with(|definition| definition.id.eq(id.0.into_owned()))
-        .one()
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(Json(definition.to_app_schema()).into_response())
-}
-
-pub fn router(client: Client) -> Router {
+pub fn router(iroha: Client, repo: Repo) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/:id", get(domains_show))
         .route("/accounts", get(accounts_index))
         .route("/accounts/:id", get(accounts_show))
-        .route("/asset-definitions", get(asset_definitions_index))
-        .route("/asset-definitions/:id", get(asset_definitions_show))
-        .route("/assets", get(assets_index))
-        .route("/assets/:id", get(assets_show))
+        // .route("/asset-definitions", get(asset_definitions_index))
+        // .route("/asset-definitions/:id", get(asset_definitions_show))
+        // .route("/assets", get(assets_index))
+        // .route("/assets/:id", get(assets_show))
         .route("/blocks", get(blocks_index))
         .route("/blocks/:height_or_hash", get(blocks_show))
         .route("/transactions", get(transactions_index))
         .route("/transactions/:hash", get(transactions_show))
         .with_state(AppState {
-            client: Arc::new(client),
+            iroha: Arc::new(iroha),
+            repo,
         })
 }

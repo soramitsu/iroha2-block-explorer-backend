@@ -1,0 +1,173 @@
+use crate::repo::util::AsText;
+use chrono::{DateTime, Utc};
+use iroha_data_model::{account, asset, domain, isi, metadata, prelude};
+use serde::Deserialize;
+use sqlx::types::Json;
+use sqlx::{FromRow, Type};
+use std::fmt::{Display, Formatter};
+use std::num::NonZero;
+use std::str::FromStr;
+
+#[derive(Debug, FromRow)]
+pub struct Domain {
+    pub id: DomainId,
+    pub logo: Option<IpfsPath>,
+    pub metadata: Metadata,
+    pub owned_by: AccountId,
+    pub accounts: u32,
+    pub assets: u32,
+}
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct DomainId(pub AsText<domain::DomainId>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct AccountId(pub AsText<account::AccountId>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct IpfsPath(pub String);
+
+#[derive(Debug, Type, Deserialize)]
+#[sqlx(transparent)]
+pub struct Metadata(pub Json<metadata::Metadata>);
+
+#[derive(Debug, FromRow)]
+pub struct Block {
+    pub hash: Hash,
+    pub height: NonZero<u64>,
+    pub prev_block_hash: Option<Hash>,
+    pub transactions_hash: Hash,
+    pub created_at: DateTime<Utc>,
+    pub consensus_estimation_ms: u64,
+    pub transactions_total: u32,
+    pub transactions_rejected: u32,
+}
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct Hash(pub AsText<iroha_crypto::Hash>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct Signature(pub AsText<SignatureFromStr>);
+
+// FIXME: remove when Iroha Signature impls FromStr
+#[derive(Debug)]
+pub struct SignatureFromStr(pub iroha_crypto::Signature);
+
+impl FromStr for SignatureFromStr {
+    type Err = iroha_crypto::error::ParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Self(iroha_crypto::Signature::from_hex(s)?))
+    }
+}
+
+impl Display for SignatureFromStr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // FIXME: extract hex directly, not via serde_json
+        let serde_json::Value::String(value) = serde_json::to_value(&self.0)
+            .expect("nothing could fail during signature serialisation to JSON")
+        else {
+            unreachable!("should always be a string")
+        };
+        write!(f, "{value}")
+    }
+}
+
+#[derive(Debug, FromRow)]
+pub struct Transaction {
+    pub hash: Hash,
+    pub block_hash: Hash,
+    pub authority: AccountId,
+    pub nonce: Option<NonZero<u32>>,
+    pub metadata: Metadata,
+    pub created_at: DateTime<Utc>,
+    pub time_to_live_ms: u64,
+    pub instructions: Executable,
+    pub signature: Signature,
+    pub error: Option<Json<prelude::TransactionRejectionReason>>,
+}
+
+#[derive(Debug, Type)]
+pub enum Executable {
+    Instructions,
+    WASM,
+}
+
+#[derive(Debug, FromRow)]
+pub struct TransactionInList {
+    pub hash: Hash,
+    pub block_hash: Hash,
+    pub created_at: DateTime<Utc>,
+    pub authority: AccountId,
+    pub instructions: Executable,
+    pub error: bool,
+}
+
+#[derive(Debug, FromRow)]
+pub struct Account {
+    pub id: AccountId,
+    pub metadata: Metadata,
+    pub owned_domains: u32,
+    pub owned_assets: u32,
+}
+
+#[derive(Debug, FromRow)]
+pub struct AssetDefinition {
+    pub id: AssetDefinitionId,
+    pub owned_by: AccountId,
+    pub logo: Option<IpfsPath>,
+    pub metadata: Metadata,
+    pub mintable: Mintable,
+    pub r#type: AssetType,
+    pub assets: u32,
+}
+
+#[derive(Debug, Type)]
+pub enum Mintable {
+    Infinitely,
+    Once,
+    Not,
+}
+
+#[derive(Debug, Type)]
+pub enum AssetType {
+    Numeric,
+    Store,
+}
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+// TODO semantic
+pub struct AssetId(String);
+
+#[derive(Debug, FromRow)]
+struct Asset {
+    id: AssetId,
+    value: Json<AssetValue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", content = "value")]
+enum AssetValue {
+    Numeric(prelude::Numeric),
+    Store(Metadata),
+}
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct AssetDefinitionId(pub asset::AssetDefinitionId);
+
+#[derive(Debug, FromRow)]
+pub struct InstructionInList {
+    pub transaction_hash: Hash,
+    pub value: Instruction,
+}
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct Instruction(pub Json<isi::InstructionBox>);

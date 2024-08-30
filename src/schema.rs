@@ -1,25 +1,21 @@
-use std::{borrow::Cow, num::NonZero, str::FromStr};
+use std::{num::NonZero, str::FromStr};
 
+use crate::repo;
+use crate::util::{DirectPagination, ReversePagination};
 use chrono::Utc;
-use iroha_data_model::{HasMetadata as _, Identifiable as _};
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use serde_with::DeserializeFromStr;
+use sqlx::prelude::FromRow;
 use utoipa::{IntoParams, ToSchema};
-
-use crate::util::{DirectPagination, ReversePagination};
 
 mod iroha {
     pub use iroha_crypto::Hash;
     pub use iroha_data_model::prelude::*;
-    pub use iroha_data_model::{
-        block::{BlockHeader, SignedBlock},
-        ipfs::IpfsPath,
-    };
 }
 
 /// Domain
-#[derive(ToSchema, Serialize)]
+#[derive(ToSchema, Serialize, FromRow)]
 #[schema(
     example = json!({
         "id": "genesis",
@@ -28,45 +24,55 @@ mod iroha {
         "owned_by": "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis"
     })
 )]
-pub struct Domain<'a> {
+pub struct Domain {
     /// Domain ID
-    id: DomainId<'a>,
+    id: DomainId,
     /// Domain logo path
-    logo: Option<IpfsPath<'a>>,
+    logo: Option<IpfsPath>,
     /// Domain metadata
-    metadata: Metadata<'a>,
+    metadata: Metadata,
     /// Domain's owner
-    owned_by: AccountId<'a>,
+    owned_by: AccountId,
+    /// Total number of accounts in this domain
+    accounts: u32,
+    /// Total number of assets _definitions_ in this domain
+    assets: u32,
 }
 
-impl<'a> From<&'a iroha_data_model::domain::Domain> for Domain<'a> {
-    fn from(value: &'a iroha_data_model::domain::Domain) -> Self {
+impl From<repo::Domain> for Domain {
+    fn from(value: repo::Domain) -> Self {
         Self {
-            id: DomainId(Cow::Borrowed(value.id())),
-            logo: value.logo().as_ref().map(IpfsPath),
-            metadata: Metadata(value.metadata()),
-            owned_by: AccountId(Cow::Borrowed(value.owned_by())),
+            id: DomainId(value.id.0 .0),
+            logo: value.logo.map(|x| IpfsPath(x.0)),
+            metadata: Metadata(value.metadata.0 .0),
+            owned_by: AccountId(value.owned_by.0 .0),
+            accounts: value.accounts,
+            assets: value.assets,
         }
     }
 }
 
 /// Domain ID
-#[derive(ToSchema, Serialize, Deserialize)]
+#[derive(Debug, ToSchema, Serialize, Deserialize)]
 #[schema(example = "genesis", value_type = String)]
-pub struct DomainId<'a>(pub Cow<'a, iroha::DomainId>);
+pub struct DomainId(pub iroha::DomainId);
 
 /// Account
 #[derive(Serialize, ToSchema)]
-pub struct Account<'a> {
-    id: AccountId<'a>,
-    metadata: Metadata<'a>,
+pub struct Account {
+    id: AccountId,
+    metadata: Metadata,
+    owned_domains: u32,
+    owned_assets: u32,
 }
 
-impl<'a> From<&'a iroha::Account> for Account<'a> {
-    fn from(value: &'a iroha::Account) -> Self {
+impl From<repo::Account> for Account {
+    fn from(value: repo::Account) -> Self {
         Self {
-            id: AccountId(Cow::Borrowed(value.id())),
-            metadata: Metadata(value.metadata()),
+            id: AccountId(value.id.0 .0),
+            metadata: Metadata(value.metadata.0 .0),
+            owned_assets: value.owned_assets,
+            owned_domains: value.owned_domains,
         }
     }
 }
@@ -77,36 +83,40 @@ impl<'a> From<&'a iroha::Account> for Account<'a> {
     example = "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
     value_type = String
 )]
-pub struct AccountId<'a>(pub Cow<'a, iroha::AccountId>);
+pub struct AccountId(pub iroha::AccountId);
 
-#[derive(ToSchema, Serialize)]
-pub struct AssetDefinition<'a> {
-    id: AssetDefinitionId<'a>,
-    r#type: AssetType,
-    mintable: Mintable,
-    logo: Option<IpfsPath<'a>>,
-    metadata: Metadata<'a>,
-    owned_by: AccountId<'a>,
+impl From<repo::AccountId> for AccountId {
+    fn from(value: repo::AccountId) -> Self {
+        Self(value.0 .0)
+    }
 }
 
-impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
-    fn from(value: &'a iroha::AssetDefinition) -> Self {
+#[derive(ToSchema, Serialize)]
+pub struct AssetDefinition {
+    id: AssetDefinitionId,
+    r#type: AssetType,
+    mintable: Mintable,
+    logo: Option<IpfsPath>,
+    metadata: Metadata,
+    owned_by: AccountId,
+}
+
+impl From<repo::AssetDefinition> for AssetDefinition {
+    fn from(value: repo::AssetDefinition) -> Self {
         Self {
-            id: AssetDefinitionId(Cow::Borrowed(value.id())),
-            r#type: match value.type_() {
-                iroha::AssetType::Numeric(spec) => AssetType::Numeric {
-                    scale: spec.scale(),
-                },
-                iroha::AssetType::Store => AssetType::Store,
+            id: AssetDefinitionId(value.id.0),
+            r#type: match value.r#type {
+                repo::AssetType::Numeric => AssetType::Numeric,
+                repo::AssetType::Store => AssetType::Store,
             },
-            mintable: match value.mintable() {
-                iroha::Mintable::Infinitely => Mintable::Infinitely,
-                iroha::Mintable::Once => Mintable::Once,
-                iroha::Mintable::Not => Mintable::Not,
+            mintable: match value.mintable {
+                repo::Mintable::Infinitely => Mintable::Infinitely,
+                repo::Mintable::Once => Mintable::Once,
+                repo::Mintable::Not => Mintable::Not,
             },
-            logo: value.logo().as_ref().map(IpfsPath),
-            metadata: Metadata(value.metadata()),
-            owned_by: AccountId(Cow::Borrowed(value.owned_by())),
+            logo: value.logo.map(|x| IpfsPath(x.0)),
+            metadata: Metadata(value.metadata.0 .0),
+            owned_by: AccountId(value.owned_by.0 .0),
         }
     }
 }
@@ -114,12 +124,12 @@ impl<'a> From<&'a iroha::AssetDefinition> for AssetDefinition<'a> {
 /// Asset Definition ID. Represented in a form of `asset#domain`.
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses#wonderland")]
-pub struct AssetDefinitionId<'a>(pub Cow<'a, iroha::AssetDefinitionId>);
+pub struct AssetDefinitionId(pub iroha::AssetDefinitionId);
 
 #[derive(ToSchema, Serialize)]
 #[serde(tag = "kind")]
 pub enum AssetType {
-    Numeric { scale: Option<u32> },
+    Numeric,
     Store,
 }
 
@@ -131,26 +141,26 @@ pub enum Mintable {
 }
 
 #[derive(ToSchema, Serialize)]
-pub struct Asset<'a> {
-    id: AssetId<'a>,
-    value: AssetValue<'a>,
+pub struct Asset {
+    id: AssetId,
+    value: AssetValue,
 }
 
-impl<'a> From<&'a iroha::Asset> for Asset<'a> {
-    fn from(value: &'a iroha::Asset) -> Self {
-        Self {
-            id: AssetId(Cow::Borrowed(value.id())),
-            value: match value.value() {
-                iroha::AssetValue::Numeric(numeric) => AssetValue::Numeric {
-                    value: Decimal::from(numeric),
-                },
-                iroha::AssetValue::Store(map) => AssetValue::Store {
-                    metadata: Metadata(map),
-                },
-            },
-        }
-    }
-}
+// impl From<iroha::Asset> for Asset {
+//     fn from(value: iroha::Asset) -> Self {
+//         Self {
+//             id: AssetId(Cow::Borrowed(value.id())),
+//             value: match value.value() {
+//                 iroha::AssetValue::Numeric(numeric) => AssetValue::Numeric {
+//                     value: Decimal::from(numeric),
+//                 },
+//                 iroha::AssetValue::Store(map) => AssetValue::Store {
+//                     metadata: Metadata(map),
+//                 },
+//             },
+//         }
+//     }
+// }
 
 /// Asset ID. Union of [`AssetDefinitionId`] (`name#domain`) and [`AccountId`] (`signatory@domain`).
 ///
@@ -160,13 +170,13 @@ impl<'a> From<&'a iroha::Asset> for Asset<'a> {
 /// - `asset##signatory@domain` - when both the asset definition and the account are in the same domain
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland")]
-pub struct AssetId<'a>(pub Cow<'a, iroha::AssetId>);
+pub struct AssetId(iroha::AssetId);
 
 #[derive(ToSchema, Serialize)]
 #[serde(tag = "kind")]
-pub enum AssetValue<'a> {
+pub enum AssetValue {
     Numeric { value: Decimal },
-    Store { metadata: Metadata<'a> },
+    Store { metadata: Metadata },
 }
 
 // TODO: figure out how to represent decimal
@@ -190,12 +200,18 @@ impl From<&iroha::Numeric> for Decimal {
         }
     })
 )]
-pub struct Metadata<'a>(&'a iroha::Metadata);
+pub struct Metadata(iroha::Metadata);
+
+impl From<repo::Metadata> for Metadata {
+    fn from(value: repo::Metadata) -> Self {
+        Self(value.0 .0)
+    }
+}
 
 /// IPFS path
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = String)]
-pub struct IpfsPath<'a>(&'a iroha::IpfsPath);
+pub struct IpfsPath(String);
 
 /// Big integer numeric value.
 ///
@@ -247,23 +263,23 @@ pub struct Pagination {
     /// Items per page, starts from 1
     per_page: BigInt,
     /// Total number of pages. Not always available.
-    total_pages: Option<BigInt>,
+    total_pages: BigInt,
     /// Total number of items. Not always available.
-    total_items: Option<BigInt>,
+    total_items: BigInt,
 }
 
 impl Pagination {
     pub fn new(
         page: NonZero<u64>,
         per_page: NonZero<u64>,
-        total_items: Option<u64>,
-        total_pages: Option<u64>,
+        total_items: u64,
+        total_pages: u64,
     ) -> Self {
         Self {
             page: BigInt::from(page.get()),
             per_page: BigInt::from(per_page.get()),
-            total_items: total_items.map(BigInt::from),
-            total_pages: total_pages.map(BigInt::from),
+            total_items: BigInt::from(total_items),
+            total_pages: BigInt::from(total_pages),
         }
     }
 
@@ -273,8 +289,8 @@ impl Pagination {
             page: BigInt(1),
             per_page: BigInt::from(per_page.get()),
             // "but there are zero pages of data"
-            total_pages: Some(BigInt(0)),
-            total_items: Some(BigInt(0)),
+            total_pages: BigInt(0),
+            total_items: BigInt(0),
         }
     }
 }
@@ -284,27 +300,30 @@ impl From<ReversePagination> for Pagination {
         Self::new(
             value.page(),
             value.per_page(),
-            Some(value.len().get()),
-            Some(
-                value
-                    .total_pages()
-                    .get()
-                    .try_into()
-                    .expect("should fit into u32"),
-            ),
+            value.total_items().get(),
+            value
+                .total_pages()
+                .get()
+                .try_into()
+                .expect("should fit into u32"),
         )
     }
 }
 
 impl From<DirectPagination> for Pagination {
     fn from(value: DirectPagination) -> Self {
-        Self::new(value.page(), value.per_page(), None, None)
+        Self::new(
+            value.page(),
+            value.per_page(),
+            value.total_items().get(),
+            value.total_pages().get(),
+        )
     }
 }
 
 /// Generic paginated data container
 #[derive(Serialize, ToSchema)]
-#[aliases(DomainsPage = Page<Domain<'a>>)]
+#[aliases(DomainsPage = Page<Domain>)]
 pub struct Page<T> {
     /// Pagination info
     pagination: Pagination,
@@ -316,11 +335,16 @@ impl<T> Page<T> {
     pub fn new(items: Vec<T>, pagination: Pagination) -> Self {
         Self { pagination, items }
     }
-}
 
-impl Page<()> {
     pub fn empty(per_page: NonZero<u64>) -> Self {
         Self::new(vec![], Pagination::for_empty_data(per_page))
+    }
+
+    pub fn map<U>(self, f: impl Fn(T) -> U) -> Page<U> {
+        Page {
+            pagination: self.pagination,
+            items: self.items.into_iter().map(f).collect(),
+        }
     }
 }
 
@@ -347,65 +371,67 @@ const fn default_per_page() -> NonZero<u64> {
 #[schema(example = "2024-08-11T23:08:58Z")]
 pub struct TimeStamp(chrono::DateTime<Utc>);
 
-impl TimeStamp {
-    fn from_duration_as_epoch(value: std::time::Duration) -> Option<Self> {
-        chrono::DateTime::from_timestamp_millis(value.as_millis().try_into().ok()?).map(Self)
-    }
-}
-
-/// Like [`Transaction`], but with a block hash included
 #[derive(Serialize, ToSchema)]
-pub struct TransactionWithHash<'a> {
-    #[serde(flatten)]
-    base: Transaction<'a>,
+struct TransactionBase {
+    hash: Hash,
     block_hash: Hash,
+    created_at: TimeStamp,
+    authority: AccountId,
+    instructions: Executable,
 }
 
-impl<'a> From<&'a iroha::TransactionQueryOutput> for TransactionWithHash<'a> {
-    fn from(value: &'a iroha::TransactionQueryOutput) -> Self {
+#[derive(Serialize, ToSchema)]
+pub struct TransactionInList {
+    #[serde(flatten)]
+    base: TransactionBase,
+    error: bool,
+}
+
+impl From<repo::TransactionInList> for TransactionInList {
+    fn from(value: repo::TransactionInList) -> Self {
         Self {
-            base: Transaction::from(value.as_ref()),
-            block_hash: Hash::from(*value.block_hash()),
+            base: TransactionBase {
+                hash: value.hash.into(),
+                block_hash: value.block_hash.into(),
+                created_at: TimeStamp(value.created_at),
+                authority: value.authority.into(),
+                instructions: value.instructions.into(),
+            },
+            error: value.error,
         }
     }
 }
 
-/// Transaction
 #[derive(Serialize, ToSchema)]
-pub struct Transaction<'a> {
-    /// Transaction hash
-    hash: Hash,
-    /// Transaction payload
-    payload: TransactionPayload<'a>,
-    /// Transaction signature
-    signature: Signature<'a>,
-    /// If exists, transaction has been rejected
-    error: Option<TransactionRejectionReason<'a>>,
+pub struct TransactionDetailed {
+    #[serde(flatten)]
+    base: TransactionBase,
+    signature: Signature,
+    nonce: Option<NonZero<u32>>,
+    metadata: Metadata,
+    time_to_live: Duration,
+    error: Option<TransactionRejectionReason>,
 }
 
-impl<'a> From<&'a iroha::CommittedTransaction> for Transaction<'a> {
-    fn from(value: &'a iroha::CommittedTransaction) -> Self {
-        let signed: &iroha::SignedTransaction = value.as_ref();
-
+impl From<repo::Transaction> for TransactionDetailed {
+    fn from(value: repo::Transaction) -> Self {
         Self {
-            hash: signed.hash().into(),
-            payload: TransactionPayload {
-                chain: signed.chain(),
-                authority: AccountId(Cow::Borrowed(signed.authority())),
-                instructions: match signed.instructions() {
-                    iroha::Executable::Instructions(isis) => {
-                        Executable::Instructions(isis.iter().map(Instruction).collect())
-                    }
-                    iroha::Executable::Wasm(_) => Executable::Wasm,
-                },
-                nonce: signed.nonce(),
-                metadata: Metadata(signed.metadata()),
-                created_at: TimeStamp::from_duration_as_epoch(signed.creation_time())
-                    .expect("creation time should fit into date time"),
-                time_to_live: signed.time_to_live().map(Duration::from),
+            base: TransactionBase {
+                hash: value.hash.into(),
+                block_hash: value.block_hash.into(),
+                created_at: TimeStamp(value.created_at),
+                authority: value.authority.into(),
+                instructions: value.instructions.into(),
             },
-            error: value.error().as_ref().map(TransactionRejectionReason),
-            signature: signed.signature().payload().into(),
+            signature: value.signature.into(),
+            nonce: value.nonce,
+            metadata: value.metadata.into(),
+            time_to_live: Duration {
+                ms: BigInt(value.time_to_live_ms as u128),
+            },
+            error: value
+                .error
+                .map(|reason| TransactionRejectionReason(reason.0)),
         }
     }
 }
@@ -413,99 +439,38 @@ impl<'a> From<&'a iroha::CommittedTransaction> for Transaction<'a> {
 /// Transaction rejection reason
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = Object)]
-pub struct TransactionRejectionReason<'a>(&'a iroha::TransactionRejectionReason);
-
-/// Payload of transaction
-#[derive(Serialize, ToSchema)]
-pub struct TransactionPayload<'a> {
-    /// Unique id of the blockchain. used for simple replay attack protection.
-    chain: &'a iroha::ChainId,
-    /// The creator of the transactions
-    authority: AccountId<'a>,
-    /// Instructions of the transaction
-    instructions: Executable<'a>,
-    /// Random value to make different hashes for transactions
-    /// which occur repeatedly and simultaneously
-    nonce: Option<NonZero<u32>>,
-    /// Arbitrary additional information
-    metadata: Metadata<'a>,
-    /// Creation timestamp
-    created_at: TimeStamp,
-    /// After which time span since creation transaction is dismissed if not committed yet
-    time_to_live: Option<Duration>,
-}
+pub struct TransactionRejectionReason(iroha::TransactionRejectionReason);
 
 /// Operations executable on-chain
 #[derive(Serialize, ToSchema)]
-#[serde(tag = "kind", content = "value")]
-pub enum Executable<'a> {
+pub enum Executable {
     /// Array of instructions
-    Instructions(Vec<Instruction<'a>>),
+    Instructions,
     /// WebAssembly smart contract
     Wasm,
+}
+
+impl From<repo::Executable> for Executable {
+    fn from(value: repo::Executable) -> Self {
+        match value {
+            repo::Executable::Instructions => Self::Instructions,
+            repo::Executable::WASM => Self::Wasm,
+        }
+    }
 }
 
 /// Iroha Special Instruction (ISI)
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = Object)]
-pub struct Instruction<'a>(&'a iroha::InstructionBox);
+pub struct Instruction(iroha::InstructionBox);
 
 /// Block
 #[derive(Serialize, ToSchema)]
-pub struct Block<'a> {
+pub struct Block {
     /// Block hash
     hash: Hash,
-    /// Block header
-    header: BlockHeader,
-    /// Signatures of peers which approved this block
-    signatures: Vec<BlockSignature<'a>>,
-    /// Transactions which successfully passed validation & consensus step.
-    transactions: Vec<Transaction<'a>>,
-    // TODO event recommendations?
-}
-
-impl<'a> From<&'a iroha::SignedBlock> for Block<'a> {
-    fn from(value: &'a iroha::SignedBlock) -> Self {
-        Self {
-            hash: Hash(value.hash().into()),
-            header: BlockHeader::from(value.header()),
-            signatures: value
-                .signatures()
-                .map(|x| BlockSignature {
-                    topology_index: BigInt(x.index() as u128),
-                    payload: x.payload().into(),
-                })
-                .collect(),
-            transactions: value.transactions().map(Transaction::from).collect(),
-        }
-    }
-}
-
-/// Signature of block
-#[derive(Serialize, ToSchema)]
-pub struct BlockSignature<'a> {
-    /// Index of the peer in the topology
-    topology_index: BigInt,
-    /// The signature itself
-    payload: Signature<'a>,
-}
-
-/// Header of block
-#[derive(Serialize, ToSchema)]
-#[schema(
-    example = json!({
-        "height": 4,
-        "prev_block_hash": "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3",
-        "transactions_hash": "6D8C110F75E7447D1495FE419C212ABA5DA31F940B85C8598D76A11C5D60AEFB",
-        "created_at": "2024-08-15T00:40:02.324Z",
-        "consensus_estimation": {
-            "ms": 0
-        }
-    })
-)]
-pub struct BlockHeader {
     /// Number of blocks in the chain including this block
-    height: NonZero<u64>,
+    height: BigInt,
     /// Hash of the previous block in the chain
     prev_block_hash: Option<Hash>,
     /// Hash of merkle tree root of transactions' hashes
@@ -514,25 +479,85 @@ pub struct BlockHeader {
     created_at: TimeStamp,
     /// Estimation of consensus duration
     consensus_estimation: Duration,
+    transactions_total: u32,
+    transactions_rejected: u32,
 }
 
-impl From<&iroha::BlockHeader> for BlockHeader {
-    fn from(value: &iroha::BlockHeader) -> Self {
+impl From<repo::Block> for Block {
+    fn from(value: repo::Block) -> Self {
         Self {
-            height: value.height(),
-            prev_block_hash: value.prev_block_hash().map(Hash::from),
-            transactions_hash: value.transactions_hash().into(),
-            created_at: TimeStamp::from_duration_as_epoch(value.creation_time())
-                .expect("creation time should fit into datetime"),
-            consensus_estimation: Duration::from(value.consensus_estimation()),
+            hash: Hash(value.hash.0 .0),
+            height: BigInt(value.height.get() as u128),
+            prev_block_hash: value.prev_block_hash.map(Hash::from),
+            transactions_hash: Hash(value.transactions_hash.0 .0),
+            created_at: TimeStamp(value.created_at),
+            consensus_estimation: Duration {
+                ms: BigInt(value.consensus_estimation_ms as u128),
+            },
+            transactions_total: value.transactions_total,
+            transactions_rejected: value.transactions_rejected,
         }
     }
 }
+
+// /// Signature of block
+// #[derive(Serialize, ToSchema)]
+// pub struct BlockSignature {
+//     /// Index of the peer in the topology
+//     topology_index: BigInt,
+//     /// The signature itself
+//     payload: Signature<'a>,
+// }
+
+// /// Header of block
+// #[derive(Serialize, ToSchema)]
+// #[schema(
+//     example = json!({
+//         "height": 4,
+//         "prev_block_hash": "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3",
+//         "transactions_hash": "6D8C110F75E7447D1495FE419C212ABA5DA31F940B85C8598D76A11C5D60AEFB",
+//         "created_at": "2024-08-15T00:40:02.324Z",
+//         "consensus_estimation": {
+//             "ms": 0
+//         }
+//     })
+// )]
+// pub struct BlockHeader {
+//     /// Number of blocks in the chain including this block
+//     height: NonZero<u64>,
+//     /// Hash of the previous block in the chain
+//     prev_block_hash: Option<Hash>,
+//     /// Hash of merkle tree root of transactions' hashes
+//     transactions_hash: Hash,
+//     /// Timestamp of creation
+//     created_at: TimeStamp,
+//     /// Estimation of consensus duration
+//     consensus_estimation: Duration,
+// }
+
+// impl From<&iroha::BlockHeader> for BlockHeader {
+//     fn from(value: &iroha::BlockHeader) -> Self {
+//         Self {
+//             height: value.height(),
+//             prev_block_hash: value.prev_block_hash().map(Hash::from),
+//             transactions_hash: value.transactions_hash().into(),
+//             created_at: TimeStamp::from_duration_as_epoch(value.creation_time())
+//                 .expect("creation time should fit into datetime"),
+//             consensus_estimation: Duration::from(value.consensus_estimation()),
+//         }
+//     }
+// }
 
 /// Hex-encoded hash
 #[derive(Deserialize, Serialize, ToSchema)]
 #[schema(value_type = String, example = "1B0A52DBDC11EAE39DD0524AD5146122351527CE00D161EA8263EA7ADE4164AF")]
 pub struct Hash(pub iroha::Hash);
+
+impl From<repo::Hash> for Hash {
+    fn from(value: repo::Hash) -> Self {
+        Self(value.0 .0)
+    }
+}
 
 impl<T> From<iroha_crypto::HashOf<T>> for Hash {
     fn from(value: iroha_crypto::HashOf<T>) -> Self {
@@ -549,26 +574,26 @@ impl<T> From<iroha_crypto::HashOf<T>> for Hash {
     })
 )]
 // FIXME: utoipa doesn't display example
-pub struct Signature<'a>(Cow<'a, iroha_crypto::Signature>);
+pub struct Signature(iroha_crypto::Signature);
 
-impl<T> From<iroha_crypto::SignatureOf<T>> for Signature<'_> {
-    fn from(value: iroha_crypto::SignatureOf<T>) -> Self {
-        Self(Cow::Owned(value.into()))
+impl From<repo::Signature> for Signature {
+    fn from(value: repo::Signature) -> Self {
+        Self(value.0 .0 .0)
     }
 }
 
-impl<'a, T> From<&'a iroha_crypto::SignatureOf<T>> for Signature<'a> {
-    fn from(value: &'a iroha_crypto::SignatureOf<T>) -> Self {
-        Self(Cow::Borrowed(value))
-    }
-}
-
-impl<'a> From<&'a iroha_crypto::Signature> for Signature<'a> {
-    fn from(value: &'a iroha_crypto::Signature) -> Self {
-        Self(Cow::Borrowed(value))
-    }
-}
-
+// impl<T> From<iroha_crypto::SignatureOf<T>> for Signature {
+//     fn from(value: iroha_crypto::SignatureOf<T>) -> Self {
+//         Self(value.into())
+//     }
+// }
+//
+// impl From<&'a iroha_crypto::Signature> for Signature {
+//     fn from(value: &'a iroha_crypto::Signature) -> Self {
+//         Self(Cow::Borrowed(value))
+//     }
+// }
+//
 /// Duration
 #[derive(ToSchema, Serialize)]
 pub struct Duration {
@@ -600,38 +625,9 @@ impl FromStr for BlockHeightOrHash {
         if let Ok(value) = s.parse::<iroha::Hash>() {
             return Ok(Self::Hash(value));
         }
-        return Err("value should be either a non-zero positive integer or a hash");
+        Err("value should be either a non-zero positive integer or a hash")
     }
 }
-
-/// Shows a relationship between a type and its reflection
-pub trait ToAppSchema<'a>
-where
-    Self: 'a,
-{
-    type Output: From<&'a Self>;
-
-    /// Reflects the type in its app schema representation
-    fn to_app_schema(&'a self) -> Self::Output {
-        Self::Output::from(&self)
-    }
-}
-
-macro_rules! impl_to_app_schema {
-    ($from:ty => $into:tt) => {
-        impl<'a> ToAppSchema<'a> for $from {
-            type Output = $into<'a>;
-        }
-    };
-}
-
-impl_to_app_schema!(iroha::Domain => Domain);
-impl_to_app_schema!(iroha::Account => Account);
-impl_to_app_schema!(iroha::Asset => Asset);
-impl_to_app_schema!(iroha::AssetDefinition => AssetDefinition);
-impl_to_app_schema!(iroha::SignedBlock => Block);
-impl_to_app_schema!(iroha::CommittedTransaction => Transaction);
-impl_to_app_schema!(iroha::TransactionQueryOutput => TransactionWithHash);
 
 #[cfg(test)]
 mod test {
@@ -677,7 +673,7 @@ mod test {
         let full = "roses#looking_glass#ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland";
         for expected in [short, full] {
             let id = iroha::AssetId::from_str(expected).expect("input is valid");
-            let value = AssetId(Cow::Owned(id));
+            let value = AssetId(id);
             let serialized = serde_json::to_string(&value).expect("no possible errors expected");
             assert_eq!(serialized, format!("\"{expected}\""));
         }
@@ -687,7 +683,7 @@ mod test {
     fn serialize_asset_definition_id_canonically() {
         let expected = "rose#wonderland";
         let id = iroha::AssetDefinitionId::from_str(expected).expect("input is valid");
-        let value = AssetDefinitionId(Cow::Owned(id));
+        let value = AssetDefinitionId(id);
         let serialized = serde_json::to_string(&value).expect("no possible errors expected");
         assert_eq!(serialized, format!("\"{expected}\""));
     }
@@ -700,6 +696,6 @@ mod test {
         );
 
         expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
-            .assert_eq(&serde_json::to_string(&Signature(Cow::Owned(value))).unwrap())
+            .assert_eq(&serde_json::to_string(&Signature(value)).unwrap())
     }
 }

@@ -2,11 +2,13 @@
 
 mod endpoint;
 mod iroha;
+mod repo;
 mod schema;
 mod util;
 
 use crate::iroha::Client;
 
+use crate::repo::Repo;
 use axum::{
     extract::{MatchedPath, Request},
     Router,
@@ -14,7 +16,10 @@ use axum::{
 use clap::Parser;
 use iroha_crypto::{KeyPair, PrivateKey};
 use iroha_data_model::account::AccountId;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::ConnectOptions;
 use tower_http::trace::TraceLayer;
+use tracing::log::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use url::Url;
 use utoipa::OpenApi;
@@ -38,18 +43,22 @@ pub struct Args {
     /// Iroha Torii URL
     #[clap(long, env)]
     pub torii_url: Url,
+
+    /// Path to SQLite database
+    #[clap(long, env)]
+    pub database: String,
 }
 
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
+// endpoint::assets_index,
+// endpoint::assets_show,
+// endpoint::asset_definitions_index,
+// endpoint::asset_definitions_show,
 #[derive(OpenApi)]
 #[openapi(
     paths(
         endpoint::accounts_index,
         endpoint::accounts_show,
-        endpoint::assets_index,
-        endpoint::assets_show,
-        endpoint::asset_definitions_index,
-        endpoint::asset_definitions_show,
         endpoint::domains_index,
         endpoint::domains_show,
         endpoint::blocks_index,
@@ -74,13 +83,12 @@ pub struct Args {
         schema::Pagination,
         schema::DomainsPage,
         schema::Block,
-        schema::BlockHeader,
-        schema::BlockSignature,
+        // schema::BlockHeader,
+        // schema::BlockSignature,
         schema::Executable,
         schema::Instruction,
-        schema::TransactionWithHash,
-        schema::Transaction,
-        schema::TransactionPayload,
+        schema::TransactionInList,
+        schema::TransactionDetailed,
         schema::TransactionRejectionReason,
         schema::TimeStamp,
         schema::BigInt,
@@ -99,18 +107,23 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "iroha2_explorer_web=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
     let key_pair = KeyPair::from(args.account_private_key);
-    let client = Client::new(args.account, key_pair, args.torii_url);
+    let iroha = Client::new(args.account, key_pair, args.torii_url);
+
+    let opts = SqliteConnectOptions::new()
+        .filename(args.database)
+        .log_statements(LevelFilter::Debug);
+    let repo = Repo::new(opts).await.unwrap();
 
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
-        .nest("/api/v1", endpoint::router(client))
+        .nest("/api/v1", endpoint::router(iroha, repo))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched

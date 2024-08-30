@@ -2,20 +2,24 @@ use std::{num::NonZero, ops::Range};
 
 use nonzero_ext::nonzero;
 
-use crate::schema::PaginationQueryParams;
-
 type Int = u64;
 
 /// Translate pagination into a range on a list, where first page is 0..n, second is n..2n and so on.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct DirectPagination {
     page: NonZero<Int>,
     per_page: NonZero<Int>,
+    // non-zero because it doesn't make sense to create with zero items
+    total_items: NonZero<Int>,
 }
 
 impl DirectPagination {
-    pub fn new(page: NonZero<Int>, per_page: NonZero<Int>) -> Self {
-        Self { page, per_page }
+    pub fn new(page: NonZero<Int>, per_page: NonZero<Int>, total_items: NonZero<Int>) -> Self {
+        Self {
+            page,
+            per_page,
+            total_items,
+        }
     }
 
     pub fn range(&self) -> Range<Int> {
@@ -30,11 +34,19 @@ impl DirectPagination {
     pub fn per_page(&self) -> NonZero<Int> {
         self.per_page
     }
-}
 
-impl From<PaginationQueryParams> for DirectPagination {
-    fn from(value: PaginationQueryParams) -> Self {
-        Self::new(value.page.unwrap_or(nonzero!(1u64)), value.per_page)
+    pub fn total_items(&self) -> NonZero<Int> {
+        self.total_items
+    }
+
+    pub fn total_pages(&self) -> NonZero<Int> {
+        let full = self.total_items.get() / self.per_page.get();
+        NonZero::new(if self.total_items.get() % self.per_page.get() > 0 {
+            full + 1
+        } else {
+            full
+        })
+        .expect("full is always greater than 0")
     }
 }
 
@@ -67,12 +79,12 @@ pub struct ReversePagination {
 impl ReversePagination {
     /// Compute pagination for provided list's `len`, items `per_page`, and optional `page` number (starting from 1).
     pub fn new(
-        len: NonZero<Int>,
+        total_items: NonZero<Int>,
         per_page: NonZero<Int>,
         page: Option<NonZero<Int>>,
     ) -> Result<Self, ReversePaginationError> {
-        let full_pages = len.get() / per_page.get();
-        let total_pages = if len.get() % per_page.get() > 0 {
+        let full_pages = total_items.get() / per_page.get();
+        let total_pages = if total_items.get() % per_page.get() > 0 {
             NonZero::new(full_pages + 1).expect("is at least 1")
         } else {
             NonZero::new(full_pages).unwrap_or(nonzero!(1u64))
@@ -88,7 +100,7 @@ impl ReversePagination {
         }
 
         Ok(Self {
-            len,
+            len: total_items,
             per_page,
             page,
             total_pages,
@@ -97,21 +109,22 @@ impl ReversePagination {
 
     /// Indices range in the list this pagination translates into
     pub fn range(&self) -> Range<Int> {
-        if self.len.get() <= self.per_page.get() {
-            return 0..self.len.get();
-        }
-        match self.page {
+        let (len, per_page) = (self.len.get(), self.per_page.get());
+
+        let (start, end) = match self.page {
             Some(page) => {
-                let offset = self.per_page.get() * page.get();
-                if offset > self.len.get() {
-                    0..(offset - self.len.get())
-                } else {
-                    let start = self.len.get() - offset;
-                    start..(start + self.per_page.get())
-                }
+                let page = page.get();
+                let start = per_page * (page - 1);
+                (start, (start + per_page).min(len))
             }
-            None => 0..(self.per_page.get() + self.len.get() % self.per_page.get()),
-        }
+            None => {
+                let full_pages = len / per_page;
+                let start = (full_pages.max(1) - 1) * per_page;
+                (start, len)
+            }
+        };
+
+        (len - end)..(len - start)
     }
 
     /// Total available pages of data, including pending one.
@@ -125,7 +138,7 @@ impl ReversePagination {
     }
 
     /// Length of the list
-    pub fn len(&self) -> NonZero<Int> {
+    pub fn total_items(&self) -> NonZero<Int> {
         self.len
     }
 
@@ -151,12 +164,12 @@ fn range_into_iroha_pagination(
     range: Range<Int>,
 ) -> iroha_data_model::query::parameters::Pagination {
     iroha_data_model::query::parameters::Pagination::new(
-        range.start,
         NonZero::new(
             (range.end - range.start)
                 .try_into()
                 .expect("if cannot fit into u32, than cannot pass limit to Iroha"),
         ),
+        range.start,
     )
 }
 
@@ -200,6 +213,7 @@ mod test {
             assert_case!((11, 10, None) => (0..11, 2));
             assert_case!((5, 2, Some(2)) => (1..3, 3));
             assert_case!((5, 2, Some(3)) => (0..1, 3));
+            assert_case!((106, 10, Some(11)) => (0..6, 11));
         }
 
         #[test]
@@ -230,7 +244,7 @@ mod test {
 
     #[test]
     fn create_direct_pagination() {
-        let value = DirectPagination::new(nonzero!(4u64), nonzero!(10u64));
+        let value = DirectPagination::new(nonzero!(4u64), nonzero!(10u64), nonzero!(95u64));
         assert_eq!(value.range(), 30..40);
     }
 }
