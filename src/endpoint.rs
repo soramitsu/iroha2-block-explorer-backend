@@ -12,7 +12,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::iroha::{Client, Error as IrohaError};
-use crate::schema::Page;
+use crate::schema::{Page, PaginationQueryParams};
 use crate::{
     repo::{self, Repo},
     schema,
@@ -253,118 +253,131 @@ async fn accounts_show(
     Ok(Json(state.repo.find_account(id.0).await?.into()))
 }
 
-// #[derive(Deserialize, IntoParams)]
-// struct AssetsIndexFilter {
-//     /// Filter by an owning account
-//     owned_by: Option<schema::AccountId<'static>>,
-//     // TODO: filter by owner/definition domain?
-//     // /// Filter by the domain
-//     // domain: Option<schema::DomainId<'static>>,
-// }
-//
-// /// List assets
-// #[utoipa::path(
-//     get,
-//     path = "/api/v1/assets",
-//     params(schema::PaginationQueryParams, AssetsIndexFilter),
-//     responses(
-//         (status = 200, description = "OK", body = [schema::Asset])
-//     )
-// )]
-// async fn assets_index(
-//     State(state): State<AppState>,
-//     Query(pagination_query): Query<schema::PaginationQueryParams>,
-//     Query(filter): Query<AssetsIndexFilter>,
-// ) -> Result<impl IntoResponse, AppError> {
-//     let pagination = DirectPagination::from(pagination_query);
-//     let predicate = if let Some(owner) = filter.owned_by {
-//         AssetPredicateBox::build(|asset| asset.id.account.eq(owner.0.into_owned()))
-//     } else {
-//         CompoundPredicate::PASS
-//     };
-//     let assets = state
-//         .iroha
-//         .query(FindAssets)
-//         .paginate(pagination)
-//         .filter(predicate)
-//         .all()
-//         .await?;
-//     Ok(Json(util_page(assets.iter(), pagination)).into_response())
-// }
-//
-// /// Find an asset
-// #[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
-//     (status = 200, description = "Found", body = schema::Asset),
-//     (status = 404, description = "Not Found")
-// ), params(("id" = schema::AssetId, description = "Asset ID")))]
-// async fn assets_show(
-//     State(state): State<AppState>,
-//     Path(id): Path<schema::AssetId<'_>>,
-// ) -> Result<impl IntoResponse, AppError> {
-//     let asset = state
-//         .iroha
-//         .query(FindAssets)
-//         .filter_with(|asset| asset.id.eq(id.0.into_owned()))
-//         .one()
-//         .await?
-//         .ok_or(AppError::NotFound)?;
-//     Ok(Json(asset.to_app_schema()).into_response())
-// }
-//
-// #[derive(IntoParams, Deserialize)]
-// struct AssetDefinitionsIndexFilter {
-//     /// Filter by domain
-//     domain: Option<schema::DomainId<'static>>,
-// }
-//
-// /// List asset definitions
-// #[utoipa::path(
-//     get,
-//     path = "/api/v1/asset-definitions",
-//     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
-//     responses(
-//         (status = 200, description = "OK", body = [schema::AssetDefinition])
-//     )
-// )]
-// async fn asset_definitions_index(
-//     State(state): State<AppState>,
-//     Query(pagination_query): Query<schema::PaginationQueryParams>,
-//     Query(filter): Query<AssetDefinitionsIndexFilter>,
-// ) -> Result<impl IntoResponse, AppError> {
-//     let pagination = DirectPagination::from(pagination_query);
-//     let predicate = if let Some(domain) = filter.domain {
-//         AssetDefinitionPredicateBox::build(|def| def.id.domain_id.eq(domain.0.into_owned()))
-//     } else {
-//         CompoundPredicate::PASS
-//     };
-//     let items = state
-//         .iroha
-//         .query(FindAssetsDefinitions)
-//         .paginate(pagination)
-//         .filter(predicate)
-//         .all()
-//         .await?;
-//     Ok(Json(util_page(items.iter(), pagination)).into_response())
-// }
-//
-// /// Find an asset definition
-// #[utoipa::path(get, path = "/api/v1/asset-definitions/{id}", responses(
-//     (status = 200, description = "Found", body = schema::AssetDefinition),
-//     (status = 404, description = "Not Found")
-// ), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
-// async fn asset_definitions_show(
-//     State(state): State<AppState>,
-//     Path(id): Path<schema::AssetDefinitionId<'_>>,
-// ) -> Result<impl IntoResponse, AppError> {
-//     let definition = state
-//         .iroha
-//         .query(FindAssetsDefinitions)
-//         .filter_with(|definition| definition.id.eq(id.0.into_owned()))
-//         .one()
-//         .await?
-//         .ok_or(AppError::NotFound)?;
-//     Ok(Json(definition.to_app_schema()).into_response())
-// }
+#[derive(IntoParams, Deserialize)]
+struct AssetDefinitionsIndexFilter {
+    /// Filter by domain
+    domain: Option<schema::DomainId>,
+    /// Filter by owner
+    owned_by: Option<schema::AccountId>,
+}
+
+/// List asset definitions
+#[utoipa::path(
+    get,
+    path = "/api/v1/assets-definitions",
+    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+    responses(
+        (status = 200, description = "OK", body = [schema::AssetDefinition])
+    )
+)]
+async fn assets_definitions_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetDefinitionsIndexFilter>,
+) -> Result<Json<Page<schema::AssetDefinition>>, AppError> {
+    let page = state
+        .repo
+        .list_assets_definitions(repo::ListAssetDefinitionParams {
+            pagination,
+            domain: filter.domain.map(|x| x.0),
+            owned_by: filter.owned_by.map(|x| x.0),
+        })
+        .await?
+        .map(schema::AssetDefinition::from);
+    Ok(Json(page))
+}
+
+/// Find an asset definition
+#[utoipa::path(get, path = "/api/v1/assets-definitions/{id}", responses(
+    (status = 200, description = "Found", body = schema::AssetDefinition),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
+async fn assets_definitions_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::AssetDefinitionId>,
+) -> Result<Json<schema::AssetDefinition>, AppError> {
+    let item = state.repo.find_asset_definition(id.0).await?.into();
+    Ok(Json(item))
+}
+
+#[derive(Deserialize, IntoParams)]
+struct AssetsIndexFilter {
+    /// Filter by an owning account
+    owned_by: Option<schema::AccountId>,
+    /// Filter by asset definition
+    definition: Option<schema::AssetDefinitionId>,
+}
+
+/// List assets
+#[utoipa::path(
+    get,
+    path = "/api/v1/assets",
+    params(schema::PaginationQueryParams, AssetsIndexFilter),
+    responses(
+        (status = 200, description = "OK", body = [schema::Asset])
+    )
+)]
+async fn assets_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetsIndexFilter>,
+) -> Result<Json<Page<schema::Asset>>, AppError> {
+    let page = state
+        .repo
+        .list_assets(repo::ListAssetsParams {
+            pagination,
+            owned_by: filter.owned_by.map(|x| x.0),
+            definition: filter.definition.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Asset::from);
+    Ok(Json(page))
+}
+
+/// Find an asset
+#[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
+    (status = 200, description = "Found", body = schema::Asset),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::AssetId, description = "Asset ID")))]
+async fn assets_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::AssetId>,
+) -> Result<Json<schema::Asset>, AppError> {
+    let item = state.repo.find_asset(id.0).await?;
+    Ok(Json(item.into()))
+}
+
+#[derive(Deserialize, IntoParams)]
+struct InstructionsIndexFilter {
+    transaction_hash: Option<schema::Hash>,
+    /// Filter by a kind of instruction
+    kind: Option<String>,
+}
+
+/// List instructions
+#[utoipa::path(
+    get,
+    path = "/api/v1/instructions",
+    params(PaginationQueryParams, InstructionsIndexFilter),
+    responses(
+        (status = 200, description = "OK", body = [schema::Instruction])
+    )
+)]
+async fn instructions_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationQueryParams>,
+    Query(filter): Query<InstructionsIndexFilter>,
+) -> Result<Json<Page<schema::Instruction>>, AppError> {
+    let items = state
+        .repo
+        .list_instructions(repo::ListInstructionParams {
+            pagination,
+            transaction_hash: filter.transaction_hash.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Instruction::from);
+    Ok(Json(items))
+}
 
 pub fn router(iroha: Client, repo: Repo) -> Router {
     Router::new()
@@ -372,14 +385,15 @@ pub fn router(iroha: Client, repo: Repo) -> Router {
         .route("/domains/:id", get(domains_show))
         .route("/accounts", get(accounts_index))
         .route("/accounts/:id", get(accounts_show))
-        // .route("/asset-definitions", get(asset_definitions_index))
-        // .route("/asset-definitions/:id", get(asset_definitions_show))
-        // .route("/assets", get(assets_index))
-        // .route("/assets/:id", get(assets_show))
+        .route("/assets-definitions", get(assets_definitions_index))
+        .route("/assets-definitions/:id", get(assets_definitions_show))
+        .route("/assets", get(assets_index))
+        .route("/assets/:id", get(assets_show))
         .route("/blocks", get(blocks_index))
         .route("/blocks/:height_or_hash", get(blocks_show))
         .route("/transactions", get(transactions_index))
         .route("/transactions/:hash", get(transactions_show))
+        .route("/instructions", get(instructions_index))
         .with_state(AppState {
             iroha: Arc::new(iroha),
             repo,

@@ -99,12 +99,13 @@ pub struct AssetDefinition {
     logo: Option<IpfsPath>,
     metadata: Metadata,
     owned_by: AccountId,
+    assets: u32,
 }
 
 impl From<repo::AssetDefinition> for AssetDefinition {
     fn from(value: repo::AssetDefinition) -> Self {
         Self {
-            id: AssetDefinitionId(value.id.0),
+            id: AssetDefinitionId(value.id.0 .0),
             r#type: match value.r#type {
                 repo::AssetType::Numeric => AssetType::Numeric,
                 repo::AssetType::Store => AssetType::Store,
@@ -117,6 +118,7 @@ impl From<repo::AssetDefinition> for AssetDefinition {
             logo: value.logo.map(|x| IpfsPath(x.0)),
             metadata: Metadata(value.metadata.0 .0),
             owned_by: AccountId(value.owned_by.0 .0),
+            assets: value.assets,
         }
     }
 }
@@ -127,7 +129,6 @@ impl From<repo::AssetDefinition> for AssetDefinition {
 pub struct AssetDefinitionId(pub iroha::AssetDefinitionId);
 
 #[derive(ToSchema, Serialize)]
-#[serde(tag = "kind")]
 pub enum AssetType {
     Numeric,
     Store,
@@ -146,21 +147,21 @@ pub struct Asset {
     value: AssetValue,
 }
 
-// impl From<iroha::Asset> for Asset {
-//     fn from(value: iroha::Asset) -> Self {
-//         Self {
-//             id: AssetId(Cow::Borrowed(value.id())),
-//             value: match value.value() {
-//                 iroha::AssetValue::Numeric(numeric) => AssetValue::Numeric {
-//                     value: Decimal::from(numeric),
-//                 },
-//                 iroha::AssetValue::Store(map) => AssetValue::Store {
-//                     metadata: Metadata(map),
-//                 },
-//             },
-//         }
-//     }
-// }
+impl From<repo::Asset> for Asset {
+    fn from(value: repo::Asset) -> Self {
+        Self {
+            id: AssetId(value.id.0 .0),
+            value: match value.value.0 {
+                repo::AssetValue::Numeric(numeric) => AssetValue::Numeric {
+                    value: Decimal::from(&numeric),
+                },
+                repo::AssetValue::Store(map) => AssetValue::Store {
+                    metadata: Metadata(map.0 .0),
+                },
+            },
+        }
+    }
+}
 
 /// Asset ID. Union of [`AssetDefinitionId`] (`name#domain`) and [`AccountId`] (`signatory@domain`).
 ///
@@ -170,7 +171,7 @@ pub struct Asset {
 /// - `asset##signatory@domain` - when both the asset definition and the account are in the same domain
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland")]
-pub struct AssetId(iroha::AssetId);
+pub struct AssetId(pub iroha::AssetId);
 
 #[derive(ToSchema, Serialize)]
 #[serde(tag = "kind")]
@@ -372,7 +373,7 @@ const fn default_per_page() -> NonZero<u64> {
 pub struct TimeStamp(chrono::DateTime<Utc>);
 
 #[derive(Serialize, ToSchema)]
-struct TransactionBase {
+pub struct TransactionBase {
     hash: Hash,
     block_hash: Hash,
     created_at: TimeStamp,
@@ -384,6 +385,7 @@ struct TransactionBase {
 pub struct TransactionInList {
     #[serde(flatten)]
     base: TransactionBase,
+    /// Where there is an error or not
     error: bool,
 }
 
@@ -461,8 +463,20 @@ impl From<repo::Executable> for Executable {
 
 /// Iroha Special Instruction (ISI)
 #[derive(Serialize, ToSchema)]
-#[schema(value_type = Object)]
-pub struct Instruction(iroha::InstructionBox);
+pub struct Instruction {
+    /// Kind of instruction. TODO: add strict enumeration
+    kind: String,
+    /// Instruction payload, some JSON. TODO: add typed output
+    payload: serde_json::Value,
+    transaction_hash: Hash,
+    created_at: TimeStamp,
+}
+
+impl From<repo::Instruction> for Instruction {
+    fn from(value: repo::Instruction) -> Self {
+        todo!()
+    }
+}
 
 /// Block
 #[derive(Serialize, ToSchema)]

@@ -50,21 +50,22 @@ pub struct Args {
 }
 
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
-// endpoint::assets_index,
-// endpoint::assets_show,
-// endpoint::asset_definitions_index,
-// endpoint::asset_definitions_show,
 #[derive(OpenApi)]
 #[openapi(
     paths(
         endpoint::accounts_index,
         endpoint::accounts_show,
+        endpoint::assets_index,
+        endpoint::assets_show,
+        endpoint::assets_definitions_index,
+        endpoint::assets_definitions_show,
         endpoint::domains_index,
         endpoint::domains_show,
         endpoint::blocks_index,
         endpoint::blocks_show,
         endpoint::transactions_index,
         endpoint::transactions_show,
+        endpoint::instructions_index
     ),
     components(schemas(
         schema::Domain,
@@ -83,13 +84,13 @@ pub struct Args {
         schema::Pagination,
         schema::DomainsPage,
         schema::Block,
-        // schema::BlockHeader,
-        // schema::BlockSignature,
         schema::Executable,
         schema::Instruction,
+        schema::TransactionBase,
         schema::TransactionInList,
         schema::TransactionDetailed,
         schema::TransactionRejectionReason,
+        schema::Instruction,
         schema::TimeStamp,
         schema::BigInt,
         schema::Decimal,

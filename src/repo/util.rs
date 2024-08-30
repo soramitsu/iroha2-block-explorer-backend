@@ -98,56 +98,6 @@ where
     }
 }
 
-impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
-    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
-        builder.push(" where ");
-        let mut sep = builder.separated(" and ");
-        sep.push("true");
-        if let Some(hash) = &self.block_hash {
-            sep.push("transactions.block_hash = ")
-                .push_bind_unseparated(AsText(hash));
-        }
-        if let Some(id) = &self.authority {
-            sep.push("transactions.authority_signatory = ")
-                .push_bind_unseparated(AsText(id.signatory()))
-                .push("transactions.authority_domain = ")
-                .push_bind_unseparated(id.domain().name().as_ref());
-        }
-    }
-}
-
-impl<'a> PushCustom<'a> for &'a ListDomainParams {
-    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
-        let mut sep = builder.separated(" and ");
-        sep.push("true");
-        if let Some(id) = &self.owned_by {
-            sep.push("domain_owners.account_signatory = ")
-                .push_bind_unseparated(id.signatory().to_string())
-                .push("domain_owners.account_domain = ")
-                .push_bind_unseparated(id.domain().name().as_ref());
-        }
-    }
-}
-
-impl<'a> PushCustom<'a> for &'a ListAccountsParams {
-    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
-        let mut sep = builder.separated(" and ");
-        sep.push("true");
-        if let Some(id) = &self.with_asset {
-            sep.push("assets.owned_by_signatory = accounts.signatory")
-                .push("assets.owned_by_domain = accounts.domain")
-                .push("assets.definition_name = ")
-                .push_bind_unseparated(id.name().as_ref())
-                .push("assets.definition_domain = ")
-                .push_bind_unseparated(id.domain().name().as_ref());
-        }
-        if let Some(domain) = &self.domain {
-            sep.push("accounts.domain = ")
-                .push_bind_unseparated(domain.name().as_ref());
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct LimitOffset {
     limit: u64,

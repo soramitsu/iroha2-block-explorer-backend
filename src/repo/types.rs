@@ -142,32 +142,29 @@ pub enum AssetType {
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
-// TODO semantic
-pub struct AssetId(String);
+pub struct AssetId(pub AsText<prelude::AssetId>);
 
 #[derive(Debug, FromRow)]
-struct Asset {
-    id: AssetId,
-    value: Json<AssetValue>,
+pub struct Asset {
+    pub id: AssetId,
+    pub value: Json<AssetValue>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", content = "value")]
-enum AssetValue {
+pub enum AssetValue {
     Numeric(prelude::Numeric),
     Store(Metadata),
 }
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
-pub struct AssetDefinitionId(pub asset::AssetDefinitionId);
+pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
 
 #[derive(Debug, FromRow)]
-pub struct InstructionInList {
+pub struct Instruction {
     pub transaction_hash: Hash,
-    pub value: Instruction,
+    pub created_at: DateTime<Utc>,
+    pub r#type: String,
+    pub payload: Json<serde_json::Value>,
 }
-
-#[derive(Debug, Type)]
-#[sqlx(transparent)]
-pub struct Instruction(pub Json<isi::InstructionBox>);

@@ -110,11 +110,8 @@ impl Repo {
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
         };
-        let pagination = dbg!(ReversePagination::new(
-            dbg!(total),
-            params.pagination.per_page,
-            params.pagination.page
-        )?);
+        let pagination =
+            ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
         let txs = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
@@ -148,22 +145,28 @@ impl Repo {
     pub async fn list_instructions(
         &self,
         params: ListInstructionParams,
-    ) -> Result<Page<InstructionInList>> {
+    ) -> Result<Page<Instruction>> {
         let mut conn = self.conn.lock().await;
 
-        let mut builder = QueryBuilder::new("select count(*) from instructions");
-        params.push_where(&mut builder);
-        let (total,): (u64,) = builder.build_query_as().fetch_one(&mut (*conn)).await?;
+        let (total,): (u64,) = QueryBuilder::new("with main as (")
+            .push_custom(SelectInstructions { params: &params })
+            .push(") select count(*) from main")
+            .build_query_as()
+            .fetch_one(&mut (*conn))
+            .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
         };
         let pagination =
             ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
-        let mut builder = QueryBuilder::new("select transaction_hash, value from instructions");
-        params.push_where(&mut builder);
-        builder.push_custom(LimitOffset::from(pagination.range()));
-        let items = builder.build_query_as().fetch_all(&mut (*conn)).await?;
+        let items = QueryBuilder::new("with main as (")
+            .push_custom(SelectInstructions { params: &params })
+            .push(") select * from main ")
+            .push_custom(LimitOffset::from(pagination.range()))
+            .build_query_as()
+            .fetch_all(&mut (*conn))
+            .await?;
 
         Ok(Page::new(items, pagination.into()))
     }
@@ -229,11 +232,11 @@ impl Repo {
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
         };
-        let pagination = dbg!(DirectPagination::new(
+        let pagination = DirectPagination::new(
             params.pagination.page.unwrap_or(nonzero!(1u64)),
             params.pagination.per_page,
             total,
-        ));
+        );
 
         let res = QueryBuilder::new("with grouped as (")
             .push_custom(SelectAccounts {
@@ -267,21 +270,65 @@ impl Repo {
         Ok(item)
     }
 
-    // pub async fn list_assets_definitions(
-    //     &self,
-    //     params: ListAssetDefinitionParams,
-    // ) -> Result<Page<AssetDefinition>> {
-    // }
-    //
-    // pub async fn find_asset_definition(
-    //     &self,
-    //     id: AssetDefinitionId,
-    // ) -> Result<Option<AssetDefinition>> {
-    // }
-    //
-    // pub async fn list_assets(&self, params: ListAssetsParams) -> Result<Page<AssetDefinition>> {}
-    //
-    // pub async fn find_asset(&self, id: AssetId) -> Result<Option<AssetDefinition>> {}
+    pub async fn list_assets_definitions(
+        &self,
+        params: ListAssetDefinitionParams,
+    ) -> Result<Page<AssetDefinition>> {
+        let mut conn = self.conn.lock().await;
+        let (total,): (u64,) = QueryBuilder::new("with main as (")
+            .push_custom(SelectAssetsDefinitions {
+                with_where: &params,
+            })
+            .push(") select count(*) from main")
+            .build_query_as()
+            .fetch_one(&mut *conn)
+            .await?;
+        let Some(total) = NonZero::new(total) else {
+            return Ok(Page::empty(params.pagination.per_page));
+        };
+        let pagination = DirectPagination::new(
+            params.pagination.page.unwrap_or(nonzero!(1u64)),
+            params.pagination.per_page,
+            total,
+        );
+        let items = QueryBuilder::new("with main as (")
+            .push_custom(SelectAssetsDefinitions {
+                with_where: &params,
+            })
+            .push(") select * from main ")
+            .push_custom(LimitOffset::from(pagination.range()))
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await?;
+        Ok(Page::new(items, pagination.into()))
+    }
+
+    pub async fn find_asset_definition(
+        &self,
+        id: data_model::AssetDefinitionId,
+    ) -> Result<AssetDefinition> {
+        Ok(QueryBuilder::new("")
+            .push_custom(SelectAssetsDefinitions {
+                with_where: push_fn(|builder| {
+                    let mut sep = builder.separated(" and ");
+                    sep.push("asset_definitions.name = ")
+                        .push_bind_unseparated(AsText(id.name()))
+                        .push("asset_definitions.domain = ")
+                        .push_bind_unseparated(AsText(id.domain()));
+                }),
+            })
+            .build_query_as()
+            .fetch_one(&mut *(self.conn.lock().await))
+            .await?)
+    }
+
+    pub async fn list_assets(&self, _params: ListAssetsParams) -> Result<Page<Asset>> {
+        unimplemented!()
+    }
+
+    pub async fn find_asset(&self, _id: data_model::AssetId) -> Result<Asset> {
+        unimplemented!()
+    }
 }
 
 struct SelectAccounts<W> {
@@ -321,12 +368,6 @@ struct SelectBlocks<W> {
     with_where: W,
 }
 
-pub struct ListTransactionsParams {
-    pub pagination: PaginationQueryParams,
-    pub block_hash: Option<iroha_crypto::Hash>,
-    pub authority: Option<data_model::AccountId>,
-}
-
 impl<'a, W> PushCustom<'a> for SelectBlocks<W>
 where
     W: PushCustom<'a>,
@@ -359,6 +400,29 @@ ORDER BY
   blocks.height DESC
 ",
             );
+    }
+}
+
+pub struct ListTransactionsParams {
+    pub pagination: PaginationQueryParams,
+    pub block_hash: Option<iroha_crypto::Hash>,
+    pub authority: Option<data_model::AccountId>,
+}
+
+impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(hash) = &self.block_hash {
+            sep.push("transactions.block_hash = ")
+                .push_bind_unseparated(AsText(hash));
+        }
+        if let Some(id) = &self.authority {
+            sep.push("transactions.authority_signatory = ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("transactions.authority_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
     }
 }
 
@@ -402,6 +466,19 @@ pub struct ListDomainParams {
     pub owned_by: Option<data_model::AccountId>,
 }
 
+impl<'a> PushCustom<'a> for &'a ListDomainParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.owned_by {
+            sep.push("domain_owners.account_signatory = ")
+                .push_bind_unseparated(id.signatory().to_string())
+                .push("domain_owners.account_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+    }
+}
+
 struct SelectDomains<W> {
     with_where: W,
 }
@@ -435,27 +512,113 @@ pub struct ListAccountsParams {
     pub domain: Option<data_model::DomainId>,
 }
 
+impl<'a> PushCustom<'a> for &'a ListAccountsParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.with_asset {
+            sep.push("assets.owned_by_signatory = accounts.signatory")
+                .push("assets.owned_by_domain = accounts.domain")
+                .push("assets.definition_name = ")
+                .push_bind_unseparated(id.name().as_ref())
+                .push("assets.definition_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+        if let Some(domain) = &self.domain {
+            sep.push("accounts.domain = ")
+                .push_bind_unseparated(domain.name().as_ref());
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct SelectAssetsDefinitions<W> {
+    pub with_where: W,
+}
+
+impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectAssetsDefinitions<W> {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        builder.push("\
+select format('%s#%s', name, domain)                                                            as id,
+       format('%s@%s', asset_definitions.owned_by_signatory, asset_definitions.owned_by_domain) as owned_by,
+       logo,
+       metadata,
+       mintable,
+       type,
+       count(assets.definition_name)                                                            as assets
+from asset_definitions
+         left join assets on asset_definitions.name = assets.definition_name and
+                             asset_definitions.domain = assets.definition_domain
+where ")
+            .push_custom(self.with_where).push(" group by asset_definitions.name, asset_definitions.domain");
+    }
+}
+
 pub struct ListAssetDefinitionParams {
     pub pagination: PaginationQueryParams,
-    pub domain: Option<DomainId>,
-    pub owned_by: Option<AccountId>,
+    pub domain: Option<data_model::DomainId>,
+    pub owned_by: Option<data_model::AccountId>,
+}
+
+impl<'a> PushCustom<'a> for &'a ListAssetDefinitionParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.domain {
+            sep.push("asset_definitions.domain = ")
+                .push_bind_unseparated(id.name().as_ref());
+        }
+        if let Some(id) = &self.owned_by {
+            sep.push("asset_definitions.owned_by_signatory = ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("asset_definitions.owned_by_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+    }
 }
 
 pub struct ListAssetsParams {
     pub pagination: PaginationQueryParams,
-    pub owned_by: Option<AccountId>,
-    pub definition: Option<AssetDefinitionId>,
+    pub owned_by: Option<data_model::AccountId>,
+    pub definition: Option<data_model::AssetDefinitionId>,
 }
 
 pub struct ListInstructionParams {
     pub pagination: PaginationQueryParams,
-    pub transaction_hash: Option<Hash>,
+    pub transaction_hash: Option<iroha_crypto::Hash>,
 }
 
-impl ListInstructionParams {
-    fn push_where<'a>(&'a self, builder: &mut QueryBuilder<'a, Sqlite>) {
+impl<'a> PushCustom<'a> for &'a ListInstructionParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
         if let Some(hash) = &self.transaction_hash {
-            builder.push(" where transaction_hash = ").push_bind(hash);
+            builder.push("transaction_hash = ").push_bind(AsText(hash));
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct SelectInstructions<'a> {
+    params: &'a ListInstructionParams,
+}
+
+impl<'a> PushCustom<'a> for SelectInstructions<'a> {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        builder
+            .push(
+                "\
+select json_each.key   as type,
+       json_each.value as payload,
+       transactions.created_at,
+       transaction_hash
+from instructions,
+     json_each(instructions.value)
+         join transactions on transactions.hash = instructions.transaction_hash
+where
+        ",
+            )
+            .push_custom(self.params)
+            .push(" order by created_at desc ");
     }
 }
