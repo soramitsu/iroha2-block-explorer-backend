@@ -91,6 +91,7 @@ pub struct Args {
         schema::TransactionDetailed,
         schema::TransactionRejectionReason,
         schema::Instruction,
+        schema::InstructionKind,
         schema::TimeStamp,
         schema::BigInt,
         schema::Decimal,
