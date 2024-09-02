@@ -15,7 +15,7 @@ use sqlx::{
     ConnectOptions, Connection, Database, Decode, Encode, QueryBuilder, Sqlite, SqliteConnection,
 };
 use std::error::Error as StdError;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::str::FromStr;
 use std::{num::NonZero, sync::Arc};
 use tokio::sync::Mutex;
@@ -258,7 +258,7 @@ impl Repo {
                 with_where: util::push_fn(|builder| {
                     builder
                         .separated(" and ")
-                        .push("accounts.signatory = ")
+                        .push("accounts.signatory like  ")
                         .push_bind_unseparated(id.signatory().to_string())
                         .push("accounts.domain = ")
                         .push_bind_unseparated(id.domain().to_string());
@@ -322,12 +322,55 @@ impl Repo {
             .await?)
     }
 
-    pub async fn list_assets(&self, _params: ListAssetsParams) -> Result<Page<Asset>> {
-        unimplemented!()
+    pub async fn list_assets(&self, params: ListAssetsParams) -> Result<Page<Asset>> {
+        let mut conn = self.conn.lock().await;
+        let (total,): (u64,) = QueryBuilder::new("with main as (")
+            .push_custom(SelectAssets {
+                with_where: &params,
+            })
+            .push(") select count(*) from main")
+            .build_query_as()
+            .fetch_one(&mut *conn)
+            .await?;
+        let Some(total) = NonZero::new(total) else {
+            return Ok(Page::empty(params.pagination.per_page));
+        };
+        let pagination = DirectPagination::new(
+            params.pagination.page.unwrap_or(nonzero!(1u64)),
+            params.pagination.per_page,
+            total,
+        );
+        let items = QueryBuilder::new("with main as (")
+            .push_custom(SelectAssets {
+                with_where: &params,
+            })
+            .push(") select * from main ")
+            .push_custom(LimitOffset::from(pagination.range()))
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await?;
+        Ok(Page::new(items, pagination.into()))
     }
 
-    pub async fn find_asset(&self, _id: data_model::AssetId) -> Result<Asset> {
-        unimplemented!()
+    pub async fn find_asset(&self, id: data_model::AssetId) -> Result<Asset> {
+        Ok(QueryBuilder::new("")
+            .push_custom(SelectAssets {
+                with_where: push_fn(|builder| {
+                    builder
+                        .separated(" and ")
+                        .push("owned_by_signatory like  ")
+                        .push_bind_unseparated(AsText(id.account().signatory()))
+                        .push("owned_by_domain = ")
+                        .push_bind_unseparated(id.account().domain().name().as_ref())
+                        .push("definition_name = ")
+                        .push_bind_unseparated(id.definition().name().as_ref())
+                        .push("definition_domain = ")
+                        .push_bind_unseparated(id.definition().domain().name().as_ref());
+                }),
+            })
+            .build_query_as()
+            .fetch_one(&mut *(self.conn.lock().await))
+            .await?)
     }
 }
 
@@ -348,10 +391,10 @@ select format('%s@%s', accounts.signatory, accounts.domain) as id,
        count(distinct assets.definition_name)               as owned_assets,
        count(distinct domain_owners.domain)                 as owned_domains
 from accounts
-     left join assets on assets.owned_by_signatory = accounts.signatory
+     left join assets on assets.owned_by_signatory like  accounts.signatory
 and assets.owned_by_domain = accounts.domain
      left join domain_owners on domain_owners.account_domain = accounts.domain
-and domain_owners.account_signatory = accounts.signatory
+and domain_owners.account_signatory like  accounts.signatory
 where ",
             )
             .push_custom(self.with_where)
@@ -418,7 +461,7 @@ impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
                 .push_bind_unseparated(AsText(hash));
         }
         if let Some(id) = &self.authority {
-            sep.push("transactions.authority_signatory = ")
+            sep.push("transactions.authority_signatory like  ")
                 .push_bind_unseparated(AsText(id.signatory()))
                 .push("transactions.authority_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
@@ -471,7 +514,7 @@ impl<'a> PushCustom<'a> for &'a ListDomainParams {
         let mut sep = builder.separated(" and ");
         sep.push("true");
         if let Some(id) = &self.owned_by {
-            sep.push("domain_owners.account_signatory = ")
+            sep.push("domain_owners.account_signatory like  ")
                 .push_bind_unseparated(id.signatory().to_string())
                 .push("domain_owners.account_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
@@ -517,7 +560,7 @@ impl<'a> PushCustom<'a> for &'a ListAccountsParams {
         let mut sep = builder.separated(" and ");
         sep.push("true");
         if let Some(id) = &self.with_asset {
-            sep.push("assets.owned_by_signatory = accounts.signatory")
+            sep.push("assets.owned_by_signatory like  accounts.signatory")
                 .push("assets.owned_by_domain = accounts.domain")
                 .push("assets.definition_name = ")
                 .push_bind_unseparated(id.name().as_ref())
@@ -569,7 +612,7 @@ impl<'a> PushCustom<'a> for &'a ListAssetDefinitionParams {
                 .push_bind_unseparated(id.name().as_ref());
         }
         if let Some(id) = &self.owned_by {
-            sep.push("asset_definitions.owned_by_signatory = ")
+            sep.push("asset_definitions.owned_by_signatory like ")
                 .push_bind_unseparated(AsText(id.signatory()))
                 .push("asset_definitions.owned_by_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
@@ -577,10 +620,48 @@ impl<'a> PushCustom<'a> for &'a ListAssetDefinitionParams {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct SelectAssets<W> {
+    pub with_where: W,
+}
+
+impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectAssets<W> {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        builder.push("\
+select case assets.definition_domain = assets.owned_by_domain
+           when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
+           else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
+                       assets.owned_by_domain) end as id,
+       value
+from assets
+where ")
+            .push_custom(self.with_where);
+    }
+}
+
 pub struct ListAssetsParams {
     pub pagination: PaginationQueryParams,
     pub owned_by: Option<data_model::AccountId>,
     pub definition: Option<data_model::AssetDefinitionId>,
+}
+
+impl<'a> PushCustom<'a> for &'a ListAssetsParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.owned_by {
+            sep.push("owned_by_signatory like ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("owned_by_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+        if let Some(id) = &self.definition {
+            sep.push("definition_name = ")
+                .push_bind_unseparated(id.name().as_ref())
+                .push("definition_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+    }
 }
 
 pub struct ListInstructionParams {
