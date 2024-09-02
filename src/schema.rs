@@ -45,7 +45,7 @@ impl From<repo::Domain> for Domain {
         Self {
             id: DomainId(value.id.0 .0),
             logo: value.logo.map(|x| IpfsPath(x.0)),
-            metadata: Metadata(value.metadata.0 .0),
+            metadata: Metadata(value.metadata.into()),
             owned_by: AccountId(value.owned_by.0 .0),
             accounts: value.accounts,
             assets: value.assets,
@@ -71,7 +71,7 @@ impl From<repo::Account> for Account {
     fn from(value: repo::Account) -> Self {
         Self {
             id: AccountId(value.id.0 .0),
-            metadata: Metadata(value.metadata.0 .0),
+            metadata: Metadata(value.metadata.into()),
             owned_assets: value.owned_assets,
             owned_domains: value.owned_domains,
         }
@@ -117,7 +117,7 @@ impl From<repo::AssetDefinition> for AssetDefinition {
                 repo::Mintable::Not => Mintable::Not,
             },
             logo: value.logo.map(|x| IpfsPath(x.0)),
-            metadata: Metadata(value.metadata.0 .0),
+            metadata: Metadata(value.metadata.into()),
             owned_by: AccountId(value.owned_by.0 .0),
             assets: value.assets,
         }
@@ -157,7 +157,7 @@ impl From<repo::Asset> for Asset {
                     value: Decimal::from(&numeric),
                 },
                 repo::AssetValue::Store(map) => AssetValue::Store {
-                    metadata: Metadata(map.0 .0),
+                    metadata: Metadata(map.into()),
                 },
             },
         }
@@ -206,7 +206,7 @@ pub struct Metadata(iroha::Metadata);
 
 impl From<repo::Metadata> for Metadata {
     fn from(value: repo::Metadata) -> Self {
-        Self(value.0 .0)
+        Self(value.into())
     }
 }
 

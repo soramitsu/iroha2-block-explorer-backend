@@ -33,7 +33,13 @@ pub struct IpfsPath(pub String);
 
 #[derive(Debug, Type, Deserialize)]
 #[sqlx(transparent)]
-pub struct Metadata(pub Json<metadata::Metadata>);
+pub struct Metadata(pub Option<Json<metadata::Metadata>>);
+
+impl From<Metadata> for metadata::Metadata {
+    fn from(value: Metadata) -> Self {
+        value.0.map(|x| x.0).unwrap_or_default()
+    }
+}
 
 #[derive(Debug, FromRow)]
 pub struct Block {
