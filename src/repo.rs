@@ -593,7 +593,8 @@ impl<'a> PushCustom<'a> for &'a ListInstructionParams {
         let mut sep = builder.separated(" and ");
         sep.push("true");
         if let Some(hash) = &self.transaction_hash {
-            builder.push("transaction_hash = ").push_bind(AsText(hash));
+            sep.push("transaction_hash like ")
+                .push_bind_unseparated(AsText(hash));
         }
     }
 }
@@ -608,7 +609,7 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
         builder
             .push(
                 "\
-select json_each.key   as type,
+select json_each.key   as kind,
        json_each.value as payload,
        transactions.created_at,
        transaction_hash

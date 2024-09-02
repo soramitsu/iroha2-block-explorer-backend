@@ -1,4 +1,5 @@
 use crate::repo::util::AsText;
+use crate::schema;
 use chrono::{DateTime, Utc};
 use iroha_data_model::{account, asset, domain, isi, metadata, prelude};
 use serde::Deserialize;
@@ -61,7 +62,7 @@ pub struct SignatureFromStr(pub iroha_crypto::Signature);
 impl FromStr for SignatureFromStr {
     type Err = iroha_crypto::error::ParseError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(iroha_crypto::Signature::from_hex(s)?))
     }
 }
@@ -165,6 +166,6 @@ pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
 pub struct Instruction {
     pub transaction_hash: Hash,
     pub created_at: DateTime<Utc>,
-    pub r#type: String,
+    pub kind: schema::InstructionKind,
     pub payload: Json<serde_json::Value>,
 }

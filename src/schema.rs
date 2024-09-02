@@ -3,6 +3,7 @@ use std::{num::NonZero, str::FromStr};
 use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
 use chrono::Utc;
+use iroha_data_model::isi::InstructionType;
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use serde_with::DeserializeFromStr;
@@ -465,7 +466,7 @@ impl From<repo::Executable> for Executable {
 #[derive(Serialize, ToSchema)]
 pub struct Instruction {
     /// Kind of instruction. TODO: add strict enumeration
-    kind: String,
+    kind: InstructionKind,
     /// Instruction payload, some JSON. TODO: add typed output
     payload: serde_json::Value,
     transaction_hash: Hash,
@@ -474,8 +475,32 @@ pub struct Instruction {
 
 impl From<repo::Instruction> for Instruction {
     fn from(value: repo::Instruction) -> Self {
-        todo!()
+        Self {
+            kind: value.kind,
+            payload: value.payload.0,
+            transaction_hash: Hash(value.transaction_hash.0 .0),
+            created_at: TimeStamp(value.created_at),
+        }
     }
+}
+
+/// Kind of instruction
+#[derive(Serialize, ToSchema, sqlx::Type, Debug)]
+pub enum InstructionKind {
+    Register,
+    Unregister,
+    Mint,
+    Burn,
+    Transfer,
+    SetKeyValue,
+    RemoveKeyValue,
+    Grant,
+    Revoke,
+    ExecuteTrigger,
+    SetParameter,
+    Upgrade,
+    Log,
+    Custom,
 }
 
 /// Block
