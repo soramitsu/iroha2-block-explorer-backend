@@ -65,7 +65,8 @@ pub struct Args {
         endpoint::blocks_show,
         endpoint::transactions_index,
         endpoint::transactions_show,
-        endpoint::instructions_index
+        endpoint::instructions_index,
+        endpoint::status_show
     ),
     components(schemas(
         schema::Domain,
@@ -90,6 +91,7 @@ pub struct Args {
         schema::TransactionInList,
         schema::TransactionDetailed,
         schema::TransactionRejectionReason,
+        schema::Status,
         schema::Instruction,
         schema::InstructionKind,
         schema::TimeStamp,

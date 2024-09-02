@@ -668,6 +668,32 @@ impl FromStr for BlockHeightOrHash {
     }
 }
 
+/// Peer status
+#[derive(Serialize, ToSchema)]
+pub struct Status {
+    peers: u32,
+    blocks: u32,
+    txs_accepted: u32,
+    txs_rejected: u32,
+    view_changes: u32,
+    queue_size: u32,
+    uptime: Duration,
+}
+
+impl From<iroha_telemetry::metrics::Status> for Status {
+    fn from(value: iroha_telemetry::metrics::Status) -> Self {
+        Self {
+            peers: value.peers as u32,
+            blocks: value.blocks as u32,
+            txs_accepted: value.txs_accepted as u32,
+            txs_rejected: value.txs_rejected as u32,
+            view_changes: value.view_changes as u32,
+            queue_size: value.queue_size as u32,
+            uptime: Duration::from(value.uptime.0),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use iroha_crypto::KeyPair;

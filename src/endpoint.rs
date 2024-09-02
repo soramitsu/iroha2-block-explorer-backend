@@ -379,6 +379,29 @@ async fn instructions_index(
     Ok(Json(items))
 }
 
+/// Show peer status
+#[utoipa::path(
+    get,
+    path = "/api/v1/status",
+    responses(
+        (status = 200, body = schema::Status, example = json!({
+      "peers": 0,
+      "blocks": 31,
+      "txs_accepted": 74,
+      "txs_rejected": 35,
+      "view_changes": 0,
+      "queue_size": 0,
+      "uptime": {
+        "ms": 1134142427
+      }
+        }))
+    )
+)]
+pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::Status>, AppError> {
+    let status = state.iroha.status().await?;
+    Ok(Json(status.into()))
+}
+
 pub fn router(iroha: Client, repo: Repo) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
@@ -394,6 +417,7 @@ pub fn router(iroha: Client, repo: Repo) -> Router {
         .route("/transactions", get(transactions_index))
         .route("/transactions/:hash", get(transactions_show))
         .route("/instructions", get(instructions_index))
+        .route("/status", get(status_show))
         .with_state(AppState {
             iroha: Arc::new(iroha),
             repo,
