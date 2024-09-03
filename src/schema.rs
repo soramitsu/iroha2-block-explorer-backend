@@ -221,10 +221,10 @@ pub struct IpfsPath(String);
 /// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
 ///
 /// On JavaScript side is recommended to parse with `BigInt`.
-#[derive(ToSchema)]
+#[derive(Debug, ToSchema)]
 // TODO set `value_type` to union of string and number
 #[schema(example = 42)]
-pub struct BigInt(u128);
+pub struct BigInt(pub u128);
 
 impl From<u64> for BigInt {
     fn from(value: u64) -> Self {
@@ -251,7 +251,7 @@ impl Serialize for BigInt {
 }
 
 /// Information on data pagination
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 #[schema(
     example = json!({
         "page": 1,
@@ -261,13 +261,13 @@ impl Serialize for BigInt {
 )]
 pub struct Pagination {
     /// Page number, starts from 1
-    page: BigInt,
+    pub page: BigInt,
     /// Items per page, starts from 1
-    per_page: BigInt,
+    pub per_page: BigInt,
     /// Total number of pages. Not always available.
-    total_pages: BigInt,
+    pub total_pages: BigInt,
     /// Total number of items. Not always available.
-    total_items: BigInt,
+    pub total_items: BigInt,
 }
 
 impl Pagination {
@@ -324,13 +324,13 @@ impl From<DirectPagination> for Pagination {
 }
 
 /// Generic paginated data container
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 #[aliases(DomainsPage = Page<Domain>)]
 pub struct Page<T> {
     /// Pagination info
-    pagination: Pagination,
+    pub pagination: Pagination,
     /// Page items
-    items: Vec<T>,
+    pub items: Vec<T>,
 }
 
 impl<T> Page<T> {

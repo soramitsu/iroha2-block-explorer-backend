@@ -38,11 +38,10 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub async fn new(opts: SqliteConnectOptions) -> Result<Self> {
-        let conn = opts.connect().await?;
-        Ok(Self {
+    pub fn new(conn: SqliteConnection) -> Self {
+        Self {
             conn: Arc::new(Mutex::new(conn)),
-        })
+        }
     }
 
     pub async fn list_blocks(&self, pagination: PaginationQueryParams) -> Result<Page<Block>> {
@@ -457,7 +456,7 @@ impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
         let mut sep = builder.separated(" and ");
         sep.push("true");
         if let Some(hash) = &self.block_hash {
-            sep.push("transactions.block_hash = ")
+            sep.push("transactions.block_hash like ")
                 .push_bind_unseparated(AsText(hash));
         }
         if let Some(id) = &self.authority {
@@ -702,5 +701,74 @@ where
             )
             .push_custom(self.params)
             .push(" order by created_at desc ");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::query;
+
+    async fn test_repo() -> Repo {
+        let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        query(include_str!("./repo/test-dump.sql"))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let repo = Repo::new(conn);
+        repo
+    }
+
+    fn default_pagination() -> PaginationQueryParams {
+        PaginationQueryParams {
+            page: None,
+            per_page: nonzero!(10u64),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_txs() {
+        let repo = test_repo().await;
+
+        let txs = repo
+            .list_transactions(ListTransactionsParams {
+                pagination: PaginationQueryParams {
+                    page: None,
+                    per_page: nonzero!(5u64),
+                },
+                block_hash: None,
+                authority: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(txs.pagination.page.0, 22);
+        assert_eq!(txs.pagination.per_page.0, 5);
+        assert_eq!(txs.pagination.total_pages.0, 22);
+        assert_eq!(txs.pagination.total_items.0, 109);
+        assert_eq!(txs.items.len(), 9);
+    }
+
+    #[tokio::test]
+    async fn filter_txs_by_block_hash() {
+        let repo = test_repo().await;
+
+        let txs = repo
+            .list_transactions(ListTransactionsParams {
+                pagination: default_pagination(),
+                block_hash: Some(
+                    "6624E2E72B76DDD4D317CA70D66A0030AC07F92EC0545BBD3BB323EBD7EE721F"
+                        .parse()
+                        .unwrap(),
+                ),
+                authority: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(txs.pagination.page.0, 1);
+        assert_eq!(txs.pagination.total_pages.0, 1);
+        assert_eq!(txs.pagination.total_items.0, 5);
+        assert_eq!(txs.items.len(), 5);
     }
 }

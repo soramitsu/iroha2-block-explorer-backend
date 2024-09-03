@@ -119,10 +119,13 @@ async fn main() {
     let key_pair = KeyPair::from(args.account_private_key);
     let iroha = Client::new(args.account, key_pair, args.torii_url);
 
-    let opts = SqliteConnectOptions::new()
+    let conn = SqliteConnectOptions::new()
         .filename(args.database)
-        .log_statements(LevelFilter::Debug);
-    let repo = Repo::new(opts).await.unwrap();
+        .log_statements(LevelFilter::Debug)
+        .connect()
+        .await
+        .unwrap();
+    let repo = Repo::new(conn);
 
     // TODO: handle endpoint panics
     let app = Router::new()
