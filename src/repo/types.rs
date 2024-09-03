@@ -1,5 +1,6 @@
 use crate::repo::util::AsText;
 use crate::schema;
+use crate::schema::TransactionStatus;
 use chrono::{DateTime, Utc};
 use iroha_data_model::{account, asset, domain, isi, metadata, prelude};
 use serde::Deserialize;
@@ -85,20 +86,6 @@ impl Display for SignatureFromStr {
     }
 }
 
-#[derive(Debug, FromRow)]
-pub struct Transaction {
-    pub hash: Hash,
-    pub block_hash: Hash,
-    pub authority: AccountId,
-    pub nonce: Option<NonZero<u32>>,
-    pub metadata: Metadata,
-    pub created_at: DateTime<Utc>,
-    pub time_to_live_ms: u64,
-    pub instructions: Executable,
-    pub signature: Signature,
-    pub error: Option<Json<prelude::TransactionRejectionReason>>,
-}
-
 #[derive(Debug, Type)]
 pub enum Executable {
     Instructions,
@@ -106,13 +93,24 @@ pub enum Executable {
 }
 
 #[derive(Debug, FromRow)]
-pub struct TransactionInList {
+pub struct TransactionBase {
     pub hash: Hash,
     pub block_hash: Hash,
     pub created_at: DateTime<Utc>,
     pub authority: AccountId,
     pub instructions: Executable,
-    pub error: bool,
+    pub status: TransactionStatus,
+}
+
+#[derive(Debug, FromRow)]
+pub struct TransactionDetailed {
+    #[sqlx(flatten)]
+    pub base: TransactionBase,
+    pub nonce: Option<NonZero<u32>>,
+    pub metadata: Metadata,
+    pub time_to_live_ms: u64,
+    pub signature: Signature,
+    pub rejection_reason: Option<Json<prelude::TransactionRejectionReason>>,
 }
 
 #[derive(Debug, FromRow)]

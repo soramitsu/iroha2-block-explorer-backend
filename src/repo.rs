@@ -3,8 +3,8 @@
 mod types;
 mod util;
 
-use crate::schema::PaginationQueryParams;
 use crate::schema::{InstructionKind, Page};
+use crate::schema::{PaginationQueryParams, TransactionStatus};
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 use iroha_data_model::prelude as data_model;
 use nonzero_ext::nonzero;
@@ -94,13 +94,13 @@ impl Repo {
     pub async fn list_transactions(
         &self,
         params: ListTransactionsParams,
-    ) -> Result<Page<TransactionInList>> {
+    ) -> Result<Page<TransactionBase>> {
         let mut conn = self.conn.lock().await;
 
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
                 with_where: &params,
-                full: false,
+                detailed: false,
             })
             .push(") select count(*) from main")
             .build_query_as()
@@ -115,7 +115,7 @@ impl Repo {
         let txs = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
                 with_where: &params,
-                full: false,
+                detailed: false,
             })
             .push(") select * from main ")
             .push_custom(LimitOffset::from(pagination.range()))
@@ -126,14 +126,17 @@ impl Repo {
         Ok(Page::new(txs, pagination.into()))
     }
 
-    pub async fn find_transaction_by_hash(&self, hash: iroha_crypto::Hash) -> Result<Transaction> {
+    pub async fn find_transaction_by_hash(
+        &self,
+        hash: iroha_crypto::Hash,
+    ) -> Result<TransactionDetailed> {
         let mut conn = self.conn.lock().await;
         let tx = QueryBuilder::new("")
             .push_custom(SelectTransactions {
                 with_where: util::push_fn(|builder| {
                     builder.push("hash like ").push_bind(AsText(hash));
                 }),
-                full: true,
+                detailed: true,
             })
             .build_query_as()
             .fetch_one(&mut (*conn))
@@ -449,6 +452,7 @@ pub struct ListTransactionsParams {
     pub pagination: PaginationQueryParams,
     pub block_hash: Option<iroha_crypto::Hash>,
     pub authority: Option<data_model::AccountId>,
+    pub status: Option<TransactionStatus>,
 }
 
 impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
@@ -465,12 +469,18 @@ impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
                 .push("transactions.authority_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
         }
+        if let Some(status) = &self.status {
+            match status {
+                TransactionStatus::Committed => sep.push("transactions.error is null"),
+                TransactionStatus::Rejected => sep.push("transactions.error is not null"),
+            };
+        }
     }
 }
 
 struct SelectTransactions<W> {
     with_where: W,
-    full: bool,
+    detailed: bool,
 }
 
 impl<'a, W> PushCustom<'a> for SelectTransactions<W>
@@ -485,14 +495,16 @@ where
             .push("block_hash")
             .push("format('%s@%s', authority_signatory, authority_domain) as authority")
             .push("created_at")
-            .push("instructions");
-        if self.full {
+            .push("instructions")
+            .push("case when error is null then 'committed' else 'rejected' end as status");
+
+        if self.detailed {
             select
                 .push("metadata")
                 .push("nonce")
                 .push("time_to_live_ms")
                 .push("signature")
-                .push("error")
+                .push("error as rejection_reason")
         } else {
             select.push("error is not null as error")
         };
@@ -708,7 +720,7 @@ select json_each.key                                          as kind,
 from instructions,
      json_each(instructions.value)
          join transactions on transactions.hash = instructions.transaction_hash
-where
+where error is null and
         ",
             )
             .push_custom(self.params)
@@ -750,6 +762,7 @@ mod tests {
                 },
                 block_hash: None,
                 authority: None,
+                status: None,
             })
             .await
             .unwrap();
@@ -774,6 +787,7 @@ mod tests {
                         .unwrap(),
                 ),
                 authority: None,
+                status: None,
             })
             .await
             .unwrap();
@@ -785,10 +799,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn filter_txs_by_status() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_transactions(ListTransactionsParams {
+                pagination: default_pagination(),
+                block_hash: None,
+                authority: None,
+                status: Some(TransactionStatus::Rejected),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(data.pagination.total_items.0, 35);
+        assert!(data
+            .items
+            .iter()
+            .all(|x| x.status == TransactionStatus::Rejected));
+
+        let data = repo
+            .list_transactions(ListTransactionsParams {
+                pagination: default_pagination(),
+                block_hash: None,
+                authority: None,
+                status: Some(TransactionStatus::Committed),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(data.pagination.total_items.0, 109 - 35);
+        assert!(data
+            .items
+            .iter()
+            .all(|x| x.status == TransactionStatus::Committed))
+    }
+
+    #[tokio::test]
     async fn filter_isi_by_kind() {
         let repo = test_repo().await;
 
-        let items = repo
+        let data = repo
             .list_instructions(ListInstructionParams {
                 pagination: default_pagination(),
                 transaction_hash: None,
@@ -798,11 +849,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(items.pagination.page.0, 3);
-        assert_eq!(items.pagination.total_pages.0, 3);
-        assert_eq!(items.pagination.total_items.0, 27);
-        assert_eq!(items.items.len(), 17);
-        assert!(items
+        assert_eq!(data.pagination.page.0, 2);
+        assert_eq!(data.pagination.total_pages.0, 2);
+        assert_eq!(data.pagination.total_items.0, 12);
+        assert_eq!(data.items.len(), 12);
+        assert!(data
             .items
             .iter()
             .all(|x| x.kind == InstructionKind::Transfer));

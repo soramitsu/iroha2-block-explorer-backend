@@ -164,6 +164,8 @@ struct TransactionsIndexFilter {
     authority: Option<schema::AccountId>,
     /// Select by block hash
     block_hash: Option<schema::Hash>,
+    /// Filter by transaction status
+    status: Option<schema::TransactionStatus>,
 }
 
 /// List transactions
@@ -179,16 +181,17 @@ async fn transactions_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<TransactionsIndexFilter>,
-) -> Result<Json<Page<schema::TransactionInList>>, AppError> {
+) -> Result<Json<Page<schema::TransactionBase>>, AppError> {
     let page = state
         .repo
         .list_transactions(repo::ListTransactionsParams {
             pagination,
             block_hash: filter.block_hash.map(|x| x.0),
             authority: filter.authority.map(|x| x.0),
+            status: filter.status,
         })
         .await?
-        .map(schema::TransactionInList::from);
+        .map(schema::TransactionBase::from);
     Ok(Json(page))
 }
 
@@ -356,7 +359,7 @@ struct InstructionsIndexFilter {
     authority: Option<schema::AccountId>,
 }
 
-/// List instructions
+/// List _committed_ instructions
 #[utoipa::path(
     get,
     path = "/api/v1/instructions",

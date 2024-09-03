@@ -1,7 +1,7 @@
 use std::{num::NonZero, str::FromStr};
 
-use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
+use crate::{repo, schema};
 use chrono::Utc;
 use iroha_data_model::isi::InstructionType;
 use nonzero_ext::nonzero;
@@ -373,6 +373,15 @@ const fn default_per_page() -> NonZero<u64> {
 #[schema(example = "2024-08-11T23:08:58Z")]
 pub struct TimeStamp(chrono::DateTime<Utc>);
 
+/// Transaction status
+#[derive(Serialize, Deserialize, ToSchema, Debug, sqlx::Type, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(rename = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum TransactionStatus {
+    Committed,
+    Rejected,
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct TransactionBase {
     hash: Hash,
@@ -380,27 +389,18 @@ pub struct TransactionBase {
     created_at: TimeStamp,
     authority: AccountId,
     instructions: Executable,
+    status: TransactionStatus,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct TransactionInList {
-    #[serde(flatten)]
-    base: TransactionBase,
-    /// Where there is an error or not
-    error: bool,
-}
-
-impl From<repo::TransactionInList> for TransactionInList {
-    fn from(value: repo::TransactionInList) -> Self {
+impl From<repo::TransactionBase> for TransactionBase {
+    fn from(value: repo::TransactionBase) -> Self {
         Self {
-            base: TransactionBase {
-                hash: value.hash.into(),
-                block_hash: value.block_hash.into(),
-                created_at: TimeStamp(value.created_at),
-                authority: value.authority.into(),
-                instructions: value.instructions.into(),
-            },
-            error: value.error,
+            hash: value.hash.into(),
+            block_hash: value.block_hash.into(),
+            created_at: TimeStamp(value.created_at),
+            authority: value.authority.into(),
+            instructions: value.instructions.into(),
+            status: value.status,
         }
     }
 }
@@ -413,27 +413,21 @@ pub struct TransactionDetailed {
     nonce: Option<NonZero<u32>>,
     metadata: Metadata,
     time_to_live: Duration,
-    error: Option<TransactionRejectionReason>,
+    rejection_reason: Option<TransactionRejectionReason>,
 }
 
-impl From<repo::Transaction> for TransactionDetailed {
-    fn from(value: repo::Transaction) -> Self {
+impl From<repo::TransactionDetailed> for TransactionDetailed {
+    fn from(value: repo::TransactionDetailed) -> Self {
         Self {
-            base: TransactionBase {
-                hash: value.hash.into(),
-                block_hash: value.block_hash.into(),
-                created_at: TimeStamp(value.created_at),
-                authority: value.authority.into(),
-                instructions: value.instructions.into(),
-            },
+            base: value.base.into(),
             signature: value.signature.into(),
             nonce: value.nonce,
             metadata: value.metadata.into(),
             time_to_live: Duration {
                 ms: BigInt(value.time_to_live_ms as u128),
             },
-            error: value
-                .error
+            rejection_reason: value
+                .rejection_reason
                 .map(|reason| TransactionRejectionReason(reason.0)),
         }
     }
@@ -541,54 +535,6 @@ impl From<repo::Block> for Block {
     }
 }
 
-// /// Signature of block
-// #[derive(Serialize, ToSchema)]
-// pub struct BlockSignature {
-//     /// Index of the peer in the topology
-//     topology_index: BigInt,
-//     /// The signature itself
-//     payload: Signature<'a>,
-// }
-
-// /// Header of block
-// #[derive(Serialize, ToSchema)]
-// #[schema(
-//     example = json!({
-//         "height": 4,
-//         "prev_block_hash": "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3",
-//         "transactions_hash": "6D8C110F75E7447D1495FE419C212ABA5DA31F940B85C8598D76A11C5D60AEFB",
-//         "created_at": "2024-08-15T00:40:02.324Z",
-//         "consensus_estimation": {
-//             "ms": 0
-//         }
-//     })
-// )]
-// pub struct BlockHeader {
-//     /// Number of blocks in the chain including this block
-//     height: NonZero<u64>,
-//     /// Hash of the previous block in the chain
-//     prev_block_hash: Option<Hash>,
-//     /// Hash of merkle tree root of transactions' hashes
-//     transactions_hash: Hash,
-//     /// Timestamp of creation
-//     created_at: TimeStamp,
-//     /// Estimation of consensus duration
-//     consensus_estimation: Duration,
-// }
-
-// impl From<&iroha::BlockHeader> for BlockHeader {
-//     fn from(value: &iroha::BlockHeader) -> Self {
-//         Self {
-//             height: value.height(),
-//             prev_block_hash: value.prev_block_hash().map(Hash::from),
-//             transactions_hash: value.transactions_hash().into(),
-//             created_at: TimeStamp::from_duration_as_epoch(value.creation_time())
-//                 .expect("creation time should fit into datetime"),
-//             consensus_estimation: Duration::from(value.consensus_estimation()),
-//         }
-//     }
-// }
-
 /// Hex-encoded hash
 #[derive(Deserialize, Serialize, ToSchema)]
 #[schema(value_type = String, example = "1B0A52DBDC11EAE39DD0524AD5146122351527CE00D161EA8263EA7ADE4164AF")]
@@ -623,18 +569,6 @@ impl From<repo::Signature> for Signature {
     }
 }
 
-// impl<T> From<iroha_crypto::SignatureOf<T>> for Signature {
-//     fn from(value: iroha_crypto::SignatureOf<T>) -> Self {
-//         Self(value.into())
-//     }
-// }
-//
-// impl From<&'a iroha_crypto::Signature> for Signature {
-//     fn from(value: &'a iroha_crypto::Signature) -> Self {
-//         Self(Cow::Borrowed(value))
-//     }
-// }
-//
 /// Duration
 #[derive(ToSchema, Serialize)]
 pub struct Duration {
