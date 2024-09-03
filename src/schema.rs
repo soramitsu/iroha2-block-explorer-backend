@@ -470,6 +470,7 @@ pub struct Instruction {
     /// Instruction payload, some JSON. TODO: add typed output
     payload: serde_json::Value,
     transaction_hash: Hash,
+    authority: AccountId,
     created_at: TimeStamp,
 }
 
@@ -479,13 +480,14 @@ impl From<repo::Instruction> for Instruction {
             kind: value.kind,
             payload: value.payload.0,
             transaction_hash: Hash(value.transaction_hash.0 .0),
+            authority: AccountId(value.authority.0 .0),
             created_at: TimeStamp(value.created_at),
         }
     }
 }
 
 /// Kind of instruction
-#[derive(Serialize, ToSchema, sqlx::Type, Debug)]
+#[derive(Deserialize, Serialize, ToSchema, sqlx::Type, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum InstructionKind {
     Register,
     Unregister,

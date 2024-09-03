@@ -351,7 +351,9 @@ async fn assets_show(
 struct InstructionsIndexFilter {
     transaction_hash: Option<schema::Hash>,
     /// Filter by a kind of instruction
-    kind: Option<String>,
+    kind: Option<schema::InstructionKind>,
+    /// Filter by the creator of the parent transaction
+    authority: Option<schema::AccountId>,
 }
 
 /// List instructions
@@ -373,6 +375,8 @@ async fn instructions_index(
         .list_instructions(repo::ListInstructionParams {
             pagination,
             transaction_hash: filter.transaction_hash.map(|x| x.0),
+            kind: filter.kind,
+            authority: filter.authority.map(|x| x.0),
         })
         .await?
         .map(schema::Instruction::from);

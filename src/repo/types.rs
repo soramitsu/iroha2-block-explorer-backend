@@ -174,4 +174,5 @@ pub struct Instruction {
     pub created_at: DateTime<Utc>,
     pub kind: schema::InstructionKind,
     pub payload: Json<serde_json::Value>,
+    pub authority: AccountId,
 }

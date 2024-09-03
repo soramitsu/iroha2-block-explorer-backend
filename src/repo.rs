@@ -3,8 +3,8 @@
 mod types;
 mod util;
 
-use crate::schema::Page;
 use crate::schema::PaginationQueryParams;
+use crate::schema::{InstructionKind, Page};
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 use iroha_data_model::prelude as data_model;
 use nonzero_ext::nonzero;
@@ -666,6 +666,8 @@ impl<'a> PushCustom<'a> for &'a ListAssetsParams {
 pub struct ListInstructionParams {
     pub pagination: PaginationQueryParams,
     pub transaction_hash: Option<iroha_crypto::Hash>,
+    pub kind: Option<InstructionKind>,
+    pub authority: Option<data_model::AccountId>,
 }
 
 impl<'a> PushCustom<'a> for &'a ListInstructionParams {
@@ -675,6 +677,15 @@ impl<'a> PushCustom<'a> for &'a ListInstructionParams {
         if let Some(hash) = &self.transaction_hash {
             sep.push("transaction_hash like ")
                 .push_bind_unseparated(AsText(hash));
+        }
+        if let Some(kind) = &self.kind {
+            sep.push("json_each.key = ").push_bind_unseparated(kind);
+        }
+        if let Some(id) = &self.authority {
+            sep.push("authority_signatory like ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("authority_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
         }
     }
 }
@@ -689,10 +700,11 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
         builder
             .push(
                 "\
-select json_each.key   as kind,
-       json_each.value as payload,
+select json_each.key                                          as kind,
+       json_each.value                                        as payload,
        transactions.created_at,
-       transaction_hash
+       transaction_hash,
+       format('%s@%s', authority_signatory, authority_domain) as authority
 from instructions,
      json_each(instructions.value)
          join transactions on transactions.hash = instructions.transaction_hash
@@ -770,5 +782,55 @@ mod tests {
         assert_eq!(txs.pagination.total_pages.0, 1);
         assert_eq!(txs.pagination.total_items.0, 5);
         assert_eq!(txs.items.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn filter_isi_by_kind() {
+        let repo = test_repo().await;
+
+        let items = repo
+            .list_instructions(ListInstructionParams {
+                pagination: default_pagination(),
+                transaction_hash: None,
+                kind: Some(InstructionKind::Transfer),
+                authority: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(items.pagination.page.0, 3);
+        assert_eq!(items.pagination.total_pages.0, 3);
+        assert_eq!(items.pagination.total_items.0, 27);
+        assert_eq!(items.items.len(), 17);
+        assert!(items
+            .items
+            .iter()
+            .all(|x| x.kind == InstructionKind::Transfer));
+    }
+
+    #[tokio::test]
+    async fn filter_isi_by_kind_and_authority() {
+        let repo = test_repo().await;
+        let account_id: data_model::AccountId =
+            "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis"
+                .parse()
+                .unwrap();
+
+        let data = repo
+            .list_instructions(ListInstructionParams {
+                pagination: default_pagination(),
+                transaction_hash: None,
+                kind: Some(InstructionKind::Register),
+                authority: Some(account_id.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(data.items.len(), 3);
+        assert_eq!(data.pagination.total_pages.0, 1);
+        assert!(data
+            .items
+            .iter()
+            .all(|x| x.kind == InstructionKind::Register && x.authority.0 .0 == account_id))
     }
 }
