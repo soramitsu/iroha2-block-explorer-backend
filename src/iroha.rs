@@ -14,6 +14,7 @@ use iroha_data_model::{
 use iroha_telemetry::metrics::Status;
 use parity_scale_codec::{DecodeAll as _, Encode};
 use reqwest::StatusCode;
+use tracing::debug;
 use url::Url;
 
 #[derive(thiserror::Error, Debug)]
@@ -106,6 +107,8 @@ impl Client {
     }
 
     async fn execute_query_request(&self, request: QueryRequest) -> Result<QueryResponse, Error> {
+        debug!(?request, "Executing query");
+
         let signed = request
             .with_authority(self.authority.clone())
             .sign(&self.key_pair);
@@ -194,7 +197,7 @@ where
         else {
             return Err(Error::ExpectedIterableResponse);
         };
-        let (batch, cursor) = response.into_parts();
+        let (batch, _remaining, cursor) = response.into_parts();
         if cursor.is_some() {
             return Err(Error::UnexpectedContinuationCursor);
         }

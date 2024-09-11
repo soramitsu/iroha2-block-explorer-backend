@@ -60,13 +60,13 @@ pub struct Hash(pub AsText<iroha_crypto::Hash>);
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
-pub struct Signature(pub AsText<SignatureFromStr>);
+pub struct Signature(pub AsText<SignatureDisplay>);
 
 // FIXME: remove when Iroha Signature impls FromStr
 #[derive(Debug)]
-pub struct SignatureFromStr(pub iroha_crypto::Signature);
+pub struct SignatureDisplay(pub iroha_crypto::Signature);
 
-impl FromStr for SignatureFromStr {
+impl FromStr for SignatureDisplay {
     type Err = iroha_crypto::error::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -74,7 +74,7 @@ impl FromStr for SignatureFromStr {
     }
 }
 
-impl Display for SignatureFromStr {
+impl Display for SignatureDisplay {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // FIXME: extract hex directly, not via serde_json
         let serde_json::Value::String(value) = serde_json::to_value(&self.0)

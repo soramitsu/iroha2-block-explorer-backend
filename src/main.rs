@@ -1,5 +1,6 @@
 #![allow(clippy::module_name_repetitions)]
 
+mod database_update;
 mod endpoint;
 mod iroha;
 mod repo;
@@ -7,6 +8,7 @@ mod schema;
 mod util;
 
 use crate::iroha::Client;
+use std::time::Duration;
 
 use crate::repo::Repo;
 use axum::{
@@ -14,12 +16,17 @@ use axum::{
     Router,
 };
 use clap::Parser;
+use database_update::DatabaseUpdateLoop;
+use eyre::Context;
 use iroha_crypto::{KeyPair, PrivateKey};
 use iroha_data_model::account::AccountId;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::ConnectOptions;
+use tokio::task::JoinSet;
+use tokio::time::sleep;
 use tower_http::trace::TraceLayer;
 use tracing::log::LevelFilter;
+use tracing_subscriber::registry::Data;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use url::Url;
 use utoipa::OpenApi;
@@ -43,10 +50,6 @@ pub struct Args {
     /// Iroha Torii URL
     #[clap(long, env)]
     pub torii_url: Url,
-
-    /// Path to SQLite database
-    #[clap(long, env)]
-    pub database: String,
 }
 
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
@@ -119,18 +122,12 @@ async fn main() {
     let key_pair = KeyPair::from(args.account_private_key);
     let iroha = Client::new(args.account, key_pair, args.torii_url);
 
-    let conn = SqliteConnectOptions::new()
-        .filename(args.database)
-        .log_statements(LevelFilter::Debug)
-        .connect()
-        .await
-        .unwrap();
-    let repo = Repo::new(conn);
+    let repo = Repo::new(None);
 
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
-        .nest("/api/v1", endpoint::router(iroha, repo))
+        .nest("/api/v1", endpoint::router(iroha.clone(), repo.clone()))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched
@@ -155,5 +152,13 @@ async fn main() {
         .await
         .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+
+    let mut set = JoinSet::<()>::new();
+    set.spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    set.spawn(async move {
+        DatabaseUpdateLoop::new(repo, iroha).run().await;
+    });
+    set.join_all().await;
 }

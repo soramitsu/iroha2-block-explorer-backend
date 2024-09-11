@@ -1,15 +1,16 @@
 //! Database operations
 
+mod from_iroha;
 mod types;
 mod util;
 
 use crate::schema::{InstructionKind, Page};
 use crate::schema::{PaginationQueryParams, TransactionStatus};
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
+pub use from_iroha::scan as scan_iroha;
 use iroha_data_model::prelude as data_model;
 use nonzero_ext::nonzero;
 use serde::Deserialize;
-use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{
     prelude::{FromRow, Type},
     ConnectOptions, Connection, Database, Decode, Encode, QueryBuilder, Sqlite, SqliteConnection,
@@ -18,7 +19,7 @@ use std::error::Error as StdError;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::{num::NonZero, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard, Notify};
 pub use types::*;
 pub use util::*;
 
@@ -34,25 +35,33 @@ type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub struct Repo {
-    conn: Arc<Mutex<SqliteConnection>>,
+    conn: Arc<Mutex<Option<SqliteConnection>>>,
+    available: Arc<Notify>,
 }
 
 impl Repo {
-    pub fn new(conn: SqliteConnection) -> Self {
+    pub fn new(conn: Option<SqliteConnection>) -> Self {
         Self {
             conn: Arc::new(Mutex::new(conn)),
+            available: Arc::new(Notify::new()),
         }
     }
 
+    pub async fn swap(&self, conn: SqliteConnection) {
+        let mut guard = self.conn.lock().await;
+        *guard = Some(conn);
+        self.available.notify_waiters();
+    }
+
     pub async fn list_blocks(&self, pagination: PaginationQueryParams) -> Result<Page<Block>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectBlocks {
                 with_where: PushDisplay("true"),
             })
             .push(") select count(*) from main")
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(pagination.per_page));
@@ -64,14 +73,14 @@ impl Repo {
             })
             .push_custom(LimitOffset::from(pagination.range()))
             .build_query_as()
-            .fetch_all(&mut (*conn))
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(Page::new(blocks, pagination.into()))
     }
 
     pub async fn find_block(&self, params: FindBlockParams) -> Result<Block> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let item = QueryBuilder::new("")
             .push_custom(SelectBlocks {
                 with_where: util::push_fn(|builder| {
@@ -86,7 +95,7 @@ impl Repo {
                 }),
             })
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         Ok(item)
     }
@@ -95,7 +104,7 @@ impl Repo {
         &self,
         params: ListTransactionsParams,
     ) -> Result<Page<TransactionBase>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
 
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
@@ -104,7 +113,7 @@ impl Repo {
             })
             .push(") select count(*) from main")
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
@@ -120,7 +129,7 @@ impl Repo {
             .push(") select * from main ")
             .push_custom(LimitOffset::from(pagination.range()))
             .build_query_as()
-            .fetch_all(&mut (*conn))
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(Page::new(txs, pagination.into()))
@@ -130,7 +139,7 @@ impl Repo {
         &self,
         hash: iroha_crypto::Hash,
     ) -> Result<TransactionDetailed> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let tx = QueryBuilder::new("")
             .push_custom(SelectTransactions {
                 with_where: util::push_fn(|builder| {
@@ -139,7 +148,7 @@ impl Repo {
                 detailed: true,
             })
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         Ok(tx)
     }
@@ -148,13 +157,13 @@ impl Repo {
         &self,
         params: ListInstructionParams,
     ) -> Result<Page<Instruction>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
 
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectInstructions { params: &params })
             .push(") select count(*) from main")
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
@@ -167,14 +176,14 @@ impl Repo {
             .push(") select * from main ")
             .push_custom(LimitOffset::from(pagination.range()))
             .build_query_as()
-            .fetch_all(&mut (*conn))
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(Page::new(items, pagination.into()))
     }
 
     pub async fn list_domains(&self, params: ListDomainParams) -> Result<Page<Domain>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
 
         let (total,): (u64,) = QueryBuilder::new("with grouped as (")
             .push_custom(SelectDomains {
@@ -182,7 +191,7 @@ impl Repo {
             })
             .push(") select count(*) from grouped")
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
@@ -200,14 +209,14 @@ impl Repo {
             .push(") select * from grouped")
             .push_custom(LimitOffset::from(pagination.range()))
             .build_query_as()
-            .fetch_all(&mut (*conn))
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(Page::new(res, pagination.into()))
     }
 
     pub async fn find_domain(&self, id: data_model::DomainId) -> Result<Domain> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let item = QueryBuilder::new("")
             .push_custom(SelectDomains {
                 with_where: util::push_fn(|builder| {
@@ -215,13 +224,13 @@ impl Repo {
                 }),
             })
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         Ok(item)
     }
 
     pub async fn list_accounts(&self, params: ListAccountsParams) -> Result<Page<Account>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
 
         let (total,): (u64,) = QueryBuilder::new("with grouped as (")
             .push_custom(SelectAccounts {
@@ -229,7 +238,7 @@ impl Repo {
             })
             .push(") select count(*) from grouped")
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         let Some(total) = NonZero::new(total) else {
             return Ok(Page::empty(params.pagination.per_page));
@@ -247,14 +256,14 @@ impl Repo {
             .push(") select * from grouped")
             .push_custom(LimitOffset::from(pagination.range()))
             .build_query_as()
-            .fetch_all(&mut (*conn))
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(Page::new(res, pagination.into()))
     }
 
     pub async fn find_account(&self, id: data_model::AccountId) -> Result<Account> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let item = QueryBuilder::new("")
             .push_custom(SelectAccounts {
                 with_where: util::push_fn(|builder| {
@@ -267,7 +276,7 @@ impl Repo {
                 }),
             })
             .build_query_as()
-            .fetch_one(&mut (*conn))
+            .fetch_one(&mut *conn)
             .await?;
         Ok(item)
     }
@@ -276,7 +285,7 @@ impl Repo {
         &self,
         params: ListAssetDefinitionParams,
     ) -> Result<Page<AssetDefinition>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectAssetsDefinitions {
                 with_where: &params,
@@ -320,12 +329,12 @@ impl Repo {
                 }),
             })
             .build_query_as()
-            .fetch_one(&mut *(self.conn.lock().await))
+            .fetch_one(&mut *(self.acquire_conn().await))
             .await?)
     }
 
     pub async fn list_assets(&self, params: ListAssetsParams) -> Result<Page<Asset>> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.acquire_conn().await;
         let (total,): (u64,) = QueryBuilder::new("with main as (")
             .push_custom(SelectAssets {
                 with_where: &params,
@@ -371,8 +380,20 @@ impl Repo {
                 }),
             })
             .build_query_as()
-            .fetch_one(&mut *(self.conn.lock().await))
+            .fetch_one(&mut *(self.acquire_conn().await))
             .await?)
+    }
+
+    async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
+        loop {
+            let guard = self.conn.lock().await;
+            match MutexGuard::try_map(guard, Option::as_mut) {
+                Ok(mapped) => return mapped,
+                // dropping
+                Err(_guard) => {}
+            }
+            self.available.notified().await;
+        }
     }
 }
 
@@ -739,7 +760,7 @@ mod tests {
             .execute(&mut conn)
             .await
             .unwrap();
-        let repo = Repo::new(conn);
+        let repo = Repo::new(Some(conn));
         repo
     }
 
