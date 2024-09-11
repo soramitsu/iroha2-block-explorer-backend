@@ -454,7 +454,7 @@ SELECT
 FROM
   blocks
 JOIN
-  transactions ON transactions.block_hash = blocks.hash
+  transactions ON transactions.block = blocks.height
 WHERE ",
             )
             .push_custom(self.with_where)
@@ -471,7 +471,7 @@ ORDER BY
 
 pub struct ListTransactionsParams {
     pub pagination: PaginationQueryParams,
-    pub block_hash: Option<iroha_crypto::Hash>,
+    pub block: Option<u64>,
     pub authority: Option<data_model::AccountId>,
     pub status: Option<TransactionStatus>,
 }
@@ -480,9 +480,9 @@ impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
     fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
         let mut sep = builder.separated(" and ");
         sep.push("true");
-        if let Some(hash) = &self.block_hash {
-            sep.push("transactions.block_hash like ")
-                .push_bind_unseparated(AsText(hash));
+        if let Some(height) = self.block {
+            sep.push("transactions.block = ")
+                .push_bind_unseparated(height as u32);
         }
         if let Some(id) = &self.authority {
             sep.push("transactions.authority_signatory like  ")
@@ -513,7 +513,7 @@ where
         let mut select = builder.separated(", ");
         select
             .push("hash")
-            .push("block_hash")
+            .push("block")
             .push("format('%s@%s', authority_signatory, authority_domain) as authority")
             .push("created_at")
             .push("executable")
@@ -737,12 +737,12 @@ select json_each.key                                          as kind,
        json_each.value                                        as payload,
        transactions.created_at,
        transaction_hash,
+       case when error is null then 'committed' else 'rejected' end as transaction_status,
        format('%s@%s', authority_signatory, authority_domain) as authority
 from instructions,
      json_each(instructions.value)
          join transactions on transactions.hash = instructions.transaction_hash
-where error is null and
-        ",
+where ",
             )
             .push_custom(self.params)
             .push(" order by created_at desc ");
@@ -781,18 +781,18 @@ mod tests {
                     page: None,
                     per_page: nonzero!(5u64),
                 },
-                block_hash: None,
+                block: None,
                 authority: None,
                 status: None,
             })
             .await
             .unwrap();
 
-        assert_eq!(txs.pagination.page.0, 22);
+        assert_eq!(txs.pagination.page.0, 18);
         assert_eq!(txs.pagination.per_page.0, 5);
-        assert_eq!(txs.pagination.total_pages.0, 22);
-        assert_eq!(txs.pagination.total_items.0, 109);
-        assert_eq!(txs.items.len(), 9);
+        assert_eq!(txs.pagination.total_pages.0, 18);
+        assert_eq!(txs.pagination.total_items.0, 90);
+        assert_eq!(txs.items.len(), 5);
     }
 
     #[tokio::test]
@@ -802,11 +802,7 @@ mod tests {
         let txs = repo
             .list_transactions(ListTransactionsParams {
                 pagination: default_pagination(),
-                block_hash: Some(
-                    "6624E2E72B76DDD4D317CA70D66A0030AC07F92EC0545BBD3BB323EBD7EE721F"
-                        .parse()
-                        .unwrap(),
-                ),
+                block: Some(1),
                 authority: None,
                 status: None,
             })
@@ -815,8 +811,8 @@ mod tests {
 
         assert_eq!(txs.pagination.page.0, 1);
         assert_eq!(txs.pagination.total_pages.0, 1);
-        assert_eq!(txs.pagination.total_items.0, 5);
-        assert_eq!(txs.items.len(), 5);
+        assert_eq!(txs.pagination.total_items.0, 3);
+        assert_eq!(txs.items.len(), 3);
     }
 
     #[tokio::test]
@@ -826,14 +822,14 @@ mod tests {
         let data = repo
             .list_transactions(ListTransactionsParams {
                 pagination: default_pagination(),
-                block_hash: None,
+                block: None,
                 authority: None,
                 status: Some(TransactionStatus::Rejected),
             })
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 35);
+        assert_eq!(data.pagination.total_items.0, 60);
         assert!(data
             .items
             .iter()
@@ -842,14 +838,14 @@ mod tests {
         let data = repo
             .list_transactions(ListTransactionsParams {
                 pagination: default_pagination(),
-                block_hash: None,
+                block: None,
                 authority: None,
                 status: Some(TransactionStatus::Committed),
             })
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 109 - 35);
+        assert_eq!(data.pagination.total_items.0, 30);
         assert!(data
             .items
             .iter()
@@ -872,8 +868,8 @@ mod tests {
 
         assert_eq!(data.pagination.page.0, 2);
         assert_eq!(data.pagination.total_pages.0, 2);
-        assert_eq!(data.pagination.total_items.0, 12);
-        assert_eq!(data.items.len(), 12);
+        assert_eq!(data.pagination.total_items.0, 15);
+        assert_eq!(data.items.len(), 15);
         assert!(data
             .items
             .iter()
@@ -904,5 +900,15 @@ mod tests {
             .items
             .iter()
             .all(|x| x.kind == InstructionKind::Register && x.authority.0 .0 == account_id))
+    }
+
+    #[tokio::test]
+    async fn list_blocks() {
+        let repo = test_repo().await;
+
+        let data = repo.list_blocks(default_pagination()).await.unwrap();
+
+        assert_eq!(data.pagination.total_pages.0, 3);
+        assert_eq!(data.pagination.total_items.0, 21);
     }
 }

@@ -9,7 +9,7 @@ use sqlx::types::Json;
 use sqlx::{query, Connection, QueryBuilder, SqliteConnection};
 use tracing::debug;
 
-pub async fn scan(client: &Client) -> Result<SqliteConnection> {
+pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
     debug!("Scanning Iroha into an in-memory SQLite database");
 
     debug!("Fetching data from Iroha...");
@@ -20,12 +20,11 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
     let assets = client.query(FindAssets).all().await?;
     debug!("Done fetching");
 
-    let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
     query(include_str!("./create_tables.sql"))
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     // query("PRAGMA foreign_keys=OFF").execute(&mut conn).await?;
-    query("BEGIN TRANSACTION").execute(&mut conn).await?;
+    query("BEGIN TRANSACTION").execute(&mut *conn).await?;
 
     /// todo: handle empty data
     debug!("Inserting domains & accounts...");
@@ -36,7 +35,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                 .push_bind(Json(value.metadata()));
         })
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     QueryBuilder::new("insert into accounts(signatory, domain, metadata) ")
         .push_values(&accounts, |mut b, value| {
@@ -45,7 +44,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                 .push_bind(Json(value.metadata()));
         })
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     QueryBuilder::new("insert into domain_owners(account_signatory, account_domain, domain) ")
         .push_values(&domains, |mut b, value| {
@@ -54,7 +53,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                 .push_bind(AsText(value.id()));
         })
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     /// TODO: handle empty blocks, txs, isis
@@ -85,14 +84,14 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                 .push_bind(AsText(value.header().transactions_hash()));
         })
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     let mut b = QueryBuilder::new("insert into transactions(");
     let mut sep = b.separated(", ");
     [
         "hash",
-        "block_hash",
+        "block",
         "created_at",
         "time_to_live_ms",
         "authority_signatory",
@@ -111,12 +110,12 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
         .push_values(
             blocks
                 .iter()
-                .flat_map(|block| block.transactions().map(|tx| (block.hash(), tx))),
-            |mut b, (block_hash, value)| {
+                .flat_map(|block| block.transactions().map(|tx| (block.header().height(), tx))),
+            |mut b, (height, value)| {
                 let error = value.error();
                 let value = &value.value;
                 b.push_bind(AsText(value.hash()))
-                    .push_bind(AsText(block_hash))
+                    .push_bind(height.get() as u32)
                     .push_bind(DateTime::from_timestamp_millis(
                         value.creation_time().as_millis() as i64,
                     ))
@@ -136,7 +135,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
             },
         )
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     QueryBuilder::new("insert into instructions(transaction_hash, value) ")
@@ -157,7 +156,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
             },
         )
         .build()
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     if !assets_definitions.is_empty() {
@@ -191,7 +190,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                     });
             })
             .build()
-            .execute(&mut conn)
+            .execute(&mut *conn)
             .await?;
         let mut b = QueryBuilder::new("insert into assets(");
         b.separated(", ")
@@ -218,14 +217,14 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
                     });
             })
             .build()
-            .execute(&mut conn)
+            .execute(&mut *conn)
             .await?;
     }
 
-    query("COMMIT").execute(&mut conn).await?;
-    // query("PRAGMA foreign_keys=ON").execute(&mut conn).await?;
+    query("COMMIT").execute(&mut *conn).await?;
+    // query("PRAGMA foreign_keys=ON").execute(&mut *conn).await?;
 
-    Ok(conn)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -233,6 +232,8 @@ mod tests {
     use super::*;
     use iroha_crypto::KeyPair;
     use iroha_data_model::prelude::{AccountId, DomainId};
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::ConnectOptions;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
@@ -260,6 +261,14 @@ mod tests {
             .with(tracing_subscriber::fmt::layer())
             .init();
 
-        let _conn = scan(&client).await.expect("should scan without errors");
+        let mut conn = SqliteConnectOptions::new()
+            .filename("./sandbox.sqlite")
+            .connect()
+            .await
+            .unwrap();
+        scan(&mut conn, &client)
+            .await
+            .expect("should scan without errors");
+        conn.close().await.unwrap();
     }
 }

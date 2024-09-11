@@ -162,8 +162,8 @@ async fn blocks_show(
 struct TransactionsIndexFilter {
     /// Select by authority
     authority: Option<schema::AccountId>,
-    /// Select by block hash
-    block_hash: Option<schema::Hash>,
+    /// Select by block
+    block: Option<u64>,
     /// Filter by transaction status
     status: Option<schema::TransactionStatus>,
 }
@@ -186,7 +186,7 @@ async fn transactions_index(
         .repo
         .list_transactions(repo::ListTransactionsParams {
             pagination,
-            block_hash: filter.block_hash.map(|x| x.0),
+            block: filter.block,
             authority: filter.authority.map(|x| x.0),
             status: filter.status,
         })
@@ -359,7 +359,7 @@ struct InstructionsIndexFilter {
     authority: Option<schema::AccountId>,
 }
 
-/// List _committed_ instructions
+/// List instructions
 #[utoipa::path(
     get,
     path = "/api/v1/instructions",

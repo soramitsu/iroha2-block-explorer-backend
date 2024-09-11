@@ -95,7 +95,7 @@ pub enum Executable {
 #[derive(Debug, FromRow)]
 pub struct TransactionBase {
     pub hash: Hash,
-    pub block_hash: Hash,
+    pub block: u32,
     pub created_at: DateTime<Utc>,
     pub authority: AccountId,
     pub executable: Executable,
@@ -169,6 +169,7 @@ pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
 #[derive(Debug, FromRow)]
 pub struct Instruction {
     pub transaction_hash: Hash,
+    pub transaction_status: TransactionStatus,
     pub created_at: DateTime<Utc>,
     pub kind: schema::InstructionKind,
     pub payload: Json<serde_json::Value>,

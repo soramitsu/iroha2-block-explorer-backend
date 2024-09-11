@@ -1,6 +1,8 @@
 use crate::iroha::Client;
 use crate::repo::{scan_iroha, Repo};
 use eyre::WrapErr;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -48,7 +50,11 @@ impl DatabaseUpdateLoop {
         }
 
         tracing::debug!("Updating the database");
-        let conn = scan_iroha(&self.client)
+        let mut conn = SqliteConnectOptions::new()
+            .in_memory(true)
+            .connect()
+            .await?;
+        scan_iroha(&mut conn, &self.client)
             .await
             .wrap_err("Failed to scan Iroha")?;
         self.repo.swap(conn).await;

@@ -385,7 +385,7 @@ pub enum TransactionStatus {
 #[derive(Serialize, ToSchema)]
 pub struct TransactionBase {
     hash: Hash,
-    block_hash: Hash,
+    block: BigInt,
     created_at: TimeStamp,
     authority: AccountId,
     executable: Executable,
@@ -396,7 +396,7 @@ impl From<repo::TransactionBase> for TransactionBase {
     fn from(value: repo::TransactionBase) -> Self {
         Self {
             hash: value.hash.into(),
-            block_hash: value.block_hash.into(),
+            block: BigInt(value.block as u128),
             created_at: TimeStamp(value.created_at),
             authority: value.authority.into(),
             executable: value.executable.into(),
@@ -464,6 +464,7 @@ pub struct Instruction {
     /// Instruction payload, some JSON. TODO: add typed output
     payload: serde_json::Value,
     transaction_hash: Hash,
+    transaction_status: TransactionStatus,
     authority: AccountId,
     created_at: TimeStamp,
 }
@@ -474,6 +475,7 @@ impl From<repo::Instruction> for Instruction {
             kind: value.kind,
             payload: value.payload.0,
             transaction_hash: Hash(value.transaction_hash.0 .0),
+            transaction_status: value.transaction_status,
             authority: AccountId(value.authority.0 .0),
             created_at: TimeStamp(value.created_at),
         }
@@ -502,10 +504,10 @@ pub enum InstructionKind {
 /// Block
 #[derive(Serialize, ToSchema)]
 pub struct Block {
-    /// Block hash
-    hash: Hash,
     /// Number of blocks in the chain including this block
     height: BigInt,
+    /// Block hash
+    hash: Hash,
     /// Hash of the previous block in the chain
     prev_block_hash: Option<Hash>,
     /// Hash of merkle tree root of transactions' hashes
