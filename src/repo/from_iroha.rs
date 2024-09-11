@@ -101,7 +101,7 @@ pub async fn scan(client: &Client) -> Result<SqliteConnection> {
         "nonce",
         "metadata",
         "error",
-        "instructions",
+        "executable",
     ]
     .iter()
     .for_each(|i| {
@@ -237,6 +237,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
 
     // This is more for the development of scanning rather than for its testing
+    #[ignore]
     #[tokio::test]
     async fn sandbox() {
         let key_pair: KeyPair = serde_json::from_value(serde_json::json!({

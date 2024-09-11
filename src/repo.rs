@@ -516,7 +516,7 @@ where
             .push("block_hash")
             .push("format('%s@%s', authority_signatory, authority_domain) as authority")
             .push("created_at")
-            .push("instructions")
+            .push("executable")
             .push("case when error is null then 'committed' else 'rejected' end as status");
 
         if self.detailed {

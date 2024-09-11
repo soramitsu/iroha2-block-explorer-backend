@@ -98,7 +98,7 @@ pub struct TransactionBase {
     pub block_hash: Hash,
     pub created_at: DateTime<Utc>,
     pub authority: AccountId,
-    pub instructions: Executable,
+    pub executable: Executable,
     pub status: TransactionStatus,
 }
 

@@ -105,7 +105,7 @@ CREATE TABLE transactions (
   nonce integer,
   metadata json,
   time_to_live_ms integer,
-  instructions text check (instructions in ('Instructions', 'WASM')) not null,
+  executable text check (executable in ('Instructions', 'WASM')) not null,
   error json,
   foreign key (authority_signatory, authority_domain) references accounts(signatory, domain)
 );

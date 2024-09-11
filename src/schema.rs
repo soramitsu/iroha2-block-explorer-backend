@@ -388,7 +388,7 @@ pub struct TransactionBase {
     block_hash: Hash,
     created_at: TimeStamp,
     authority: AccountId,
-    instructions: Executable,
+    executable: Executable,
     status: TransactionStatus,
 }
 
@@ -399,7 +399,7 @@ impl From<repo::TransactionBase> for TransactionBase {
             block_hash: value.block_hash.into(),
             created_at: TimeStamp(value.created_at),
             authority: value.authority.into(),
-            instructions: value.instructions.into(),
+            executable: value.executable.into(),
             status: value.status,
         }
     }
