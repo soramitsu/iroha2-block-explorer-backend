@@ -113,7 +113,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
                 .flat_map(|block| block.transactions().map(|tx| (block.header().height(), tx))),
             |mut b, (height, value)| {
                 let error = value.error();
-                let value = &value.value;
+                let value = value.as_ref();
                 b.push_bind(AsText(value.hash()))
                     .push_bind(height.get() as u32)
                     .push_bind(DateTime::from_timestamp_millis(
@@ -143,9 +143,9 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
             blocks.iter().flat_map(|block| {
                 block
                     .transactions()
-                    .flat_map(|tx| match &tx.value.instructions() {
+                    .flat_map(|tx| match tx.as_ref().instructions() {
                         Executable::Instructions(isi) => {
-                            Some(isi.iter().map(|i| (tx.value.hash(), i)))
+                            Some(isi.iter().map(|i| (tx.as_ref().hash(), i)))
                         }
                         Executable::Wasm(_) => None,
                     })
@@ -176,7 +176,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
                 b.push_bind(AsText(value.id().name()))
                     .push_bind(AsText(value.id().domain()))
                     .push_bind(Json(value.metadata()))
-                    .push_bind(match &value.mintable {
+                    .push_bind(match value.mintable() {
                         Mintable::Not => "Not",
                         Mintable::Once => "Once",
                         Mintable::Infinitely => "Infinitely",
@@ -205,7 +205,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
                     .push_bind(AsText(value.id().definition().domain()))
                     .push_bind(AsText(value.id().account().signatory()))
                     .push_bind(AsText(value.id().account().domain()))
-                    .push_bind(match &value.value {
+                    .push_bind(match value.value() {
                         AssetValue::Store(metadata) => Json(json!({
                             "kind": "Store",
                             "value": metadata
