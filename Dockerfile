@@ -1,10 +1,8 @@
-FROM  nwtgck/rust-musl-builder:1.65.0 AS builder
+FROM  nwtgck/rust-musl-builder:1.81.0 AS builder
 
 COPY  src src
-COPY  tools tools
 COPY  Cargo.toml Cargo.toml
 COPY  Cargo.lock Cargo.lock
-COPY  api.ts api.ts
 
 RUN   cargo build --release
 
@@ -16,9 +14,9 @@ RUN   apk --no-cache add ca-certificates && \
       adduser --disabled-password --gecos "" iroha
     
 COPY  --from=builder \
-      /home/rust/src/target/x86_64-unknown-linux-musl/release/iroha2_explorer_web \
+      /home/rust/src/target/x86_64-unknown-linux-musl/release/iroha_explorer \
       ${LOAD_DIR}
 
-CMD   ${LOAD_DIR}iroha2_explorer_web
+CMD   ${LOAD_DIR}iroha_explorer
 
 USER  iroha
