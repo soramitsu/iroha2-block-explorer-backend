@@ -111,17 +111,14 @@ impl ReversePagination {
     pub fn range(&self) -> Range<Int> {
         let (len, per_page) = (self.len.get(), self.per_page.get());
 
-        let (start, end) = match self.page {
-            Some(page) => {
-                let page = page.get();
-                let start = per_page * (page - 1);
-                (start, (start + per_page).min(len))
-            }
-            None => {
-                let full_pages = len / per_page;
-                let start = (full_pages.max(1) - 1) * per_page;
-                (start, len)
-            }
+        let (start, end) = if let Some(page) = self.page {
+            let page = page.get();
+            let start = per_page * (page - 1);
+            (start, (start + per_page).min(len))
+        } else {
+            let full_pages = len / per_page;
+            let start = (full_pages.max(1) - 1) * per_page;
+            (start, len)
         };
 
         (len - end)..(len - start)
@@ -164,11 +161,7 @@ fn range_into_iroha_pagination(
     range: Range<Int>,
 ) -> iroha_data_model::query::parameters::Pagination {
     iroha_data_model::query::parameters::Pagination::new(
-        NonZero::new(
-            (range.end - range.start)
-                .try_into()
-                .expect("if cannot fit into u32, than cannot pass limit to Iroha"),
-        ),
+        NonZero::new(range.end - range.start),
         range.start,
     )
 }

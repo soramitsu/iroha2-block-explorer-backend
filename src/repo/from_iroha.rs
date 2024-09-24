@@ -1,14 +1,14 @@
 use crate::iroha::Client;
 use crate::repo::{AsText, SignatureDisplay};
 use chrono::DateTime;
-use color_eyre::SectionExt;
 use eyre::Result;
 use iroha_data_model::prelude::*;
 use serde_json::json;
 use sqlx::types::Json;
-use sqlx::{query, Connection, QueryBuilder, SqliteConnection};
+use sqlx::{query, QueryBuilder, SqliteConnection};
 use tracing::debug;
 
+#[allow(clippy::too_many_lines)]
 pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
     debug!("Scanning Iroha into an in-memory SQLite database");
 
@@ -26,7 +26,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
     // query("PRAGMA foreign_keys=OFF").execute(&mut conn).await?;
     query("BEGIN TRANSACTION").execute(&mut *conn).await?;
 
-    /// todo: handle empty data
+    // todo: handle empty data
     debug!("Inserting domains & accounts...");
     QueryBuilder::new("insert into domains(name, logo, metadata) ")
         .push_values(&domains, |mut b, value| {
@@ -56,7 +56,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
         .execute(&mut *conn)
         .await?;
 
-    /// TODO: handle empty blocks, txs, isis
+    // TODO: handle empty blocks, txs, isis
     debug!("Inserting blocks, transactions, instructions...");
     let mut b = QueryBuilder::new("insert into blocks(");
     let mut sep = b.separated(", ");
@@ -89,7 +89,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
 
     let mut b = QueryBuilder::new("insert into transactions(");
     let mut sep = b.separated(", ");
-    [
+    for i in &[
         "hash",
         "block",
         "created_at",
@@ -101,11 +101,9 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
         "metadata",
         "error",
         "executable",
-    ]
-    .iter()
-    .for_each(|i| {
+    ] {
         sep.push(i);
-    });
+    }
     b.push(") ")
         .push_values(
             blocks
@@ -125,7 +123,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
                     .push_bind(AsText(SignatureDisplay(
                         value.signature().payload().clone(),
                     )))
-                    .push_bind(value.nonce().map(|num| num.get() as i64))
+                    .push_bind(value.nonce().map(|num| i64::from(num.get())))
                     .push_bind(Json(value.metadata()))
                     .push_bind(error.as_ref().map(Json))
                     .push_bind(match value.instructions() {
@@ -143,7 +141,7 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
             blocks.iter().flat_map(|block| {
                 block
                     .transactions()
-                    .flat_map(|tx| match tx.as_ref().instructions() {
+                    .filter_map(|tx| match tx.as_ref().instructions() {
                         Executable::Instructions(isi) => {
                             Some(isi.iter().map(|i| (tx.as_ref().hash(), i)))
                         }
@@ -231,9 +229,9 @@ pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
 mod tests {
     use super::*;
     use iroha_crypto::KeyPair;
-    use iroha_data_model::prelude::{AccountId, DomainId};
+    use iroha_data_model::prelude::AccountId;
     use sqlx::sqlite::SqliteConnectOptions;
-    use sqlx::ConnectOptions;
+    use sqlx::{ConnectOptions, Connection};
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 

@@ -1,4 +1,6 @@
 #![allow(clippy::module_name_repetitions)]
+// FIXME: there are many truncations which we don't care about _for now_
+#![allow(clippy::cast_possible_truncation)]
 
 mod database_update;
 mod endpoint;
@@ -8,7 +10,6 @@ mod schema;
 mod util;
 
 use crate::iroha::Client;
-use std::time::Duration;
 
 use crate::repo::Repo;
 use axum::{
@@ -17,16 +18,10 @@ use axum::{
 };
 use clap::Parser;
 use database_update::DatabaseUpdateLoop;
-use eyre::Context;
 use iroha_crypto::{KeyPair, PrivateKey};
 use iroha_data_model::account::AccountId;
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::ConnectOptions;
 use tokio::task::JoinSet;
-use tokio::time::sleep;
 use tower_http::trace::TraceLayer;
-use tracing::log::LevelFilter;
-use tracing_subscriber::registry::Data;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use url::Url;
 use utoipa::OpenApi;
@@ -140,7 +135,7 @@ async fn main() {
                     let matched_path = req
                         .extensions()
                         .get::<MatchedPath>()
-                        .map(|matched_path| matched_path.as_str());
+                        .map(axum::extract::MatchedPath::as_str);
 
                     tracing::debug_span!("request", %method, %uri, matched_path)
                 })

@@ -19,17 +19,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     iroha: Arc<Client>,
     repo: Repo,
 }
 
 #[derive(thiserror::Error, Debug)]
-enum AppError {
+pub enum AppError {
     #[error("failed to perform Iroha query: {0}")]
     IrohaClientError(#[from] crate::iroha::Error),
-    #[error("not found")]
-    NotFound,
+    // #[error("not found")]
+    // NotFound,
     // #[error("invalid pagination: {0}")]
     // BadPage(#[from] ReversePaginationError),
     #[error("database-related error: {0}")]
@@ -50,7 +50,7 @@ impl IntoResponse for AppError {
                 tracing::error!(%err, "iroha client error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
+            // AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
             AppError::Repo(repo::Error::Pagination(x)) => {
                 (StatusCode::BAD_REQUEST, format!("{x}")).into_response()
             }
@@ -399,7 +399,7 @@ async fn instructions_index(
       "view_changes": 0,
       "queue_size": 0,
       "uptime": {
-        "ms": 1134142427
+        "ms": 1_134_142_427
       }
         }))
     )

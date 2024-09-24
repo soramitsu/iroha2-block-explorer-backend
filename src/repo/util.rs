@@ -1,4 +1,3 @@
-use crate::repo::{ListAccountsParams, ListDomainParams, ListTransactionsParams};
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::sqlite::SqliteArgumentValue;
@@ -41,7 +40,7 @@ pub fn push_fn<'a, F>(f: F) -> PushFn<'a, F>
 where
     F: FnOnce(&mut QueryBuilder<'a, Sqlite>) + 'a,
 {
-    PushFn(f, PhantomData::default())
+    PushFn(f, PhantomData)
 }
 
 impl<'a, F> PushCustom<'a> for PushFn<'a, F>

@@ -1,4 +1,5 @@
 use iroha_crypto::KeyPair;
+use iroha_data_model::prelude::{FetchSize, Sorting};
 use iroha_data_model::{
     account::AccountId,
     prelude::CompoundPredicate,
@@ -29,6 +30,7 @@ pub enum Error {
     UnexpectedResponseCode(StatusCode),
     #[error("expected iterable query response")]
     ExpectedIterableResponse,
+    #[allow(dead_code)]
     #[error("expected singular query response")]
     ExpectedSingularResponse,
     #[error("expected to got all data in a single request, got a forward cursor")]
@@ -64,9 +66,10 @@ impl Client {
     where
         Q: Query,
     {
-        QueryBuilder::new(&self, query)
+        QueryBuilder::new(self, query)
     }
 
+    #[allow(dead_code)]
     pub async fn query_singular<Q>(&self, query: Q) -> Result<<Q as SingularQuery>::Output, Error>
     where
         Q: SingularQuery,
@@ -156,12 +159,14 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
     }
 
     #[must_use]
+    #[allow(dead_code)]
     pub fn filter(mut self, filter: CompoundPredicate<P>) -> Self {
         self.filter = self.filter.and(filter);
         self
     }
 
     #[must_use]
+    #[allow(dead_code)]
     pub fn filter_with<B, O>(self, predicate_builder: B) -> Self
     where
         P: HasPrototype,
@@ -173,6 +178,7 @@ impl<'a, Q, P> QueryBuilder<'a, Q, P> {
         self.filter(predicate_builder(Default::default()).normalize())
     }
 
+    #[allow(dead_code)]
     pub fn paginate(mut self, pagination: impl Into<Pagination>) -> Self {
         self.pagination = pagination.into();
         self
@@ -190,7 +196,7 @@ where
     pub async fn all(self) -> Result<Vec<Q::Item>, Error> {
         let start = QueryRequest::Start(QueryWithParams::new(
             QueryBox::from(QueryWithFilter::new(self.query, self.filter)),
-            QueryParams::new(self.pagination, Default::default(), Default::default()),
+            QueryParams::new(self.pagination, Sorting::default(), FetchSize::default()),
         ));
 
         let QueryResponse::Iterable(response) = self.client.execute_query_request(start).await?
@@ -206,6 +212,7 @@ where
         Ok(items)
     }
 
+    #[allow(dead_code)]
     pub async fn one(self) -> Result<Option<Q::Item>, Error> {
         let all = self.all().await?;
         if all.len() > 1 {

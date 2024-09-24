@@ -10,14 +10,7 @@ use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 pub use from_iroha::scan as scan_iroha;
 use iroha_data_model::prelude as data_model;
 use nonzero_ext::nonzero;
-use serde::Deserialize;
-use sqlx::{
-    prelude::{FromRow, Type},
-    ConnectOptions, Connection, Database, Decode, Encode, QueryBuilder, Sqlite, SqliteConnection,
-};
-use std::error::Error as StdError;
-use std::fmt::Display;
-use std::str::FromStr;
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
 use std::{num::NonZero, sync::Arc};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard, Notify};
 pub use types::*;
@@ -752,7 +745,7 @@ where ",
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::query;
+    use sqlx::{query, Connection};
 
     async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
@@ -760,8 +753,8 @@ mod tests {
             .execute(&mut conn)
             .await
             .unwrap();
-        let repo = Repo::new(Some(conn));
-        repo
+        
+        Repo::new(Some(conn))
     }
 
     fn default_pagination() -> PaginationQueryParams {
@@ -849,7 +842,7 @@ mod tests {
         assert!(data
             .items
             .iter()
-            .all(|x| x.status == TransactionStatus::Committed))
+            .all(|x| x.status == TransactionStatus::Committed));
     }
 
     #[tokio::test]
@@ -899,7 +892,7 @@ mod tests {
         assert!(data
             .items
             .iter()
-            .all(|x| x.kind == InstructionKind::Register && x.authority.0 .0 == account_id))
+            .all(|x| x.kind == InstructionKind::Register && x.authority.0 .0 == account_id));
     }
 
     #[tokio::test]

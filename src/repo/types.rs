@@ -2,7 +2,7 @@ use crate::repo::util::AsText;
 use crate::schema;
 use crate::schema::TransactionStatus;
 use chrono::{DateTime, Utc};
-use iroha_data_model::{account, asset, domain, isi, metadata, prelude};
+use iroha_data_model::{account, asset, domain, metadata, prelude};
 use serde::Deserialize;
 use sqlx::types::Json;
 use sqlx::{FromRow, Type};
@@ -89,6 +89,7 @@ impl Display for SignatureDisplay {
 #[derive(Debug, Type)]
 pub enum Executable {
     Instructions,
+    #[allow(clippy::upper_case_acronyms)]
     WASM,
 }
 

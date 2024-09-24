@@ -2,7 +2,7 @@ use crate::iroha::Client;
 use crate::repo::{scan_iroha, Repo};
 use eyre::WrapErr;
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection, SqliteConnection};
+use sqlx::ConnectOptions;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -29,7 +29,7 @@ impl DatabaseUpdateLoop {
                 tracing::error!(
                     ?err,
                     "Error while attempting to update the database. Will try again."
-                )
+                );
             }
 
             tracing::debug!("Sleep for {TICK:?}");

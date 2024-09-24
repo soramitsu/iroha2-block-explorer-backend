@@ -1,9 +1,8 @@
 use std::{num::NonZero, str::FromStr};
 
+use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
-use crate::{repo, schema};
 use chrono::Utc;
-use iroha_data_model::isi::InstructionType;
 use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use serde_with::DeserializeFromStr;
@@ -303,11 +302,7 @@ impl From<ReversePagination> for Pagination {
             value.page(),
             value.per_page(),
             value.total_items().get(),
-            value
-                .total_pages()
-                .get()
-                .try_into()
-                .expect("should fit into u32"),
+            value.total_pages().get(),
         )
     }
 }
@@ -625,7 +620,7 @@ impl From<iroha_telemetry::metrics::Status> for Status {
             blocks: value.blocks as u32,
             txs_accepted: value.txs_accepted as u32,
             txs_rejected: value.txs_rejected as u32,
-            view_changes: value.view_changes as u32,
+            view_changes: value.view_changes,
             queue_size: value.queue_size as u32,
             uptime: Duration::from(value.uptime.0),
         }
@@ -642,15 +637,15 @@ mod test {
     #[test]
     fn serialize_bigint() {
         assert_eq!(json!(BigInt(0)), json!(0));
-        assert_eq!(json!(BigInt(9007199254740991)), json!(9007199254740991u64));
+        assert_eq!(json!(BigInt(9_007_199_254_740_991)), json!(9_007_199_254_740_991_u64));
         assert_eq!(
-            json!(BigInt(9007199254740991 + 1)),
+            json!(BigInt(9_007_199_254_740_991 + 1)),
             json!("9007199254740992")
         );
         assert_eq!(
             json!(BigInt(10_000_000_000_000_000_000_000u128)),
             json!("10000000000000000000000")
-        )
+        );
     }
 
     #[test]
@@ -699,6 +694,6 @@ mod test {
         );
 
         expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
-            .assert_eq(&serde_json::to_string(&Signature(value)).unwrap())
+            .assert_eq(&serde_json::to_string(&Signature(value)).unwrap());
     }
 }
