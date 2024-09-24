@@ -4,9 +4,9 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-iroha_data_model = { path = "../iroha/crates/iroha_data_model" }
-iroha_telemetry = { path = "../iroha/crates/iroha_telemetry" }
-iroha_crypto = { path = "../iroha/crates/iroha_crypto" }
+iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "99fda1f55cd868617a80c74273ba43f390f5e89e" }
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "99fda1f55cd868617a80c74273ba43f390f5e89e" }
+iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "99fda1f55cd868617a80c74273ba43f390f5e89e" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
