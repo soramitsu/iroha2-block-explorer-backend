@@ -12,7 +12,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::iroha::{Client, Error as IrohaError};
-use crate::schema::{Page, PaginationQueryParams};
+use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
 use crate::{
     repo::{self, Repo},
     schema,
@@ -353,6 +353,10 @@ async fn assets_show(
 #[derive(Deserialize, IntoParams)]
 struct InstructionsIndexFilter {
     transaction_hash: Option<schema::Hash>,
+    /// Select by transaction status
+    transaction_status: Option<TransactionStatus>,
+    /// Select by block
+    block: Option<u64>,
     /// Filter by a kind of instruction
     kind: Option<schema::InstructionKind>,
     /// Filter by the creator of the parent transaction
@@ -378,6 +382,8 @@ async fn instructions_index(
         .list_instructions(repo::ListInstructionParams {
             pagination,
             transaction_hash: filter.transaction_hash.map(|x| x.0),
+            transaction_status: filter.transaction_status,
+            block: filter.block,
             kind: filter.kind,
             authority: filter.authority.map(|x| x.0),
         })

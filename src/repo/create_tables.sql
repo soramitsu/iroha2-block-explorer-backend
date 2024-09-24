@@ -80,3 +80,33 @@ create table if not exists instructions
     transaction_hash text not null references transactions (hash),
     value            json not null
 );
+
+/* VIEWS */
+
+create view if not exists v_transactions
+as
+select *,
+       format('%s@%s', authority_signatory, authority_domain)       as authority,
+       case when error is null then 'committed' else 'rejected' end as status
+from transactions;
+
+create view if not exists v_instructions
+as
+select json_each.key                                                as kind,
+       json_each.value                                              as payload,
+       created_at,
+       transaction_hash,
+       case when error is null then 'committed' else 'rejected' end as transaction_status,
+       format('%s@%s', authority_signatory, authority_domain)       as authority,
+       block
+from instructions,
+     json_each(instructions.value)
+         join v_transactions as txs on txs.hash = instructions.transaction_hash;
+
+create view if not exists v_assets as
+select case assets.definition_domain = assets.owned_by_domain
+           when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
+           else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
+                       assets.owned_by_domain) end as id,
+       value
+from assets;

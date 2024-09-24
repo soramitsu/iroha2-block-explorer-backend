@@ -474,20 +474,14 @@ impl<'a> PushCustom<'a> for &'a ListTransactionsParams {
         let mut sep = builder.separated(" and ");
         sep.push("true");
         if let Some(height) = self.block {
-            sep.push("transactions.block = ")
-                .push_bind_unseparated(height as u32);
+            sep.push("block = ").push_bind_unseparated(height as u32);
         }
         if let Some(id) = &self.authority {
-            sep.push("transactions.authority_signatory like  ")
-                .push_bind_unseparated(AsText(id.signatory()))
-                .push("transactions.authority_domain = ")
-                .push_bind_unseparated(id.domain().name().as_ref());
+            sep.push("authority like  ")
+                .push_bind_unseparated(AsText(id));
         }
-        if let Some(status) = &self.status {
-            match status {
-                TransactionStatus::Committed => sep.push("transactions.error is null"),
-                TransactionStatus::Rejected => sep.push("transactions.error is not null"),
-            };
+        if let Some(status) = self.status {
+            sep.push("status = ").push_bind_unseparated(status);
         }
     }
 }
@@ -507,10 +501,10 @@ where
         select
             .push("hash")
             .push("block")
-            .push("format('%s@%s', authority_signatory, authority_domain) as authority")
+            .push("authority")
             .push("created_at")
             .push("executable")
-            .push("case when error is null then 'committed' else 'rejected' end as status");
+            .push("status");
 
         if self.detailed {
             select
@@ -523,7 +517,7 @@ where
             select.push("error is not null as error")
         };
         builder
-            .push(" from transactions where ")
+            .push(" from v_transactions where ")
             .push_custom(self.with_where)
             .push(" order by created_at desc");
     }
@@ -692,6 +686,8 @@ impl<'a> PushCustom<'a> for &'a ListAssetsParams {
 pub struct ListInstructionParams {
     pub pagination: PaginationQueryParams,
     pub transaction_hash: Option<iroha_crypto::Hash>,
+    pub transaction_status: Option<TransactionStatus>,
+    pub block: Option<u64>,
     pub kind: Option<InstructionKind>,
     pub authority: Option<data_model::AccountId>,
 }
@@ -705,13 +701,18 @@ impl<'a> PushCustom<'a> for &'a ListInstructionParams {
                 .push_bind_unseparated(AsText(hash));
         }
         if let Some(kind) = &self.kind {
-            sep.push("json_each.key = ").push_bind_unseparated(kind);
+            sep.push("kind = ").push_bind_unseparated(kind);
         }
         if let Some(id) = &self.authority {
-            sep.push("authority_signatory like ")
-                .push_bind_unseparated(AsText(id.signatory()))
-                .push("authority_domain = ")
-                .push_bind_unseparated(id.domain().name().as_ref());
+            sep.push("authority like ")
+                .push_bind_unseparated(AsText(id));
+        }
+        if let Some(block) = self.block {
+            sep.push("block = ").push_bind_unseparated(block as i64);
+        }
+        if let Some(status) = self.transaction_status {
+            sep.push("transaction_status = ")
+                .push_bind_unseparated(status);
         }
     }
 }
@@ -724,19 +725,7 @@ struct SelectInstructions<'a> {
 impl<'a> PushCustom<'a> for SelectInstructions<'a> {
     fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
         builder
-            .push(
-                "\
-select json_each.key                                          as kind,
-       json_each.value                                        as payload,
-       transactions.created_at,
-       transaction_hash,
-       case when error is null then 'committed' else 'rejected' end as transaction_status,
-       format('%s@%s', authority_signatory, authority_domain) as authority
-from instructions,
-     json_each(instructions.value)
-         join transactions on transactions.hash = instructions.transaction_hash
-where ",
-            )
+            .push("select * from v_instructions where ")
             .push_custom(self.params)
             .push(" order by created_at desc ");
     }
@@ -749,11 +738,15 @@ mod tests {
 
     async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+        query(include_str!("./repo/create_tables.sql"))
+            .execute(&mut conn)
+            .await
+            .unwrap();
         query(include_str!("./repo/test-dump.sql"))
             .execute(&mut conn)
             .await
             .unwrap();
-        
+
         Repo::new(Some(conn))
     }
 
@@ -853,6 +846,8 @@ mod tests {
             .list_instructions(ListInstructionParams {
                 pagination: default_pagination(),
                 transaction_hash: None,
+                transaction_status: None,
+                block: None,
                 kind: Some(InstructionKind::Transfer),
                 authority: None,
             })
@@ -881,6 +876,8 @@ mod tests {
             .list_instructions(ListInstructionParams {
                 pagination: default_pagination(),
                 transaction_hash: None,
+                transaction_status: None,
+                block: None,
                 kind: Some(InstructionKind::Register),
                 authority: Some(account_id.clone()),
             })
@@ -896,6 +893,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn filter_isi_by_block() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_instructions(ListInstructionParams {
+                pagination: default_pagination(),
+                transaction_hash: None,
+                transaction_status: None,
+                block: Some(6),
+                kind: None,
+                authority: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(data.items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn filter_isi_by_status() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_instructions(ListInstructionParams {
+                pagination: default_pagination(),
+                transaction_hash: None,
+                transaction_status: Some(TransactionStatus::Committed),
+                block: None,
+                kind: None,
+                authority: None,
+            })
+            .await
+            .unwrap();
+
+        dbg!(data);
+    }
+
+    #[tokio::test]
     async fn list_blocks() {
         let repo = test_repo().await;
 
@@ -903,5 +938,21 @@ mod tests {
 
         assert_eq!(data.pagination.total_pages.0, 3);
         assert_eq!(data.pagination.total_items.0, 21);
+    }
+
+    #[tokio::test]
+    async fn list_assets() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_assets(ListAssetsParams {
+                pagination: default_pagination(),
+                owned_by: None,
+                definition: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(data.items.len(), 1);
     }
 }

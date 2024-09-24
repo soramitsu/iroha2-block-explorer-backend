@@ -1,15 +1,5 @@
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
-CREATE TABLE blocks
-(
-    height                  integer primary key not null,
-    hash                    text                not null,
-    prev_block_hash         text,
-    transactions_hash       text                not null,
-    created_at              datetime            not null,
-    consensus_estimation_ms integer             not null,
-    view_change_index       integer
-);
 INSERT INTO blocks VALUES(1,'224f7f15a87a27af5bec0df7284d41b85a37842693a7511d70779b3356b6025f',NULL,'a5fa92f52d028a3f9d72029851fb24e69588140f14fab6b46f328ab10e09f763','2024-09-10T22:21:13.567+00:00',0,NULL);
 INSERT INTO blocks VALUES(2,'f57039098960d23e534b0c0549fb9b5b2556b6eea448268000da914d2b586e59','224f7f15a87a27af5bec0df7284d41b85a37842693a7511d70779b3356b6025f','eea4c4ee072cf48647fb2e9d6a46d7fbc74def5ec780371b325912d001ed0765','2024-09-10T22:24:58.834+00:00',6000,NULL);
 INSERT INTO blocks VALUES(3,'f46570559f65c1482628dacc182fbb2aac77f10eb5d7b8e08ea5248ff6bbc8c1','f57039098960d23e534b0c0549fb9b5b2556b6eea448268000da914d2b586e59','4758d061fcda0e50a3dabd1423e7e597d76a6e1f4697ea187178b0ea63618133','2024-09-10T22:25:01.844+00:00',6000,NULL);
@@ -31,78 +21,18 @@ INSERT INTO blocks VALUES(18,'f24b03691b424cecd8d1cd5e94888909ec1ad85e8428189398
 INSERT INTO blocks VALUES(19,'c9160a397fbe6392d1fbc9b4ca4340a460238d0f2a2fb2e27d296476e91c342f','f24b03691b424cecd8d1cd5e94888909ec1ad85e8428189398d049240e922375','89b76ac3306dcc075b32651e00cac0443ea64d35aab8285152b1d4ab08b80233','2024-09-11T00:45:45.236+00:00',6000,NULL);
 INSERT INTO blocks VALUES(20,'ee75cec5040651700a36f07725d436183a9e8d4edcdc02c9fbd2d2a4b5c95f51','c9160a397fbe6392d1fbc9b4ca4340a460238d0f2a2fb2e27d296476e91c342f','9c176a5a8204ac1e3740e13fa64ac5e52312df68f59187ebfd9ecc6985ad86ff','2024-09-11T00:45:48.239+00:00',6000,NULL);
 INSERT INTO blocks VALUES(21,'f0b762a5546a28dd4ecdc47bb0920b79fffc68dc26e48474f2c8bcd3a59b2e47','ee75cec5040651700a36f07725d436183a9e8d4edcdc02c9fbd2d2a4b5c95f51','1594f8922bdb2a8300cb7cbff7dabffb9764ce02b8c7c30e3f6f8bcda9992e45','2024-09-11T00:45:51.244+00:00',6000,NULL);
-CREATE TABLE domains
-(
-    name     text primary key not null,
-    logo     text,
-    metadata json
-);
 INSERT INTO domains VALUES('genesis',NULL,'{}');
 INSERT INTO domains VALUES('looking_glass',NULL,'{"foo":{"bar":false}}');
 INSERT INTO domains VALUES('wonderland',NULL,'{"rand-0.009162167398916177":[0,1,2,0.009162167398916177],"rand-0.04339914887107921":[0,1,2,0.04339914887107921],"rand-0.04457981325314209":[0,1,2,0.04457981325314209],"rand-0.11308556750697063":[0,1,2,0.11308556750697064],"rand-0.14892351115726488":[0,1,2,0.14892351115726488],"rand-0.16819616916527247":[0,1,2,0.16819616916527247],"rand-0.19883415005478344":[0,1,2,0.19883415005478344],"rand-0.20676934049629714":[0,1,2,0.2067693404962971],"rand-0.22435053204199984":[0,1,2,0.22435053204199984],"rand-0.24248305017576732":[0,1,2,0.24248305017576732],"rand-0.26111181990929344":[0,1,2,0.26111181990929344],"rand-0.27305621363426225":[0,1,2,0.27305621363426225],"rand-0.302665198750246":[0,1,2,0.302665198750246],"rand-0.3549676875300418":[0,1,2,0.3549676875300418],"rand-0.3964422026407102":[0,1,2,0.3964422026407102],"rand-0.40475951433890023":[0,1,2,0.40475951433890023],"rand-0.43243784459884127":[0,1,2,0.43243784459884127],"rand-0.5171967440035778":[0,1,2,0.5171967440035778],"rand-0.5787887083280621":[0,1,2,0.5787887083280621],"rand-0.58978088319587":[0,1,2,0.58978088319587],"rand-0.6872213683650643":[0,1,2,0.6872213683650643],"rand-0.7211200806902991":[0,1,2,0.7211200806902991],"rand-0.8157606199077243":[0,1,2,0.8157606199077243],"rand-0.8287171031483009":[0,1,2,0.8287171031483009],"rand-0.9878136796782111":[0,1,2,0.9878136796782112]}');
-CREATE TABLE accounts
-(
-    signatory text not null,
-    domain    text not null references domains (name),
-    metadata  json,
-    primary key (signatory, domain)
-);
 INSERT INTO accounts VALUES('ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4','genesis','{}');
 INSERT INTO accounts VALUES('e70121037287D2200EE4CAF41A9EA2D4B33C9D4FA441FABF44CF09F5D441AB301A4EA64D','looking_glass','{"key_pair_alg":"secp256k1","key_pair_seed_hex":"deadbeef"}');
 INSERT INTO accounts VALUES('ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','{}');
-CREATE TABLE domain_owners
-(
-    account_signatory text not null,
-    account_domain    text not null,
-    domain            text not null references domains (name),
-    foreign key (account_signatory, account_domain) references accounts (signatory, domain),
-    primary key (account_signatory, account_domain, domain)
-);
 INSERT INTO domain_owners VALUES('ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4','genesis','genesis');
 INSERT INTO domain_owners VALUES('ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','looking_glass');
 INSERT INTO domain_owners VALUES('ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','wonderland');
-CREATE TABLE asset_definitions
-(
-    name               text                                                   not null,
-    domain             text                                                   not null references domains (name),
-    owned_by_signatory text                                                   not null,
-    owned_by_domain    text                                                   not null,
-    logo               text,
-    metadata           json,
-    mintable           text check (mintable in ('Once', 'Not', 'Infinitely')) not null,
-    type               text check (type in ('Numeric', 'Store'))              not null,
-    primary key (name, domain),
-    foreign key (owned_by_signatory, owned_by_domain) references accounts (signatory, domain)
-);
 INSERT INTO asset_definitions VALUES('roses','looking_glass','ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland',NULL,'{}','Infinitely','Store');
 INSERT INTO asset_definitions VALUES('roses','wonderland','ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland',NULL,'{}','Not','Numeric');
-CREATE TABLE assets
-(
-    definition_name    text not null,
-    definition_domain  text not null,
-    owned_by_signatory text not null,
-    owned_by_domain    text not null,
-    value              json not null,
-    foreign key (definition_name, definition_domain) references asset_definitions (name, domain),
-    foreign key (owned_by_signatory, owned_by_domain) references accounts (signatory, domain),
-    primary key (definition_name, definition_domain, owned_by_signatory, owned_by_domain)
-);
 INSERT INTO assets VALUES('roses','wonderland','e70121037287D2200EE4CAF41A9EA2D4B33C9D4FA441FABF44CF09F5D441AB301A4EA64D','looking_glass','{"kind":"Numeric","value":"100500"}');
-CREATE TABLE transactions
-(
-    hash                text primary key                                    not null,
-    block               integer                                             not null references blocks (height),
-    created_at          datetime                                            not null,
-    authority_signatory text                                                not null,
-    authority_domain    text                                                not null,
-    signature           text                                                not null,
-    nonce               integer,
-    metadata            json,
-    time_to_live_ms     integer,
-    executable          text check (executable in ('Instructions', 'WASM')) not null,
-    error               json,
-    foreign key (authority_signatory, authority_domain) references accounts (signatory, domain)
-);
 INSERT INTO transactions VALUES('150325f9cd93ba26db80bcfa4cc661bfc3a1dad22c95ae07824c04c750127581',21,'2024-09-11T00:45:48.372+00:00','ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','5805F26165CD9662BD0F16D1618198444B6AA13E37813FBBE110F1EF67A7B8B019EA90E181814F8B24DD7AB1C0FEE55D815769A5EA128475E871645ACB07F109',NULL,'{}',NULL,'Instructions','{"Validation":{"InstructionFailed":{"Find":{"AssetDefinition":"coin#wonderland"}}}}');
 INSERT INTO transactions VALUES('c27f806738b0c4f5c355ea5c7f3ea5209ca09c0606d3fa2c8f533040b5a29433',21,'2024-09-11T00:45:49.880+00:00','ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','F04CE59772595C05349CEBA3C9E4DE4605705EA8F2FE75BE1174A4A80EB931A18C60B56F20DC613902D6164DA6E73430D719455C07FD8FB7B5EFB3D53AC4B50A',NULL,'{}',NULL,'Instructions','{"Validation":{"InstructionFailed":{"Find":{"AssetDefinition":"coin#wonderland"}}}}');
 INSERT INTO transactions VALUES('37e89ced73960d975763807b8e07048c6e47c1082cfa5cb30933c33c30f6f8b1',20,'2024-09-11T00:45:45.356+00:00','ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E','wonderland','F227D7E889FB56D4E488C4566FAE611A0A025B31B24BD357F9BC7D11FD7170114DD86102C3D146A65483BA4B7021D730D09FA59B35A615E3B511B2ED6EE6DA06',NULL,'{}',NULL,'Instructions','{"Validation":{"InstructionFailed":{"Find":{"AssetDefinition":"coin#wonderland"}}}}');
@@ -193,11 +123,6 @@ INSERT INTO transactions VALUES('eea4c4ee072cf48647fb2e9d6a46d7fbc74def5ec780371
 INSERT INTO transactions VALUES('573c60bee2b609b3723b1ea8aeeb496978707825b520e419e88d823cacf64ccf',1,'2024-09-10T22:21:13.565+00:00','ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4','genesis','8F5786D81104431A816602378CFF7E332B727DCE8DF15ED97819AC2CDF7611C28355B551087CA45D0A0597B878DAD44B14C9A9FDFE830E0D9711EA0A95F72A0E',NULL,'{}',NULL,'Instructions',NULL);
 INSERT INTO transactions VALUES('d6efcf9c8be01ee4333d26f420d487f271fc2c724254b762145e5916a6a458b3',1,'2024-09-10T22:21:13.566+00:00','ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4','genesis','6B970D89F74517E449C0D9282B6224D8B0E510DC35B7B590926A24B7027A3CFD9AAE89FCDEBDDBE3B80813E2F6DA43B54030D68B0FF8520011DFE4E21F3C980E',NULL,'{}',NULL,'Instructions',NULL);
 INSERT INTO transactions VALUES('63f5f0345c37992eca21e6be3e07da02327b829954c560a18915a125fdc17919',1,'2024-09-10T22:21:13.566+00:00','ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4','genesis','B21D5B4DACF8E57FE7DF97BAD4E97F9E20E718A0F88BE028D1740C02208FC5B3D6FD2520D43623C35AB06D9C9F82D4B4927C947621B5B42C1262BEB154BE1200',NULL,'{}',NULL,'Instructions',NULL);
-CREATE TABLE instructions
-(
-    transaction_hash text not null references transactions (hash),
-    value            json not null
-);
 INSERT INTO instructions VALUES('150325f9cd93ba26db80bcfa4cc661bfc3a1dad22c95ae07824c04c750127581','{"Burn":{"Asset":{"object":"958","destination":"coin#wonderland#e70121037287D2200EE4CAF41A9EA2D4B33C9D4FA441FABF44CF09F5D441AB301A4EA64D@looking_glass"}}}');
 INSERT INTO instructions VALUES('c27f806738b0c4f5c355ea5c7f3ea5209ca09c0606d3fa2c8f533040b5a29433','{"Burn":{"Asset":{"object":"461","destination":"coin#wonderland#e70121037287D2200EE4CAF41A9EA2D4B33C9D4FA441FABF44CF09F5D441AB301A4EA64D@looking_glass"}}}');
 INSERT INTO instructions VALUES('37e89ced73960d975763807b8e07048c6e47c1082cfa5cb30933c33c30f6f8b1','{"Burn":{"Asset":{"object":"931","destination":"coin#wonderland#e70121037287D2200EE4CAF41A9EA2D4B33C9D4FA441FABF44CF09F5D441AB301A4EA64D@looking_glass"}}}');

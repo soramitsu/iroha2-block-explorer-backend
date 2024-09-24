@@ -369,7 +369,9 @@ const fn default_per_page() -> NonZero<u64> {
 pub struct TimeStamp(chrono::DateTime<Utc>);
 
 /// Transaction status
-#[derive(Serialize, Deserialize, ToSchema, Debug, sqlx::Type, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(
+    Serialize, Deserialize, ToSchema, Debug, sqlx::Type, Ord, PartialOrd, Eq, PartialEq, Copy, Clone,
+)]
 #[serde(rename = "lowercase")]
 #[sqlx(rename_all = "lowercase")]
 pub enum TransactionStatus {
@@ -637,7 +639,10 @@ mod test {
     #[test]
     fn serialize_bigint() {
         assert_eq!(json!(BigInt(0)), json!(0));
-        assert_eq!(json!(BigInt(9_007_199_254_740_991)), json!(9_007_199_254_740_991_u64));
+        assert_eq!(
+            json!(BigInt(9_007_199_254_740_991)),
+            json!(9_007_199_254_740_991_u64)
+        );
         assert_eq!(
             json!(BigInt(9_007_199_254_740_991 + 1)),
             json!("9007199254740992")
