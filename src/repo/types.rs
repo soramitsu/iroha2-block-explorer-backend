@@ -170,6 +170,7 @@ pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
 #[derive(Debug, FromRow)]
 pub struct Instruction {
     pub transaction_hash: Hash,
+    pub block: u32,
     pub transaction_status: TransactionStatus,
     pub created_at: DateTime<Utc>,
     pub kind: schema::InstructionKind,

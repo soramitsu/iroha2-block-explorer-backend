@@ -462,6 +462,7 @@ pub struct Instruction {
     payload: serde_json::Value,
     transaction_hash: Hash,
     transaction_status: TransactionStatus,
+    block: BigInt,
     authority: AccountId,
     created_at: TimeStamp,
 }
@@ -473,6 +474,7 @@ impl From<repo::Instruction> for Instruction {
             payload: value.payload.0,
             transaction_hash: Hash(value.transaction_hash.0 .0),
             transaction_status: value.transaction_status,
+            block: BigInt(value.block as u128),
             authority: AccountId(value.authority.0 .0),
             created_at: TimeStamp(value.created_at),
         }
