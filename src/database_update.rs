@@ -54,7 +54,7 @@ impl DatabaseUpdateLoop {
             .in_memory(true)
             .connect()
             .await?;
-        scan_iroha(&mut conn, &self.client)
+        scan_iroha(&self.client, &mut conn)
             .await
             .wrap_err("Failed to scan Iroha")?;
         self.repo.swap(conn).await;

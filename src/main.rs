@@ -10,6 +10,7 @@ mod schema;
 mod util;
 
 use crate::iroha::Client;
+use std::path::PathBuf;
 
 use crate::repo::Repo;
 use axum::{
@@ -20,6 +21,8 @@ use clap::Parser;
 use database_update::DatabaseUpdateLoop;
 use iroha_crypto::{KeyPair, PrivateKey};
 use iroha_data_model::account::AccountId;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Connection};
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
@@ -30,10 +33,6 @@ use utoipa_scalar::{Scalar, Servable};
 #[derive(Debug, Parser)]
 #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
 pub struct Args {
-    /// Port to run the server on
-    #[clap(short, long, default_value = "4000", env)]
-    pub port: u16,
-
     /// Account ID in a form of `signatory@domain` on which behalf to perform Iroha Queries
     #[clap(long, env)]
     pub account: AccountId,
@@ -45,6 +44,24 @@ pub struct Args {
     /// Iroha Torii URL
     #[clap(long, env)]
     pub torii_url: Url,
+
+    #[command(subcommand)]
+    pub command: Subcommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Subcommand {
+    /// Scan Iroha into an SQLite database and save it to file
+    Scan {
+        /// Path to SQLite database to scan Iroha to
+        out_file: PathBuf,
+    },
+    /// Run the server
+    Serve {
+        /// Port to run the server on
+        #[clap(short, long, default_value = "4000", env)]
+        port: u16,
+    },
 }
 
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
@@ -117,12 +134,19 @@ async fn main() {
     let key_pair = KeyPair::from(args.account_private_key);
     let iroha = Client::new(args.account, key_pair, args.torii_url);
 
+    match args.command {
+        Subcommand::Serve { port } => serve(iroha, port).await,
+        Subcommand::Scan { out_file } => scan(iroha, out_file).await.unwrap(),
+    }
+}
+
+async fn serve(client: Client, port: u16) {
     let repo = Repo::new(None);
 
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
-        .nest("/api/v1", endpoint::router(iroha.clone(), repo.clone()))
+        .nest("/api/v1", endpoint::router(client.clone(), repo.clone()))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched
@@ -143,7 +167,7 @@ async fn main() {
                 .on_failure(()),
         );
 
-    let listener = tokio::net::TcpListener::bind(("localhost", args.port))
+    let listener = tokio::net::TcpListener::bind(("localhost", port))
         .await
         .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
@@ -153,7 +177,19 @@ async fn main() {
         axum::serve(listener, app).await.unwrap();
     });
     set.spawn(async move {
-        DatabaseUpdateLoop::new(repo, iroha).run().await;
+        DatabaseUpdateLoop::new(repo, client).run().await;
     });
     set.join_all().await;
+}
+
+async fn scan(client: Client, out_file: PathBuf) -> eyre::Result<()> {
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&out_file)
+        .create_if_missing(true)
+        .connect()
+        .await?;
+    repo::scan_iroha(&client, &mut conn).await?;
+    conn.close().await?;
+    tracing::info!(?out_file, "written");
+    Ok(())
 }

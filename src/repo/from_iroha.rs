@@ -8,8 +8,9 @@ use sqlx::types::Json;
 use sqlx::{query, QueryBuilder, SqliteConnection};
 use tracing::debug;
 
+/// Scan Iroha into an SQLite database.
 #[allow(clippy::too_many_lines)]
-pub async fn scan(conn: &mut SqliteConnection, client: &Client) -> Result<()> {
+pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<()> {
     debug!("Scanning Iroha into an in-memory SQLite database");
 
     debug!("Fetching data from Iroha...");
@@ -264,9 +265,10 @@ mod tests {
             .connect()
             .await
             .unwrap();
-        scan(&mut conn, &client)
+        scan_into(&client, &mut conn)
             .await
             .expect("should scan without errors");
+
         conn.close().await.unwrap();
     }
 }

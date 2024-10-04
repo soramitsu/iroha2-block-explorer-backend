@@ -93,7 +93,12 @@ from transactions;
 create view if not exists v_instructions
 as
 select json_each.key                                                as kind,
-       json_each.value                                              as payload,
+       case
+           /* TODO: truncate payload for `Upgrade` instruction kind? */
+           when json_each.type in ('null', 'text', 'integer', 'real') then json_quote(json_each.value)
+           when json_each.type in ('false', 'true') then json_each.type
+           else json_each.value
+           end                                                      as payload,
        created_at,
        transaction_hash,
        case when error is null then 'committed' else 'rejected' end as transaction_status,

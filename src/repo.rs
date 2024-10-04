@@ -7,7 +7,7 @@ mod util;
 use crate::schema::{InstructionKind, Page};
 use crate::schema::{PaginationQueryParams, TransactionStatus};
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
-pub use from_iroha::scan as scan_iroha;
+pub use from_iroha::scan_into as scan_iroha;
 use iroha_data_model::prelude as data_model;
 use nonzero_ext::nonzero;
 use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
@@ -734,7 +734,9 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::{query, Connection};
+    use serde_json::json;
+    use sqlx::types::JsonValue;
+    use sqlx::{query, query_as, Connection};
 
     async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
@@ -954,5 +956,65 @@ mod tests {
             .unwrap();
 
         assert_eq!(data.items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn json_payloads_in_v_instructions() -> eyre::Result<()> {
+        let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
+        query(include_str!("./repo/create_tables.sql"))
+            .execute(&mut conn)
+            .await?;
+        query("PRAGMA foreign_keys=OFF").execute(&mut conn).await?;
+
+        let values = [
+            json!(null),
+            json!(412),
+            json!(false),
+            json!(true),
+            json!(42.0),
+            json!("whatever\""),
+            json!([1, 2, 3]),
+            json!(["foo", "bar", false, null]),
+            json!({"foo": "bar"}),
+        ];
+
+        let mut b = QueryBuilder::new("insert into transactions (hash, block, created_at, authority_signatory, authority_domain, signature, executable) values (");
+        b.separated(", ")
+            .push_bind("dummy")
+            .push_bind(1)
+            .push_bind("now()")
+            .push_bind("dummy")
+            .push_bind("dummy")
+            .push_bind("dummy")
+            .push_bind("Instructions");
+        b.push(")").build().execute(&mut conn).await?;
+        QueryBuilder::new("insert into instructions ")
+            .push_values(&values, |mut b, value| {
+                b.push_bind("dummy")
+                    .push_bind(json!({"kind": value.clone()}));
+            })
+            .build()
+            .execute(&mut conn)
+            .await?;
+
+        let rows: Vec<(JsonValue,)> = query_as("select payload from v_instructions")
+            .fetch_all(&mut conn)
+            .await?;
+        let rows: Vec<JsonValue> = rows.into_iter().map(|(x,)| x).collect();
+
+        assert_eq!(&rows, &values);
+
+        // for row in query("select payload, payload_quoted from v_instructions")
+        //     .fetch_all(&mut conn)
+        //     .await?
+        // {
+        //     for column in row.columns() {
+        //         let column_name = column.name();
+        //         let value: String = row.try_get_unchecked(column_name)?;
+        //         println!("{}: {}", column_name, value);
+        //     }
+        // }
+
+        Ok(())
     }
 }
