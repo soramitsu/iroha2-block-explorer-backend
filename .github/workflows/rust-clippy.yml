@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - iroha-rc-1
+      - master
 
 jobs:
   rust-clippy-analyze:
