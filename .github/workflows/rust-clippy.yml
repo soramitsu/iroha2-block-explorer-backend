@@ -1,4 +1,4 @@
-name: Test CI
+name: rust-clippy analyze
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ on:
       - iroha-rc-1
 
 jobs:
-  test:
+  rust-clippy-analyze:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,10 +26,10 @@ jobs:
     - name: Install clippy-sarif
       uses: taiki-e/install-action@f06446b5f0cca77ab90b7b2ad3b01677f1d09ee9
       with:
-        tool: clippy-sarif
+        tool: clippy-sarif sarif-fmt
 
     - name: Run Clippy (Lints for tests)
-      run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif
+      run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif | sarif-fmt
 
     - name: Run Tests
       run: cargo test --all
