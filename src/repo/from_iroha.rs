@@ -65,8 +65,6 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
         "hash",
         "height",
         "created_at",
-        "consensus_estimation_ms",
-        // "view_change_index",
         "prev_block_hash",
         "transactions_hash",
     ] {
@@ -79,8 +77,6 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                 .push_bind(DateTime::from_timestamp_millis(
                     value.header().creation_time().as_millis() as i64,
                 ))
-                .push_bind(value.header().consensus_estimation().as_millis() as i64)
-                // .push_bind(value.header().view_change_index())
                 .push_bind(value.header().prev_block_hash().map(AsText))
                 .push_bind(AsText(value.header().transactions_hash()));
         })

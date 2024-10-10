@@ -441,7 +441,6 @@ SELECT
   blocks.created_at,
   prev_block_hash,
   transactions_hash,
-  consensus_estimation_ms,
   count(transactions.hash) as transactions_total,
   count(case 1 when transactions.error is not null then 1 else null end) as transactions_rejected
 FROM

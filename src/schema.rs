@@ -513,8 +513,6 @@ pub struct Block {
     transactions_hash: Hash,
     /// Timestamp of creation
     created_at: TimeStamp,
-    /// Estimation of consensus duration
-    consensus_estimation: Duration,
     transactions_total: u32,
     transactions_rejected: u32,
 }
@@ -527,9 +525,6 @@ impl From<repo::Block> for Block {
             prev_block_hash: value.prev_block_hash.map(Hash::from),
             transactions_hash: Hash(value.transactions_hash.0 .0),
             created_at: TimeStamp(value.created_at),
-            consensus_estimation: Duration {
-                ms: BigInt(value.consensus_estimation_ms as u128),
-            },
             transactions_total: value.transactions_total,
             transactions_rejected: value.transactions_rejected,
         }

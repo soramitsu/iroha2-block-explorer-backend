@@ -49,7 +49,6 @@ pub struct Block {
     pub prev_block_hash: Option<Hash>,
     pub transactions_hash: Hash,
     pub created_at: DateTime<Utc>,
-    pub consensus_estimation_ms: u64,
     pub transactions_total: u32,
     pub transactions_rejected: u32,
 }

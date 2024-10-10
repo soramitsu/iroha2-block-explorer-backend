@@ -1,12 +1,10 @@
 create table if not exists blocks
 (
-    height                  integer primary key not null,
-    hash                    text                not null,
-    prev_block_hash         text,
-    transactions_hash       text                not null,
-    created_at              datetime            not null,
-    consensus_estimation_ms integer             not null,
-    view_change_index       integer
+    height            integer primary key not null,
+    hash              text                not null,
+    prev_block_hash   text,
+    transactions_hash text                not null,
+    created_at        datetime            not null
 );
 
 create table if not exists domains
