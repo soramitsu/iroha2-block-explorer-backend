@@ -26,7 +26,7 @@ jobs:
     - name: Install clippy-sarif
       uses: taiki-e/install-action@f06446b5f0cca77ab90b7b2ad3b01677f1d09ee9
       with:
-        tool: clippy-sarif sarif-fmt
+        tool: clippy-sarif, sarif-fmt
 
     - name: Run Clippy (Lints for tests)
       run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif | sarif-fmt
