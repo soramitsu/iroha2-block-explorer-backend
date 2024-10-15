@@ -39,8 +39,8 @@ For example:
 
 ```shell
 # via ENVs; also could be passed as CLI args
-export ACCOUNT=ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland
-export ACCOUNT_PRIVATE_KEY=802620CCF31D85E3B32A4BEA59987CE0C78E3B8E2DB93881468AB2435FE45D5C9DCD53
+export ACCOUNT=<account id>
+export ACCOUNT_PRIVATE_KEY=<acount private key>
 export TORII_URL=http://localhost:8080
 
 iroha_explorer serve --port 4123
