@@ -29,16 +29,13 @@ jobs:
         tool: clippy-sarif, sarif-fmt
 
     - name: Check code formatting
-      run: cargo fmt -- --check
-      continue-on-error: true
+      run: cargo fmt -- --check || echo "fmt_failed=true" >> $GITHUB_ENV
 
     - name: Run Clippy (Lints for tests)
-      run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif | sarif-fmt
-      continue-on-error: true
+      run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif | sarif-fmt || echo "clippy_failed=true" >> $GITHUB_ENV
 
     - name: Run Tests
-      run: cargo test
-      continue-on-error: true
+      run: cargo test || echo "test_failed=true" >> $GITHUB_ENV
 
     # v3.26.11
     - name: Upload SARIF file
@@ -47,3 +44,11 @@ jobs:
       with:
         sarif_file: results.sarif
         wait-for-processing: true
+
+    - name: Final status check
+      if: always()
+      run: |
+        if [[ "$fmt_failed" == "true" || "$clippy_failed" == "true" || "$test_failed" == "true" ]]; then
+          echo "One or more checks failed."
+          exit 1
+        fi
