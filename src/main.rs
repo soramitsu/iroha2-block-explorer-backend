@@ -4,14 +4,12 @@
 
 mod database_update;
 mod endpoint;
-mod iroha;
+mod iroha_client_wrap;
 mod repo;
 mod schema;
 mod util;
 
-use crate::iroha::Client;
-use std::path::PathBuf;
-
+use crate::iroha_client_wrap::ClientWrap;
 use crate::repo::Repo;
 use axum::{
     extract::{MatchedPath, Request},
@@ -19,10 +17,11 @@ use axum::{
 };
 use clap::Parser;
 use database_update::DatabaseUpdateLoop;
-use iroha_crypto::{KeyPair, PrivateKey};
-use iroha_data_model::account::AccountId;
+use iroha::crypto::{KeyPair, PrivateKey};
+use iroha::data_model::account::AccountId;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
+use std::path::PathBuf;
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
@@ -51,9 +50,9 @@ pub struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Subcommand {
-    /// Scan Iroha into an SQLite database and save it to file
+    /// Scan Iroha into an `SQLite` database and save it to file
     Scan {
-        /// Path to SQLite database to scan Iroha to
+        /// Path to `SQLite` database to scan Iroha to
         out_file: PathBuf,
     },
     /// Run the server
@@ -132,15 +131,15 @@ async fn main() {
         .init();
 
     let key_pair = KeyPair::from(args.account_private_key);
-    let iroha = Client::new(args.account, key_pair, args.torii_url);
+    let iroha_client = ClientWrap::new(args.account, key_pair, args.torii_url);
 
     match args.command {
-        Subcommand::Serve { port } => serve(iroha, port).await,
-        Subcommand::Scan { out_file } => scan(iroha, out_file).await.unwrap(),
+        Subcommand::Serve { port } => serve(iroha_client, port).await,
+        Subcommand::Scan { out_file } => scan(iroha_client, out_file).await.unwrap(),
     }
 }
 
-async fn serve(client: Client, port: u16) {
+async fn serve(client: ClientWrap, port: u16) {
     let repo = Repo::new(None);
 
     // TODO: handle endpoint panics
@@ -182,7 +181,7 @@ async fn serve(client: Client, port: u16) {
     set.join_all().await;
 }
 
-async fn scan(client: Client, out_file: PathBuf) -> eyre::Result<()> {
+async fn scan(client: ClientWrap, out_file: PathBuf) -> eyre::Result<()> {
     let mut conn = SqliteConnectOptions::new()
         .filename(&out_file)
         .create_if_missing(true)

@@ -2,7 +2,7 @@ use crate::repo::util::AsText;
 use crate::schema;
 use crate::schema::TransactionStatus;
 use chrono::{DateTime, Utc};
-use iroha_data_model::{account, asset, domain, metadata, prelude};
+use iroha::data_model::{account, asset, domain, metadata, prelude};
 use serde::Deserialize;
 use sqlx::types::Json;
 use sqlx::{FromRow, Type};
@@ -55,7 +55,7 @@ pub struct Block {
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
-pub struct Hash(pub AsText<iroha_crypto::Hash>);
+pub struct Hash(pub AsText<iroha::crypto::Hash>);
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
@@ -63,13 +63,13 @@ pub struct Signature(pub AsText<SignatureDisplay>);
 
 // FIXME: remove when Iroha Signature impls FromStr
 #[derive(Debug)]
-pub struct SignatureDisplay(pub iroha_crypto::Signature);
+pub struct SignatureDisplay(pub iroha::crypto::Signature);
 
 impl FromStr for SignatureDisplay {
-    type Err = iroha_crypto::error::ParseError;
+    type Err = iroha::crypto::error::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(iroha_crypto::Signature::from_hex(s)?))
+        Ok(Self(iroha::crypto::Signature::from_hex(s)?))
     }
 }
 

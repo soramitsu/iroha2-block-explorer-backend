@@ -8,7 +8,7 @@ use crate::schema::{InstructionKind, Page};
 use crate::schema::{PaginationQueryParams, TransactionStatus};
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 pub use from_iroha::scan_into as scan_iroha;
-use iroha_data_model::prelude as data_model;
+use iroha::data_model::prelude as data_model;
 use nonzero_ext::nonzero;
 use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
 use std::{num::NonZero, sync::Arc};
@@ -130,7 +130,7 @@ impl Repo {
 
     pub async fn find_transaction_by_hash(
         &self,
-        hash: iroha_crypto::Hash,
+        hash: iroha::crypto::Hash,
     ) -> Result<TransactionDetailed> {
         let mut conn = self.acquire_conn().await;
         let tx = QueryBuilder::new("")
@@ -420,7 +420,7 @@ where ",
 
 pub enum FindBlockParams {
     Height(u32),
-    Hash(iroha_crypto::Hash),
+    Hash(iroha::crypto::Hash),
 }
 
 struct SelectBlocks<W> {
@@ -684,7 +684,7 @@ impl<'a> PushCustom<'a> for &'a ListAssetsParams {
 
 pub struct ListInstructionParams {
     pub pagination: PaginationQueryParams,
-    pub transaction_hash: Option<iroha_crypto::Hash>,
+    pub transaction_hash: Option<iroha::crypto::Hash>,
     pub transaction_status: Option<TransactionStatus>,
     pub block: Option<u64>,
     pub kind: Option<InstructionKind>,

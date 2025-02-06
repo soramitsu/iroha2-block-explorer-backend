@@ -10,8 +10,8 @@ use sqlx::prelude::FromRow;
 use utoipa::{IntoParams, ToSchema};
 
 mod iroha {
-    pub use iroha_crypto::Hash;
-    pub use iroha_data_model::prelude::*;
+    pub use iroha::crypto::*;
+    pub use iroha::data_model::prelude::*;
 }
 
 /// Domain
@@ -542,8 +542,8 @@ impl From<repo::Hash> for Hash {
     }
 }
 
-impl<T> From<iroha_crypto::HashOf<T>> for Hash {
-    fn from(value: iroha_crypto::HashOf<T>) -> Self {
+impl<T> From<iroha::HashOf<T>> for Hash {
+    fn from(value: iroha::HashOf<T>) -> Self {
         Self(value.into())
     }
 }
@@ -557,7 +557,7 @@ impl<T> From<iroha_crypto::HashOf<T>> for Hash {
     })
 )]
 // FIXME: utoipa doesn't display example
-pub struct Signature(iroha_crypto::Signature);
+pub struct Signature(iroha::Signature);
 
 impl From<repo::Signature> for Signature {
     fn from(value: repo::Signature) -> Self {
@@ -617,7 +617,7 @@ impl From<iroha_telemetry::metrics::Status> for Status {
         Self {
             peers: value.peers as u32,
             blocks: value.blocks as u32,
-            txs_accepted: value.txs_accepted as u32,
+            txs_accepted: value.txs_approved as u32,
             txs_rejected: value.txs_rejected as u32,
             view_changes: value.view_changes,
             queue_size: value.queue_size as u32,
@@ -628,7 +628,7 @@ impl From<iroha_telemetry::metrics::Status> for Status {
 
 #[cfg(test)]
 mod test {
-    use iroha_crypto::KeyPair;
+    use super::iroha::KeyPair;
     use serde_json::json;
 
     use super::*;
@@ -690,8 +690,8 @@ mod test {
 
     #[test]
     fn serialize_signature() {
-        let value = iroha_crypto::Signature::new(
-            KeyPair::from_seed(vec![1, 2, 3], iroha_crypto::Algorithm::Secp256k1).private_key(),
+        let value = iroha::Signature::new(
+            KeyPair::from_seed(vec![1, 2, 3], iroha::Algorithm::Secp256k1).private_key(),
             &[5, 4, 3, 2, 1],
         );
 

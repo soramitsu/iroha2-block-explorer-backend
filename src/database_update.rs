@@ -1,19 +1,20 @@
-use crate::iroha::Client;
+use crate::iroha_client_wrap::ClientWrap;
 use crate::repo::{scan_iroha, Repo};
 use eyre::WrapErr;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::ConnectOptions;
 use std::time::Duration;
+use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
 pub struct DatabaseUpdateLoop {
     repo: Repo,
-    client: Client,
+    client: ClientWrap,
     last_update_block: u64,
 }
 
 impl DatabaseUpdateLoop {
-    pub fn new(repo: Repo, client: Client) -> Self {
+    pub fn new(repo: Repo, client: ClientWrap) -> Self {
         Self {
             repo,
             client,
@@ -38,10 +39,9 @@ impl DatabaseUpdateLoop {
     }
 
     async fn attempt(&mut self) -> eyre::Result<()> {
-        let status = self
-            .client
-            .status()
-            .await
+        let client_clone = self.client.clone();
+        let status = spawn_blocking(move || client_clone.get_status())
+            .await?
             .wrap_err("Failed to fetch Iroha status")?;
 
         if status.blocks == self.last_update_block {

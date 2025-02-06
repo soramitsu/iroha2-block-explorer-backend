@@ -1,30 +1,36 @@
-use crate::iroha::Client;
 use crate::repo::{AsText, SignatureDisplay};
 use chrono::DateTime;
 use eyre::Result;
-use iroha_data_model::prelude::*;
+use iroha::client::Client;
+use iroha::data_model::prelude::*;
 use serde_json::json;
 use sqlx::types::Json;
 use sqlx::{query, QueryBuilder, SqliteConnection};
+use tokio::task::spawn_blocking;
 use tracing::debug;
 
-/// Scan Iroha into an SQLite database.
+/// Scan Iroha into an `SQLite` database.
 #[allow(clippy::too_many_lines)]
 pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<()> {
     debug!("Scanning Iroha into an in-memory SQLite database");
 
     debug!("Fetching data from Iroha...");
-    let domains = client.query(FindDomains).all().await?;
-    let accounts = client.query(FindAccounts).all().await?;
-    let blocks = client.query(FindBlocks).all().await?;
-    let assets_definitions = client.query(FindAssetsDefinitions).all().await?;
-    let assets = client.query(FindAssets).all().await?;
+    let client = client.clone();
+    let (domains, accounts, blocks, assets_definitions, assets) = spawn_blocking(move || {
+        let domains = client.query(FindDomains).execute_all()?;
+        let accounts = client.query(FindAccounts).execute_all()?;
+        let blocks = client.query(FindBlocks).execute_all()?;
+        let assets_definitions = client.query(FindAssetsDefinitions).execute_all()?;
+        let assets = client.query(FindAssets).execute_all()?;
+        Ok::<_, eyre::Report>((domains, accounts, blocks, assets_definitions, assets))
+    })
+    .await??;
     debug!("Done fetching");
 
     query(include_str!("./create_tables.sql"))
         .execute(&mut *conn)
         .await?;
-    // query("PRAGMA foreign_keys=OFF").execute(&mut conn).await?;
+    query("PRAGMA foreign_keys=OFF").execute(&mut *conn).await?;
     query("BEGIN TRANSACTION").execute(&mut *conn).await?;
 
     // todo: handle empty data
@@ -103,27 +109,29 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
     }
     b.push(") ")
         .push_values(
-            blocks
-                .iter()
-                .flat_map(|block| block.transactions().map(|tx| (block.header().height(), tx))),
-            |mut b, (height, value)| {
-                let error = value.error();
-                let value = value.as_ref();
-                b.push_bind(AsText(value.hash()))
+            blocks.iter().flat_map(|block| {
+                block
+                    .transactions()
+                    .enumerate()
+                    .map(move |(i, tx)| (block, tx, i))
+            }),
+            |mut b, (block, tx, tx_index)| {
+                let error = block.error(tx_index);
+                let height = block.header().height();
+
+                b.push_bind(AsText(tx.hash()))
                     .push_bind(height.get() as u32)
                     .push_bind(DateTime::from_timestamp_millis(
-                        value.creation_time().as_millis() as i64,
+                        tx.creation_time().as_millis() as i64,
                     ))
-                    .push_bind(value.time_to_live().map(|dur| dur.as_millis() as i64))
-                    .push_bind(AsText(value.authority().signatory()))
-                    .push_bind(AsText(value.authority().domain()))
-                    .push_bind(AsText(SignatureDisplay(
-                        value.signature().payload().clone(),
-                    )))
-                    .push_bind(value.nonce().map(|num| i64::from(num.get())))
-                    .push_bind(Json(value.metadata()))
-                    .push_bind(error.as_ref().map(Json))
-                    .push_bind(match value.instructions() {
+                    .push_bind(tx.time_to_live().map(|dur| dur.as_millis() as i64))
+                    .push_bind(AsText(tx.authority().signatory()))
+                    .push_bind(AsText(tx.authority().domain()))
+                    .push_bind(AsText(SignatureDisplay(tx.signature().payload().clone())))
+                    .push_bind(tx.nonce().map(|num| i64::from(num.get())))
+                    .push_bind(Json(tx.metadata()))
+                    .push_bind(error.map(Json))
+                    .push_bind(match tx.instructions() {
                         Executable::Instructions(_) => "Instructions",
                         Executable::Wasm(_) => "WASM",
                     });
@@ -138,16 +146,27 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
             blocks.iter().flat_map(|block| {
                 block
                     .transactions()
-                    .filter_map(|tx| match tx.as_ref().instructions() {
-                        Executable::Instructions(isi) => {
-                            Some(isi.iter().map(|i| (tx.as_ref().hash(), i)))
+                    .filter_map(|tx| match tx.instructions() {
+                        Executable::Instructions(isi_vec) => {
+                            Some(isi_vec.iter().map(|isi| (tx.hash(), isi)))
                         }
                         Executable::Wasm(_) => None,
                     })
                     .flatten()
             }),
             |mut b, (tx_hash, value)| {
-                b.push_bind(AsText(tx_hash)).push_bind(Json(value));
+                let json = match value {
+                    // https://github.com/hyperledger-iroha/iroha/issues/5305
+                    InstructionBox::Log(log) => Json(json!({
+                        "Log": {
+                            "level": log.level(),
+                            "msg": "[Message could not be extracted at this moment]"
+                        }
+                    })),
+                    other => Json(json!(other)),
+                };
+                // dbg!(&(tx_hash, value));
+                b.push_bind(AsText(tx_hash)).push_bind(json);
             },
         )
         .build()
@@ -217,7 +236,7 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
     }
 
     query("COMMIT").execute(&mut *conn).await?;
-    // query("PRAGMA foreign_keys=ON").execute(&mut *conn).await?;
+    query("PRAGMA foreign_keys=ON").execute(&mut *conn).await?;
 
     Ok(())
 }
@@ -225,8 +244,8 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iroha_crypto::KeyPair;
-    use iroha_data_model::prelude::AccountId;
+    use crate::iroha_client_wrap::ClientWrap;
+    use iroha::crypto::KeyPair;
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::{ConnectOptions, Connection};
     use tracing_subscriber::layer::SubscriberExt;
@@ -242,10 +261,10 @@ mod tests {
         }))
         .unwrap();
 
-        let client = Client::new(
+        let client = ClientWrap::new(
             AccountId::new("wonderland".parse().unwrap(), key_pair.public_key().clone()),
             key_pair,
-            "http://localhost:8080".parse().unwrap(),
+            "http://fujiwara.sora.org/v5/".parse().unwrap(),
         );
 
         tracing_subscriber::registry()
@@ -257,7 +276,8 @@ mod tests {
             .init();
 
         let mut conn = SqliteConnectOptions::new()
-            .filename("./sandbox.sqlite")
+            .in_memory(true)
+            // .filename("./sandbox.sqlite")
             .connect()
             .await
             .unwrap();

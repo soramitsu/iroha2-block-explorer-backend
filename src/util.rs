@@ -50,7 +50,7 @@ impl DirectPagination {
     }
 }
 
-impl From<DirectPagination> for iroha_data_model::query::parameters::Pagination {
+impl From<DirectPagination> for iroha::data_model::query::parameters::Pagination {
     fn from(value: DirectPagination) -> Self {
         range_into_iroha_pagination(value.range())
     }
@@ -145,7 +145,7 @@ impl ReversePagination {
     }
 }
 
-impl From<ReversePagination> for iroha_data_model::query::parameters::Pagination {
+impl From<ReversePagination> for iroha::data_model::query::parameters::Pagination {
     fn from(value: ReversePagination) -> Self {
         range_into_iroha_pagination(value.range())
     }
@@ -159,8 +159,8 @@ pub enum ReversePaginationError {
 
 fn range_into_iroha_pagination(
     range: Range<Int>,
-) -> iroha_data_model::query::parameters::Pagination {
-    iroha_data_model::query::parameters::Pagination::new(
+) -> iroha::data_model::query::parameters::Pagination {
+    iroha::data_model::query::parameters::Pagination::new(
         NonZero::new(range.end - range.start),
         range.start,
     )

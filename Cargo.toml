@@ -4,9 +4,9 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "7473d0453d752311317f29f9dda20eff22d99bb1" }
-iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "7473d0453d752311317f29f9dda20eff22d99bb1" }
-iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "7473d0453d752311317f29f9dda20eff22d99bb1" }
+# FIXME: `iroha` must expose `Status` struct
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", tag = "v2.0.0-rc.1.0" }
+iroha = { git = "https://github.com/hyperledger/iroha.git", tag = "v2.0.0-rc.1.0" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
@@ -22,7 +22,7 @@ parity-scale-codec = "3.2.1"
 thiserror = "1.0"
 url = "2.4.0"
 axum = { version = "0.7.5", features = ["http2", "macros"] }
-tokio = { version = "1.40.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.40.0", features = ["macros", "rt"] }
 reqwest = "0.12.5"
 tower-http = { version = "0.5.2", features = ["trace"] }
 utoipa = { version = "4.2.3", features = ["axum_extras"] }

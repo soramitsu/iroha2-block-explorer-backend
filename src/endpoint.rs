@@ -7,11 +7,13 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use iroha_data_model::{query::error::QueryExecutionFail, ValidationFail};
+use eyre::Context;
+use iroha::data_model::{query::error::QueryExecutionFail, ValidationFail};
 use serde::Deserialize;
+use tokio::task::spawn_blocking;
 use utoipa::IntoParams;
 
-use crate::iroha::{Client, Error as IrohaError};
+use crate::iroha_client_wrap::ClientWrap;
 use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
 use crate::{
     repo::{self, Repo},
@@ -20,34 +22,36 @@ use crate::{
 
 #[derive(Clone)]
 pub struct AppState {
-    iroha: Arc<Client>,
+    iroha: Arc<ClientWrap>,
     repo: Repo,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
     #[error("failed to perform Iroha query: {0}")]
-    IrohaClientError(#[from] crate::iroha::Error),
+    IrohaQueryError(#[from] iroha::client::QueryError),
     // #[error("not found")]
     // NotFound,
     // #[error("invalid pagination: {0}")]
     // BadPage(#[from] ReversePaginationError),
     #[error("database-related error: {0}")]
     Repo(#[from] repo::Error),
+    #[error("{0}")]
+    Other(#[from] eyre::Report),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            AppError::IrohaClientError(IrohaError::QueryValidationFail {
-                reason: ValidationFail::QueryFailed(QueryExecutionFail::Find(error)),
-            }) => (
+            AppError::IrohaQueryError(iroha::client::QueryError::Validation(
+                ValidationFail::QueryFailed(QueryExecutionFail::Find(error)),
+            )) => (
                 StatusCode::NOT_FOUND,
                 format!("Iroha couldn't find requested resource: {error}"),
             )
                 .into_response(),
-            AppError::IrohaClientError(err) => {
-                tracing::error!(%err, "iroha client error");
+            AppError::IrohaQueryError(err) => {
+                tracing::error!(%err, "iroha query error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
             // AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
@@ -59,6 +63,11 @@ impl IntoResponse for AppError {
             }
             AppError::Repo(repo::Error::Sqlx(err)) => {
                 tracing::error!(%err, "sqlx error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
+            }
+            AppError::Other(report) => {
+                tracing::error!(%report, "other error");
+
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
         }
@@ -398,24 +407,27 @@ async fn instructions_index(
     path = "/api/v1/status",
     responses(
         (status = 200, body = schema::Status, example = json!({
-      "peers": 0,
-      "blocks": 31,
-      "txs_accepted": 74,
-      "txs_rejected": 35,
-      "view_changes": 0,
-      "queue_size": 0,
-      "uptime": {
-        "ms": 1_134_142_427
-      }
+          "peers": 0,
+          "blocks": 31,
+          "txs_accepted": 74,
+          "txs_rejected": 35,
+          "view_changes": 0,
+          "queue_size": 0,
+          "uptime": {
+            "ms": 1_134_142_427
+          }
         }))
     )
 )]
 pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::Status>, AppError> {
-    let status = state.iroha.status().await?;
+    let client = state.iroha.clone();
+    let status = spawn_blocking(move || client.get_status())
+        .await
+        .wrap_err("failed to join task")??;
     Ok(Json(status.into()))
 }
 
-pub fn router(iroha: Client, repo: Repo) -> Router {
+pub fn router(iroha: ClientWrap, repo: Repo) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/:id", get(domains_show))
