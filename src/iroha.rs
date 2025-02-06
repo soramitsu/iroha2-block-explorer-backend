@@ -92,7 +92,7 @@ impl Client {
     pub async fn status(&self) -> Result<Status, Error> {
         let response = self
             .http
-            .get(self.torii_url.join("/status").unwrap())
+            .get(join_torii_url(&self.torii_url, "/status").unwrap())
             .header(reqwest::header::ACCEPT, "application/x-parity-scale")
             .send()
             .await?;
@@ -118,7 +118,7 @@ impl Client {
 
         let response = self
             .http
-            .post(self.torii_url.join("/query").unwrap())
+            .post(join_torii_url(&self.torii_url, "/query").unwrap())
             .body(signed.encode())
             .send()
             .await?;
@@ -221,5 +221,44 @@ where
         let mut items = all.into_iter();
         let one = items.next();
         Ok(one)
+    }
+}
+
+fn join_torii_url(base: &Url, path: &str) -> Result<Url, url::ParseError> {
+    let path = path.strip_prefix("/").unwrap_or(path);
+    if base.path().ends_with("/") {
+        base.join(path)
+    } else {
+        let last_component = base
+            .path_segments()
+            .expect("Torii URL must be a base URL")
+            .last()
+            .unwrap_or("");
+        base.join(&format!("{last_component}/{path}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_urls() -> Result<(), url::ParseError> {
+        let url = join_torii_url(&Url::parse("http://alice.com")?, "/status")?;
+        assert_eq!(url.as_str(), "http://alice.com/status");
+
+        let url = join_torii_url(&Url::parse("http://alice.com/")?, "/status")?;
+        assert_eq!(url.as_str(), "http://alice.com/status");
+
+        let url = join_torii_url(&Url::parse("http://alice.com/v1")?, "/status")?;
+        assert_eq!(url.as_str(), "http://alice.com/v1/status");
+
+        let url = join_torii_url(&Url::parse("http://alice.com/v1")?, "status")?;
+        assert_eq!(url.as_str(), "http://alice.com/v1/status");
+
+        let url = join_torii_url(&Url::parse("http://alice.com/v1/")?, "/status")?;
+        assert_eq!(url.as_str(), "http://alice.com/v1/status");
+
+        Ok(())
     }
 }
