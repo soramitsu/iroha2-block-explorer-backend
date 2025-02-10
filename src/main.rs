@@ -11,6 +11,7 @@ mod util;
 
 use crate::iroha_client_wrap::ClientWrap;
 use crate::repo::Repo;
+use axum::routing::get;
 use axum::{
     extract::{MatchedPath, Request},
     Router,
@@ -144,7 +145,8 @@ async fn serve(client: ClientWrap, port: u16) {
 
     // TODO: handle endpoint panics
     let app = Router::new()
-        .merge(Scalar::with_url("/scalar", ApiDoc::openapi()))
+        .merge(Scalar::with_url("/api/docs", ApiDoc::openapi()))
+        .route("/api/health", get(|| async { "healthy" }))
         .nest("/api/v1", endpoint::router(client.clone(), repo.clone()))
         .layer(
             TraceLayer::new_for_http()

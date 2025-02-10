@@ -47,4 +47,10 @@ iroha_explorer serve --port 4123
 iroha_explorer scan ./scanned.sqlite
 ```
 
-With the running server, open `/scalar` path (e.g. `http://localhost:4123/scalar`) for API documentation.
+With the running server, open `/api/docs` path (e.g. `http://localhost:4123/api/docs`) for API documentation.
+
+### Health check
+
+```shell
+test "$(curl -fsSL localhost:4000/api/health)" = "healthy" && echo OK || echo FAIL
+```
