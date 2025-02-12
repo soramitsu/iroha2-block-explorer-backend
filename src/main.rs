@@ -166,7 +166,7 @@ async fn serve(client: ClientWrap, port: u16) {
                 .on_failure(()),
         );
 
-    let listener = tokio::net::TcpListener::bind(("localhost", port))
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
