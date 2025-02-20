@@ -22,6 +22,7 @@ use iroha::crypto::{KeyPair, PrivateKey};
 use iroha::data_model::account::AccountId;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
@@ -61,6 +62,9 @@ pub enum Subcommand {
         /// Port to run the server on
         #[clap(short, long, default_value = "4000", env)]
         port: u16,
+        /// IP to run the server on
+        #[clap(long, default_value = "127.0.0.1", env = "IROHA_EXPLORER_IP")]
+        ip: IpAddr,
     },
 }
 
@@ -135,12 +139,12 @@ async fn main() {
     let iroha_client = ClientWrap::new(args.account, key_pair, args.torii_url);
 
     match args.command {
-        Subcommand::Serve { port } => serve(iroha_client, port).await,
+        Subcommand::Serve { port, ip } => serve(iroha_client, port, ip).await,
         Subcommand::Scan { out_file } => scan(iroha_client, out_file).await.unwrap(),
     }
 }
 
-async fn serve(client: ClientWrap, port: u16) {
+async fn serve(client: ClientWrap, port: u16, ip: IpAddr) {
     let repo = Repo::new(None);
 
     // TODO: handle endpoint panics
@@ -168,9 +172,7 @@ async fn serve(client: ClientWrap, port: u16) {
                 .on_failure(()),
         );
 
-    let listener = tokio::net::TcpListener::bind(("localhost", port))
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind((ip, port)).await.unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
 
     let mut set = JoinSet::<()>::new();
