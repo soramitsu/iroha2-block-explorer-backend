@@ -1,61 +1,36 @@
 [package]
-name = "iroha2_explorer_web"
-version = "0.1.0"
+name = "iroha_explorer"
+version = "0.2.0"
 edition = "2021"
 
-[workspace]
-members = [".", "tools/genesis-gen"]
+[dependencies]
+# FIXME: `iroha` must expose `Status` struct
+iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", tag = "v2.0.0-rc.1.0" }
+iroha = { git = "https://github.com/hyperledger/iroha.git", tag = "v2.0.0-rc.1.0" }
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[workspace.dependencies]
-# Iroha_dev Version: RC_16 
-iroha_client = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
-iroha_data_model = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
-iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
-iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
-iroha_core = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
-iroha_config = { git = "https://github.com/hyperledger/iroha.git", rev = "37ba88c2d920b112bfb2ac0d7eb283086c53a8c4" }
+tracing = "0.1.32"
+tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 color-eyre = "0.5"
 serde = "1.0"
 serde_json = "1.0"
-clap = { version = "3.1.12", features = ["derive", "env"] }
-rand = { version = "0.8.5" }
-faker_rand = { version = "0.1" }
-
-[dependencies]
-actix = "0.13.0"
-actix-web = { version = "4.0.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies"] }
-awc = { version = "=3.0.0", default-features = false, features = ["compress-brotli", "compress-gzip", "cookies"] }
-actix-server = "2.1.1"
-tracing = "0.1.32"
-tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
-tracing-log = "0.1.2"
-tracing-actix-web = "0.5.1"
-iroha_client = { workspace = true }
-iroha_data_model = { workspace = true }
-iroha_crypto = { workspace = true }
-iroha_telemetry = { workspace = true }
-iroha_core = { workspace = true }
-iroha_config = { workspace = true }
-futures = "0.3.21"
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3.30"
 http = "0.2.6"
 chrono = { version = "0.4.19", features = ["serde"] }
 hex = "0.4.3"
 parity-scale-codec = "3.2.1"
 thiserror = "1.0"
-rand = { workspace = true, optional = true }
-faker_rand = { workspace = true, optional = true }
-clap = { workspace = true, features = ["derive", "env"] }
-serde = { workspace = true }
-color-eyre = { workspace = true }
-serde_json = { workspace = true }
 url = "2.4.0"
+axum = { version = "0.7.5", features = ["http2", "macros"] }
+tokio = { version = "1.40.0", features = ["macros", "rt"] }
+reqwest = "0.12.5"
+tower-http = { version = "0.5.2", features = ["trace"] }
+utoipa = { version = "4.2.3", features = ["axum_extras"] }
+utoipa-scalar = { version = "0.1.0", features = ["axum"] }
+nonzero_ext = "0.3.0"
+serde_with = "3.9.0"
+sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
+eyre = "0.6.12"
 
-[features]
-default = ["dev_actor"]
-# Enables an actor that fills Iroha with different data. For dev purposes
-dev_actor = ["dep:rand", "dep:faker_rand"]
-
-[profile.dev.package.backtrace]
-# to optimize color-eyre
-opt-level = 3
+[dev-dependencies]
+expect-test = "1.5.0"

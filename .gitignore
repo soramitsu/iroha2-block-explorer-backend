@@ -1,6 +1,3 @@
 /target
-
-# the folder with dev binaries, configs etc
-/dev_artifacts
-/.idea/
-
+/.idea
+/.vscode

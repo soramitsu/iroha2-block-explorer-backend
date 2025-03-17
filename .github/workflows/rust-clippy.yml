@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+
+jobs:
+  fmt_clippy_tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    # v4.1.1
+    - name: Checkout repository
+      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
+
+    # v2.7.3
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84
+      with:
+        cache-provider: "buildjet"
+
+    # v2.44.30
+    - name: Install clippy-sarif
+      uses: taiki-e/install-action@f06446b5f0cca77ab90b7b2ad3b01677f1d09ee9
+      with:
+        tool: clippy-sarif, sarif-fmt
+
+    - name: Check code formatting
+      if: always()
+      run: cargo fmt -- --check
+
+    - name: Run Clippy (Lints for tests)
+      if: always()
+      run: cargo clippy --tests --message-format=json -- -D warnings | clippy-sarif | tee results.sarif | sarif-fmt
+
+    - name: Run Tests
+      if: always()
+      run: cargo test
+
+    # v3.26.11
+    - name: Upload SARIF file
+      if: always()
+      uses: github/codeql-action/upload-sarif@cf5b0a9041d3c1d336516f1944c96d96598193cc
+      with:
+        sarif_file: results.sarif
+        wait-for-processing: true
