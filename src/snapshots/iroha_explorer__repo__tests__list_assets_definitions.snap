@@ -18,33 +18,29 @@ Page {
         ),
     },
     items: [
-        Nft {
-            id: NftId(
+        AssetDefinition {
+            id: AssetDefinitionId(
                 AsText(
-                    snowflake$wonderland,
+                    rose#wonderland,
                 ),
             ),
             owned_by: AccountId(
                 AsText(
-                    ed0120CA92F6B66EB49188C40CE3B4A916687B260518F57C467C2961516F46DE3B537D@looking_glass,
+                    ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland,
                 ),
             ),
-            content: Metadata(
+            logo: None,
+            metadata: Metadata(
                 Some(
                     Json(
                         Metadata(
-                            {
-                                "another-rather-unique-metadata-set-later": Json(
-                                    "[5,1,2,3,4]",
-                                ),
-                                "what-am-i": Json(
-                                    "\"an nft, unique as a snowflake\"",
-                                ),
-                            },
+                            {},
                         ),
                     ),
                 ),
             ),
+            mintable: Infinitely,
+            assets: 2,
         },
     ],
 }

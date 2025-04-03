@@ -259,7 +259,7 @@ mod tests {
     /// - Running one of the Docker Compose configs from Iroha repo, e.g.:
     ///
     /// ```sh
-    /// docker-compose -f defaults/docker-compose.local.yml up
+    /// docker-compose -f defaults/docker-compose.local.yml up --force-recreate
     /// ```
     ///
     /// When run, it fills Iroha with data, scans into an SQLite database, saves it into `test_dump_db.sqlite`,
@@ -323,12 +323,7 @@ mod tests {
     }
 
     async fn redact_wasm_blobs(conn: &mut SqliteConnection) -> Result<()> {
-        sqlx::query(
-            r#"update instructions \
-                   set value = '{"Upgrade":"MHgwMDk5MjI="}' \
-                   from json_each(instructions.value) \
-                   where json_each.key = 'Upgrade'"#,
-        )
+        sqlx::query(r#"update instructions set value = '{"Upgrade":"MHgwMDk5MjI="}' from json_each(instructions.value) where json_each.key = 'Upgrade'"#)
         .execute(conn)
         .await?;
 
@@ -357,9 +352,9 @@ mod tests {
     /// - **All kinds of instructions**
     /// - Metadata for most of the entities
     fn fill_iroha(client: &Client) -> Result<()> {
-        let acc1_key = KeyPair::random();
+        let acc1_key = KeyPair::from_seed(vec![0, 4, 1, 2, 5, 2, 5, 2, 1, 2], <_>::default());
         let acc1 = AccountId::new("wonderland".parse()?, acc1_key.public_key().clone());
-        let acc2_key = KeyPair::random();
+        let acc2_key = KeyPair::from_seed(vec![0, 111, 222, 41, 1, 2], <_>::default());
         let acc2 = AccountId::new("looking_glass".parse()?, acc2_key.public_key().clone());
 
         client.submit_blocking(Register::domain(

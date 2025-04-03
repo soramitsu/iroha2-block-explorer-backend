@@ -651,7 +651,6 @@ select format('%s#%s', name, domain)                                            
        logo,
        metadata,
        mintable,
-       type,
        count(assets.definition_name)                                                            as assets
 from asset_definitions
          left join assets on asset_definitions.name = assets.definition_name and
@@ -1038,6 +1037,31 @@ mod tests {
                 pagination: default_pagination(),
                 owned_by: None,
                 definition: None,
+            })
+            .await
+            .unwrap();
+
+        assert_debug_snapshot!(data);
+    }
+
+    #[tokio::test]
+    async fn find_an_asset() {
+        let repo = test_repo().await;
+
+        let data = repo.find_asset("rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland".parse().unwrap()).await.unwrap();
+
+        assert_debug_snapshot!(data);
+    }
+
+    #[tokio::test]
+    async fn list_assets_definitions() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_assets_definitions(ListAssetDefinitionParams {
+                pagination: default_pagination(),
+                owned_by: None,
+                domain: Some("wonderland".parse().unwrap()),
             })
             .await
             .unwrap();

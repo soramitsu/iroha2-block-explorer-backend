@@ -273,10 +273,81 @@ async fn scan(args: ScanArgs) -> eyre::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::StatusCode;
+    use std::time::Duration;
+    use tokio::spawn;
 
     #[test]
     fn cli() {
         use clap::CommandFactory;
         Args::command().debug_assert();
+    }
+
+    #[tokio::test]
+    async fn serve_test_ok() -> eyre::Result<()> {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+
+        spawn(serve_test(ServeBaseArgs {
+            ip: "127.0.0.1".parse()?,
+            port: 9928,
+        }));
+        let path = |fragment: &str| format!("http://127.0.0.1:9928{fragment}");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+
+        let client = reqwest::Client::builder().build()?;
+
+        let health = client.get(path("/api/health")).send().await?.text().await?;
+        assert_eq!(health, "healthy");
+
+        ensure_status(&client, path("/api/docs"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/blocks"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/blocks/1"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/transactions"), StatusCode::OK).await;
+        ensure_status(
+            &client,
+            path("/api/v1/transactions/bad_hash"),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        ensure_status(&client, path("/api/v1/instructions"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/domains"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/domains/genesis"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/accounts"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/accounts/ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/assets"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/assets/rose%23%23ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/nfts"), StatusCode::OK).await;
+        ensure_status(
+            &client,
+            path("/api/v1/nfts/snowflake$wonderland"),
+            StatusCode::OK,
+        )
+        .await;
+        ensure_status(&client, path("/api/v1/assets-definitions"), StatusCode::OK).await;
+        ensure_status(
+            &client,
+            path("/api/v1/assets-definitions/cabbage%23garden_of_live_flowers"),
+            StatusCode::OK,
+        )
+        .await;
+        ensure_status(&client, path("/api/v1/status"), StatusCode::NOT_IMPLEMENTED).await;
+
+        Ok(())
+    }
+
+    async fn ensure_status(
+        client: &reqwest::Client,
+        url: impl reqwest::IntoUrl,
+        status: StatusCode,
+    ) {
+        let url = url.into_url().unwrap();
+        let resp = client.get(url.clone()).send().await.unwrap();
+        assert_eq!(resp.status(), status, "unexpected status for GET {url}");
     }
 }

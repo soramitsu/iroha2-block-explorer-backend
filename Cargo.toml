@@ -32,5 +32,6 @@ insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
 iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "22d84e7ba64df81c63b2006ced467f6be5752833", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
+reqwest = { version = "0.12.15", features = ["json"] }
 
 

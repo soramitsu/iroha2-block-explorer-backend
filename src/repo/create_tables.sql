@@ -118,7 +118,8 @@ from instructions,
          join v_transactions as txs on txs.hash = instructions.transaction_hash;
 
 create view if not exists v_assets as
-select case assets.definition_domain = assets.owned_by_domain
+select *,
+       case assets.definition_domain = assets.owned_by_domain
            when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
            else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
                        assets.owned_by_domain) end as id,
