@@ -274,8 +274,10 @@ async fn scan(args: ScanArgs) -> eyre::Result<()> {
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+    use std::net::SocketAddr;
     use std::time::Duration;
     use tokio::spawn;
+    use tokio::time::timeout;
 
     #[test]
     fn cli() {
@@ -285,20 +287,25 @@ mod tests {
 
     #[tokio::test]
     async fn serve_test_ok() -> eyre::Result<()> {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
-            )
-            .with(tracing_subscriber::fmt::layer())
-            .init();
+        // Uncomment for troubleshooting
+        // tracing_subscriber::registry()
+        //     .with(
+        //         tracing_subscriber::EnvFilter::try_from_default_env()
+        //             .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
+        //     )
+        //     .with(tracing_subscriber::fmt::layer())
+        //     .init();
 
         spawn(serve_test(ServeBaseArgs {
             ip: "127.0.0.1".parse()?,
             port: 9928,
         }));
         let path = |fragment: &str| format!("http://127.0.0.1:9928{fragment}");
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        timeout(
+            Duration::from_secs(1),
+            wait_addr_bind("127.0.0.1:9928".parse()?),
+        )
+        .await?;
 
         let client = reqwest::Client::builder().build()?;
 
@@ -339,6 +346,12 @@ mod tests {
         ensure_status(&client, path("/api/v1/status"), StatusCode::NOT_IMPLEMENTED).await;
 
         Ok(())
+    }
+
+    async fn wait_addr_bind(addr: SocketAddr) {
+        while let Err(_) = tokio::net::TcpStream::connect(addr).await {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+        }
     }
 
     async fn ensure_status(
