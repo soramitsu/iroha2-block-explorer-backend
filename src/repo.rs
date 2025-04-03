@@ -24,12 +24,49 @@ pub enum Error {
     Pagination(#[from] ReversePaginationError),
 }
 
-type Result<T> = core::result::Result<T, Error>;
+type Result<T, E = Error> = core::result::Result<T, E>;
 
 #[derive(Debug, Clone)]
 pub struct Repo {
     conn: Arc<Mutex<Option<SqliteConnection>>>,
     available: Arc<Notify>,
+}
+
+enum ParsePagination<P, T> {
+    NonEmpty(P),
+    Empty(Page<T>),
+}
+
+use ParsePagination::*;
+
+impl<T> ParsePagination<DirectPagination, T> {
+    fn direct(total: u64, query: PaginationQueryParams) -> Self {
+        match NonZero::new(total) {
+            Some(total) => NonEmpty(DirectPagination::new(
+                query
+                    .page
+                    .unwrap_or(crate::schema::PositiveInteger(nonzero!(1u64)))
+                    .into(),
+                query.per_page.into(),
+                total,
+            )),
+            None => Empty(Page::empty(query.per_page)),
+        }
+    }
+}
+
+impl<T> ParsePagination<ReversePagination, T> {
+    fn reverse(total: u64, query: PaginationQueryParams) -> Result<Self, ReversePaginationError> {
+        let res = match NonZero::new(total) {
+            Some(total) => NonEmpty(ReversePagination::new(
+                total,
+                query.per_page.into(),
+                query.page.map(From::from),
+            )?),
+            None => Empty(Page::empty(query.per_page)),
+        };
+        Ok(res)
+    }
 }
 
 impl Repo {
@@ -56,10 +93,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = ReversePagination::new(total, pagination.per_page, pagination.page)?;
         let blocks = QueryBuilder::new("")
             .push_custom(SelectBlocks {
                 with_where: PushDisplay("true"),
@@ -108,11 +145,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, params.pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination =
-            ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
         let txs = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
@@ -158,11 +194,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, params.pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination =
-            ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectInstructions { params: &params })
@@ -186,14 +221,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(page) => return Ok(page),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
 
         let res = QueryBuilder::new("with grouped as (")
             .push_custom(SelectDomains {
@@ -233,14 +264,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
 
         let res = QueryBuilder::new("with grouped as (")
             .push_custom(SelectAccounts {
@@ -287,14 +314,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectAssetsDefinitions {
                 with_where: &params,
@@ -336,14 +359,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectAssets {
                 with_where: &params,
@@ -387,14 +406,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectNfts {
                 with_where: &params,
@@ -836,7 +851,7 @@ mod tests {
     fn default_pagination() -> PaginationQueryParams {
         PaginationQueryParams {
             page: None,
-            per_page: nonzero!(10u64),
+            per_page: nonzero!(10u64).into(),
         }
     }
 
@@ -848,7 +863,7 @@ mod tests {
             .list_transactions(ListTransactionsParams {
                 pagination: PaginationQueryParams {
                     page: None,
-                    per_page: nonzero!(5u64),
+                    per_page: nonzero!(5u64).into(),
                 },
                 block: None,
                 authority: None,
@@ -860,7 +875,7 @@ mod tests {
         assert_debug_snapshot!(txs.pagination);
         assert_eq!(
             txs.items.len(),
-            txs.pagination.per_page.0 as usize + txs.pagination.total_items.0 as usize % 5
+            txs.pagination.per_page.0.get() as usize + txs.pagination.total_items as usize % 5
         );
     }
 
@@ -878,9 +893,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(txs.pagination.page.0, 1);
-        assert_eq!(txs.pagination.total_pages.0, 1);
-        assert_eq!(txs.pagination.total_items.0, 4);
+        assert_eq!(txs.pagination.page.get(), 1);
+        assert_eq!(txs.pagination.total_pages, 1);
+        assert_eq!(txs.pagination.total_items, 4);
         assert_eq!(txs.items.len(), 4);
     }
 
@@ -898,7 +913,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 4);
+        assert_eq!(data.pagination.total_items, 4);
         assert!(data
             .items
             .iter()
@@ -914,7 +929,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 14);
+        assert_eq!(data.pagination.total_items, 14);
         assert!(data
             .items
             .iter()
@@ -937,9 +952,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.page.0, 1);
-        assert_eq!(data.pagination.total_pages.0, 1);
-        assert_eq!(data.pagination.total_items.0, 3);
+        assert_eq!(data.pagination.page.get(), 1);
+        assert_eq!(data.pagination.total_pages, 1);
+        assert_eq!(data.pagination.total_items, 3);
         assert_eq!(data.items.len(), 3);
         assert!(data
             .items
@@ -968,7 +983,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(data.items.len(), 11);
-        assert_eq!(data.pagination.total_pages.0, 2);
+        assert_eq!(data.pagination.total_pages, 2);
         assert!(data
             .items
             .iter()

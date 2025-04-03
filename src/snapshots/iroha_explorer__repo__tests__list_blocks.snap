@@ -3,16 +3,12 @@ source: src/repo.rs
 expression: data.pagination
 ---
 Pagination {
-    page: BigInt(
+    page: PositiveInteger(
         2,
     ),
-    per_page: BigInt(
+    per_page: PositiveInteger(
         10,
     ),
-    total_pages: BigInt(
-        2,
-    ),
-    total_items: BigInt(
-        15,
-    ),
+    total_pages: 2,
+    total_items: 15,
 }

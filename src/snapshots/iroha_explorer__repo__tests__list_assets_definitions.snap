@@ -4,18 +4,14 @@ expression: data
 ---
 Page {
     pagination: Pagination {
-        page: BigInt(
+        page: PositiveInteger(
             1,
         ),
-        per_page: BigInt(
+        per_page: PositiveInteger(
             10,
         ),
-        total_pages: BigInt(
-            1,
-        ),
-        total_items: BigInt(
-            1,
-        ),
+        total_pages: 1,
+        total_items: 1,
     },
     items: [
         AssetDefinition {

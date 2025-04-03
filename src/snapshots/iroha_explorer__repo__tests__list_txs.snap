@@ -3,16 +3,12 @@ source: src/repo.rs
 expression: txs.pagination
 ---
 Pagination {
-    page: BigInt(
+    page: PositiveInteger(
         4,
     ),
-    per_page: BigInt(
+    per_page: PositiveInteger(
         5,
     ),
-    total_pages: BigInt(
-        4,
-    ),
-    total_items: BigInt(
-        18,
-    ),
+    total_pages: 4,
+    total_items: 18,
 }

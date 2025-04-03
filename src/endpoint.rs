@@ -9,7 +9,7 @@ use eyre::Context;
 use iroha::data_model::{query::error::QueryExecutionFail, ValidationFail};
 use serde::Deserialize;
 use tokio::task::spawn_blocking;
-use utoipa::IntoParams;
+use utoipa::{IntoParams, OpenApi};
 
 use crate::iroha_client_wrap::ClientWrap;
 use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
@@ -28,10 +28,6 @@ pub struct AppState {
 pub enum AppError {
     #[error("failed to perform Iroha query: {0}")]
     IrohaQueryError(#[from] iroha::client::QueryError),
-    // #[error("not found")]
-    // NotFound,
-    // #[error("invalid pagination: {0}")]
-    // BadPage(#[from] ReversePaginationError),
     #[error("database-related error: {0}")]
     Repo(#[from] repo::Error),
     #[error("{0}")]
@@ -89,9 +85,9 @@ struct DomainsIndexFilter {
 /// List domains
 #[utoipa::path(
     get,
-    path = "/api/v1/domains",
+    path = "/domains",
     responses(
-        (status = 200, description = "OK", body = schema::DomainsPage)
+        (status = 200, description = "OK", body = Page<schema::Domain>)
     ),
     params(schema::PaginationQueryParams, DomainsIndexFilter)
 )]
@@ -113,7 +109,7 @@ async fn domains_index(
 }
 
 /// Find a domain
-#[utoipa::path(get, path = "/api/v1/domains/{id}", responses(
+#[utoipa::path(get, path = "/domains/{id}", responses(
     (status = 200, description = "Domain Found", body = schema::Domain),
     (status = 404, description = "Domain Not Found")
 ), params(("id" = schema::DomainId, description = "Domain ID", example = "genesis")))]
@@ -129,7 +125,7 @@ async fn domains_show(
 // TODO: describe page number
 #[utoipa::path(
     get,
-    path = "/api/v1/blocks",
+    path = "/blocks",
     responses(
         (status = 200, description = "OK", body = [schema::Block]),
     ),
@@ -150,7 +146,7 @@ async fn blocks_index(
 /// Find a block by its hash/height
 #[utoipa::path(
     get,
-    path = "/api/v1/blocks/{height_or_hash}",
+    path = "/blocks/{height_or_hash}",
     params(
         ("height_or_hash", description = "Height or hash of the block", example = "12")
     ),
@@ -187,10 +183,10 @@ struct TransactionsIndexFilter {
 /// List transactions
 #[utoipa::path(
     get,
-    path = "/api/v1/transactions",
+    path = "/transactions",
     params(schema::PaginationQueryParams, TransactionsIndexFilter),
     responses(
-        (status = 200, description = "OK", body = [schema::Transaction])
+        (status = 200, description = "OK", body = Page<schema::TransactionBase>)
     )
 )]
 async fn transactions_index(
@@ -212,10 +208,10 @@ async fn transactions_index(
 }
 
 /// Find a transaction by its hash
-#[utoipa::path(get, path = "/api/v1/transactions/{hash}", params(
+#[utoipa::path(get, path = "/transactions/{hash}", params(
     ("hash" = schema::Hash, description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
 ), responses(
-    (status = 200, description = "Transaction Found", body = schema::TransactionWithHash),
+    (status = 200, description = "Transaction Found", body = schema::TransactionDetailed),
     (status = 404, description = "Transaction Not Found")
 ))]
 async fn transactions_show(
@@ -237,7 +233,7 @@ struct AccountsIndexFilter {
 /// List accounts
 #[utoipa::path(
     get,
-    path = "/api/v1/accounts",
+    path = "/accounts",
     params(schema::PaginationQueryParams, AccountsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Account])
@@ -261,7 +257,7 @@ async fn accounts_index(
 }
 
 /// Find an account
-#[utoipa::path(get, path = "/api/v1/accounts/{id}", responses(
+#[utoipa::path(get, path = "/accounts/{id}", responses(
     (status = 200, description = "Found", body = schema::Account),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AccountId, description = "Account ID")))]
@@ -283,7 +279,7 @@ struct AssetDefinitionsIndexFilter {
 /// List asset definitions
 #[utoipa::path(
     get,
-    path = "/api/v1/assets-definitions",
+    path = "/assets-definitions",
     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::AssetDefinition])
@@ -307,7 +303,7 @@ async fn assets_definitions_index(
 }
 
 /// Find an asset definition
-#[utoipa::path(get, path = "/api/v1/assets-definitions/{id}", responses(
+#[utoipa::path(get, path = "/assets-definitions/{id}", responses(
     (status = 200, description = "Found", body = schema::AssetDefinition),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
@@ -330,7 +326,7 @@ struct AssetsIndexFilter {
 /// List assets
 #[utoipa::path(
     get,
-    path = "/api/v1/assets",
+    path = "/assets",
     params(schema::PaginationQueryParams, AssetsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Asset])
@@ -354,7 +350,7 @@ async fn assets_index(
 }
 
 /// Find an asset
-#[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
+#[utoipa::path(get, path = "/assets/{id}", responses(
     (status = 200, description = "Found", body = schema::Asset),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetId, description = "Asset ID")))]
@@ -369,7 +365,7 @@ async fn assets_show(
 /// List NFTs
 #[utoipa::path(
     get,
-    path = "/api/v1/nfts",
+    path = "/nfts",
     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Nft])
@@ -393,7 +389,7 @@ async fn nfts_index(
 }
 
 /// Find an asset definition
-#[utoipa::path(get, path = "/api/v1/nfts/{id}", responses(
+#[utoipa::path(get, path = "/nfts/{id}", responses(
     (status = 200, description = "Found", body = schema::Nft),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::NftId, description = "Asset Definition ID")))]
@@ -421,7 +417,7 @@ struct InstructionsIndexFilter {
 /// List instructions
 #[utoipa::path(
     get,
-    path = "/api/v1/instructions",
+    path = "/instructions",
     params(PaginationQueryParams, InstructionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Instruction])
@@ -473,7 +469,7 @@ impl StatusProvider {
 /// Show peer status
 #[utoipa::path(
     get,
-    path = "/api/v1/status",
+    path = "/status",
     responses(
         (status = 200, body = schema::Status, example = json!({
           "peers": 0,
@@ -496,19 +492,19 @@ pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::S
 pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
-        .route("/domains/:id", get(domains_show))
+        .route("/domains/{:id}", get(domains_show))
         .route("/accounts", get(accounts_index))
-        .route("/accounts/:id", get(accounts_show))
+        .route("/accounts/{:id}", get(accounts_show))
         .route("/assets-definitions", get(assets_definitions_index))
-        .route("/assets-definitions/:id", get(assets_definitions_show))
+        .route("/assets-definitions/{:id}", get(assets_definitions_show))
         .route("/assets", get(assets_index))
-        .route("/assets/:id", get(assets_show))
+        .route("/assets/{:id}", get(assets_show))
         .route("/nfts", get(nfts_index))
-        .route("/nfts/:id", get(nfts_show))
+        .route("/nfts/{:id}", get(nfts_show))
         .route("/blocks", get(blocks_index))
-        .route("/blocks/:height_or_hash", get(blocks_show))
+        .route("/blocks/{:height_or_hash}", get(blocks_show))
         .route("/transactions", get(transactions_index))
-        .route("/transactions/:hash", get(transactions_show))
+        .route("/transactions/{:hash}", get(transactions_show))
         .route("/instructions", get(instructions_index))
         .route("/status", get(status_show))
         .with_state(AppState {
@@ -516,3 +512,24 @@ pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
             status_provider,
         })
 }
+
+#[derive(OpenApi)]
+#[openapi(paths(
+    accounts_index,
+    accounts_show,
+    assets_index,
+    assets_show,
+    nfts_index,
+    nfts_show,
+    assets_definitions_index,
+    assets_definitions_show,
+    domains_index,
+    domains_show,
+    blocks_index,
+    blocks_show,
+    transactions_index,
+    transactions_show,
+    instructions_index,
+    status_show
+))]
+pub struct Api;

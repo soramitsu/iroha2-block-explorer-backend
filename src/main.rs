@@ -99,62 +99,12 @@ pub struct ServeArgs {
     creds: IrohaCredentialsArgs,
 }
 
-// TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
 #[derive(OpenApi)]
 #[openapi(
-    paths(
-        endpoint::accounts_index,
-        endpoint::accounts_show,
-        endpoint::assets_index,
-        endpoint::assets_show,
-        endpoint::nfts_index,
-        endpoint::nfts_show,
-        endpoint::assets_definitions_index,
-        endpoint::assets_definitions_show,
-        endpoint::domains_index,
-        endpoint::domains_show,
-        endpoint::blocks_index,
-        endpoint::blocks_show,
-        endpoint::transactions_index,
-        endpoint::transactions_show,
-        endpoint::instructions_index,
-        endpoint::status_show
-    ),
-    components(schemas(
-        schema::Domain,
-        schema::DomainId,
-        schema::Asset,
-        schema::AssetId,
-        schema::AssetDefinition,
-        schema::AssetDefinitionId,
-        schema::NftId,
-        schema::Nft,
-        schema::Mintable,
-        schema::Account,
-        schema::AccountId,
-        schema::IpfsPath,
-        schema::Metadata,
-        schema::Pagination,
-        schema::DomainsPage,
-        schema::Block,
-        schema::Executable,
-        schema::Instruction,
-        schema::TransactionStatus,
-        schema::TransactionBase,
-        schema::TransactionDetailed,
-        schema::TransactionRejectionReason,
-        schema::Status,
-        schema::Instruction,
-        schema::InstructionKind,
-        schema::TimeStamp,
-        schema::BigInt,
-        schema::Decimal,
-        schema::Hash,
-        schema::Signature,
-        schema::Duration,
-    ))
+    nest((path = "/api/v1", api = endpoint::Api)),
+    paths(health_check)
 )]
-struct ApiDoc;
+struct Api;
 
 #[tokio::main]
 async fn main() {
@@ -214,8 +164,8 @@ async fn serve_test(args: ServeBaseArgs) {
 async fn do_serve(repo: Repo, status_provider: StatusProvider, args: ServeBaseArgs) {
     // TODO: handle endpoint panics
     let app = Router::new()
-        .merge(Scalar::with_url("/api/docs", ApiDoc::openapi()))
-        .route("/api/health", get(|| async { "healthy" }))
+        .merge(Scalar::with_url("/api/docs", Api::openapi()))
+        .route("/api/health", get(health_check))
         .nest("/api/v1", endpoint::router(repo, status_provider))
         .layer(
             TraceLayer::new_for_http()
@@ -240,9 +190,15 @@ async fn do_serve(repo: Repo, status_provider: StatusProvider, args: ServeBaseAr
     let listener = tokio::net::TcpListener::bind((args.ip, args.port))
         .await
         .unwrap();
-    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    tracing::debug!("listening on http://{}", listener.local_addr().unwrap());
 
     axum::serve(listener, app).await.unwrap()
+}
+
+/// Health check
+#[utoipa::path(get, path = "/api/health")]
+async fn health_check() -> &'static str {
+    "healthy"
 }
 
 #[cfg(debug_assertions)]
