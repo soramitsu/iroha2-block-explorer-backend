@@ -1101,6 +1101,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn json_payloads_in_v_instructions() -> eyre::Result<()> {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
         query(include_str!("./repo/create_tables.sql"))

@@ -2619,6 +2619,7 @@ name = "iroha_explorer"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "base64",
  "chrono",
  "clap",
  "expect-test",
@@ -2629,6 +2630,7 @@ dependencies = [
  "iroha_crypto",
  "iroha_telemetry",
  "nonzero_ext",
+ "parity-scale-codec",
  "reqwest",
  "serde",
  "serde_json",

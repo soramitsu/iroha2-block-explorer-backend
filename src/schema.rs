@@ -1,15 +1,18 @@
+use crate::repo;
+use crate::util::{DirectPagination, ReversePagination};
+use base64::Engine;
+use chrono::Utc;
+use nonzero_ext::nonzero;
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
+use serde_with::DeserializeFromStr;
+use sqlx::prelude::FromRow;
+use std::borrow::Cow;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::str::FromStr;
-
-use crate::repo;
-use crate::util::{DirectPagination, ReversePagination};
-use chrono::Utc;
-use nonzero_ext::nonzero;
-use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
-use sqlx::prelude::FromRow;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::openapi::{RefOr, Schema};
+use utoipa::{IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
     pub use iroha::crypto::*;
@@ -213,12 +216,86 @@ impl From<repo::Metadata> for Metadata {
 #[schema(value_type = String)]
 pub struct IpfsPath(String);
 
+pub struct ScaleBinary<T>(T);
+
+impl<T> PartialSchema for ScaleBinary<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Generic container of some value, represented as a SCALE-encoded binary data in base64. \
+                 Should usually be decoded on the client side using Iroha JavaScript"
+            ))
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .into()
+    }
+}
+
+impl<T> ToSchema for ScaleBinary<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ScaleBinary")
+    }
+}
+
+impl<T> Serialize for ScaleBinary<T>
+where
+    T: parity_scale_codec::Encode,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let scale = self.0.encode();
+        let as_str = base64::prelude::BASE64_STANDARD.encode(&scale);
+        serializer.serialize_str(&as_str)
+    }
+}
+
+pub struct ReprScaleJson<T>(T);
+
+impl<T> PartialSchema for ReprScaleJson<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Generic container of some value, representing it in both JSON and SCALE",
+            ))
+            .property("scale", ScaleBinary::<T>::schema())
+            .property(
+                "json",
+                utoipa::openapi::ObjectBuilder::new()
+                    .schema_type(utoipa::openapi::schema::Type::Object)
+                    .description(Some("JSON representation of the value")),
+            )
+            .into()
+    }
+}
+
+impl<T> ToSchema for ReprScaleJson<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ReprScaleJson")
+    }
+}
+
+impl<T> Serialize for ReprScaleJson<T>
+where
+    T: parity_scale_codec::Encode + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("scale", &ScaleBinary(&self.0))?;
+        map.serialize_entry("json", &self.0)?;
+        map.end()
+    }
+}
+
 /// Big integer numeric value.
 ///
 /// Serialized as a **number** when safely fits into `f64` max safe integer
 /// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
 ///
-/// On JavaScript side is recommended to parse with `BigInt`.
+/// On the JavaScript side is recommended to parse with `BigInt`.
 #[derive(Debug, ToSchema)]
 // TODO set `value_type` to union of string and number
 #[schema(example = 42)]
@@ -442,6 +519,7 @@ pub struct TransactionDetailed {
     nonce: Option<PositiveInteger>,
     metadata: Metadata,
     time_to_live: Duration,
+    /// Corresponding type: [`TransactionRejectionReason`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/TransactionRejectionReason)
     rejection_reason: Option<TransactionRejectionReason>,
 }
 
@@ -459,7 +537,7 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
             },
             rejection_reason: value
                 .rejection_reason
-                .map(|reason| TransactionRejectionReason(reason.0)),
+                .map(|reason| TransactionRejectionReason(ReprScaleJson(reason.0))),
         }
     }
 }
@@ -467,7 +545,7 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
 /// Transaction rejection reason
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = Object)]
-pub struct TransactionRejectionReason(iroha::TransactionRejectionReason);
+pub struct TransactionRejectionReason(ReprScaleJson<iroha::TransactionRejectionReason>);
 
 /// Operations executable on-chain
 #[derive(Serialize, ToSchema)]
@@ -489,11 +567,15 @@ impl From<repo::Executable> for Executable {
 
 /// Iroha Special Instruction (ISI)
 #[derive(Serialize, ToSchema)]
+#[schema(bound = "")]
 pub struct Instruction {
-    /// Kind of instruction. TODO: add strict enumeration
+    /// Kind of instruction.
     kind: InstructionKind,
-    /// Instruction payload, some JSON. TODO: add typed output
-    payload: serde_json::Value,
+    /// `InstructionBox` enumeration as a whole.
+    ///
+    /// Corresponding type: [`InstructionBox`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/InstructionBox)
+    #[schema(schema_with = ReprScaleJson::<iroha::InstructionBox>::schema)]
+    payload: ReprScaleJson<iroha::InstructionBox>,
     transaction_hash: Hash,
     transaction_status: TransactionStatus,
     block: BigInt,
@@ -505,7 +587,7 @@ impl From<repo::Instruction> for Instruction {
     fn from(value: repo::Instruction) -> Self {
         Self {
             kind: value.kind,
-            payload: value.payload.0,
+            payload: ReprScaleJson(value.payload.0),
             transaction_hash: Hash(value.transaction_hash.0 .0),
             transaction_status: value.transaction_status,
             block: BigInt(value.block as u128),
@@ -663,8 +745,9 @@ impl From<iroha_telemetry::metrics::Status> for Status {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::iroha::KeyPair;
+    use insta::assert_json_snapshot;
     use serde_json::json;
 
     use super::*;
@@ -733,5 +816,26 @@ mod test {
 
         expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
             .assert_eq(&serde_json::to_string(&Signature(value)).unwrap());
+    }
+
+    #[test]
+    fn serialize_unified_repr_int() {
+        let value = ReprScaleJson(5);
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_str() {
+        let value = ReprScaleJson("test string");
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_iroha() {
+        let value = ReprScaleJson(Some(iroha::Log::new(
+            "INFO".parse().unwrap(),
+            "wuf".to_owned(),
+        )));
+        assert_json_snapshot!(value);
     }
 }

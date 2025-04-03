@@ -26,6 +26,8 @@ nonzero_ext = "0.3.0"
 serde_with = "3.9.0"
 sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
 eyre = "0.6.12"
+parity-scale-codec = "3.7.4"
+base64 = "0.22.1"
 
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
