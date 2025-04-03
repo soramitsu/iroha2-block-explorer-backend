@@ -1,4 +1,6 @@
-use std::{num::NonZero, str::FromStr};
+use std::num::NonZero;
+use std::ops::Deref;
+use std::str::FromStr;
 
 use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
@@ -257,38 +259,38 @@ impl Serialize for BigInt {
 )]
 pub struct Pagination {
     /// Page number, starts from 1
-    pub page: BigInt,
+    pub page: PositiveInteger,
     /// Items per page, starts from 1
-    pub per_page: BigInt,
+    pub per_page: PositiveInteger,
     /// Total number of pages. Not always available.
-    pub total_pages: BigInt,
+    pub total_pages: u64,
     /// Total number of items. Not always available.
-    pub total_items: BigInt,
+    pub total_items: u64,
 }
 
 impl Pagination {
     pub fn new(
-        page: NonZero<u64>,
-        per_page: NonZero<u64>,
+        page: PositiveInteger,
+        per_page: PositiveInteger,
         total_items: u64,
         total_pages: u64,
     ) -> Self {
         Self {
-            page: BigInt::from(page.get()),
-            per_page: BigInt::from(per_page.get()),
-            total_items: BigInt::from(total_items),
-            total_pages: BigInt::from(total_pages),
+            page,
+            per_page,
+            total_items,
+            total_pages,
         }
     }
 
-    pub fn for_empty_data(per_page: NonZero<u64>) -> Self {
+    pub fn for_empty_data(per_page: PositiveInteger) -> Self {
         Self {
             // "there is one page, it's just empty"
-            page: BigInt(1),
-            per_page: BigInt::from(per_page.get()),
+            page: PositiveInteger(nonzero!(1u64)),
+            per_page,
             // "but there are zero pages of data"
-            total_pages: BigInt(0),
-            total_items: BigInt(0),
+            total_pages: 0,
+            total_items: 0,
         }
     }
 }
@@ -296,8 +298,8 @@ impl Pagination {
 impl From<ReversePagination> for Pagination {
     fn from(value: ReversePagination) -> Self {
         Self::new(
-            value.page(),
-            value.per_page(),
+            PositiveInteger(value.page()),
+            PositiveInteger(value.per_page()),
             value.total_items().get(),
             value.total_pages().get(),
         )
@@ -307,8 +309,8 @@ impl From<ReversePagination> for Pagination {
 impl From<DirectPagination> for Pagination {
     fn from(value: DirectPagination) -> Self {
         Self::new(
-            value.page(),
-            value.per_page(),
+            PositiveInteger(value.page()),
+            PositiveInteger(value.per_page()),
             value.total_items().get(),
             value.total_pages().get(),
         )
@@ -317,7 +319,6 @@ impl From<DirectPagination> for Pagination {
 
 /// Generic paginated data container
 #[derive(Debug, Serialize, ToSchema)]
-#[aliases(DomainsPage = Page<Domain>)]
 pub struct Page<T> {
     /// Pagination info
     pub pagination: Pagination,
@@ -330,7 +331,7 @@ impl<T> Page<T> {
         Self { pagination, items }
     }
 
-    pub fn empty(per_page: NonZero<u64>) -> Self {
+    pub fn empty(per_page: PositiveInteger) -> Self {
         Self::new(vec![], Pagination::for_empty_data(per_page))
     }
 
@@ -342,22 +343,56 @@ impl<T> Page<T> {
     }
 }
 
+/// Integer greater than zero
+#[derive(ToSchema, Copy, Clone, Debug, Serialize, Deserialize)]
+#[schema(value_type = u64)]
+pub struct PositiveInteger(pub NonZero<u64>);
+
+impl Deref for PositiveInteger {
+    type Target = NonZero<u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for PositiveInteger {
+    type Err = <NonZero<u64> as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let value = NonZero::from_str(s)?;
+        Ok(Self(value))
+    }
+}
+
+impl From<PositiveInteger> for NonZero<u64> {
+    fn from(value: PositiveInteger) -> Self {
+        value.0
+    }
+}
+
+impl From<NonZero<u64>> for PositiveInteger {
+    fn from(value: NonZero<u64>) -> Self {
+        Self(value)
+    }
+}
+
 // FIXME: params details is not rendered fully, only docs
 /// Pagination query parameters
 #[derive(Deserialize, IntoParams, Clone, Copy)]
 pub struct PaginationQueryParams {
     /// Page number, optional. Different endpoints interpret value absense differently.
     #[param(example = 3, minimum = 1)]
-    pub page: Option<NonZero<u64>>,
+    pub page: Option<PositiveInteger>,
     /// Items per page
     #[param(example = 15, minimum = 1)]
     #[serde(default = "default_per_page")]
-    pub per_page: NonZero<u64>,
+    pub per_page: PositiveInteger,
 }
 
-const fn default_per_page() -> NonZero<u64> {
+const fn default_per_page() -> PositiveInteger {
     // FIXME: does it work as `const VAR = ...; VAR`?
-    const { nonzero!(10u64) }
+    PositiveInteger(const { nonzero!(10u64) })
 }
 
 /// Timestamp
@@ -404,7 +439,7 @@ pub struct TransactionDetailed {
     #[serde(flatten)]
     base: TransactionBase,
     signature: Signature,
-    nonce: Option<NonZero<u32>>,
+    nonce: Option<PositiveInteger>,
     metadata: Metadata,
     time_to_live: Duration,
     rejection_reason: Option<TransactionRejectionReason>,
@@ -415,7 +450,9 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
         Self {
             base: value.base.into(),
             signature: value.signature.into(),
-            nonce: value.nonce,
+            nonce: value.nonce.map(|int| {
+                PositiveInteger(NonZero::new(int.get() as u64).expect("it is non-zero"))
+            }),
             metadata: value.metadata.into(),
             time_to_live: Duration {
                 ms: BigInt(value.time_to_live_ms as u128),
@@ -581,7 +618,7 @@ impl From<std::time::Duration> for Duration {
 
 #[derive(DeserializeFromStr)]
 pub enum BlockHeightOrHash {
-    Height(NonZero<u64>),
+    Height(PositiveInteger),
     Hash(iroha::Hash),
 }
 
@@ -589,7 +626,7 @@ impl FromStr for BlockHeightOrHash {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(value) = s.parse::<NonZero<u64>>() {
+        if let Ok(value) = s.parse::<PositiveInteger>() {
             return Ok(Self::Height(value));
         }
         if let Ok(value) = s.parse::<iroha::Hash>() {
@@ -656,7 +693,7 @@ mod test {
         else {
             panic!("should be height")
         };
-        assert_eq!(value, nonzero!(412u64));
+        assert_eq!(value.0, nonzero!(412u64));
 
         let BlockHeightOrHash::Hash(_) = serde_json::from_value(json!(
             "3E75E5A0277C34756C2FF702963C4B9024A5E00C327CC682D9CA222EB5589DB1"
