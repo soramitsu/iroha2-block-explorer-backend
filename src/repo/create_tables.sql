@@ -3,7 +3,7 @@ create table if not exists blocks
     height            integer primary key not null,
     hash              text                not null,
     prev_block_hash   text,
-    transactions_hash text                not null,
+    transactions_hash text,
     created_at        datetime            not null
 );
 
@@ -40,10 +40,21 @@ create table if not exists asset_definitions
     logo               text,
     metadata           json,
     mintable           text check (mintable in ('Once', 'Not', 'Infinitely')) not null,
-    type               text check (type in ('Numeric', 'Store'))              not null,
     primary key (name, domain),
     foreign key (owned_by_signatory, owned_by_domain) references accounts (signatory, domain)
 );
+
+
+create table if not exists nfts
+(
+    name               text                                                   not null,
+    domain             text                                                   not null references domains (name),
+    owned_by_signatory text                                                   not null,
+    owned_by_domain    text                                                   not null,
+    content            json,
+    primary key (name, domain),
+    foreign key (owned_by_signatory, owned_by_domain) references accounts (signatory, domain)
+    );
 
 create table if not exists assets
 (
@@ -107,9 +118,17 @@ from instructions,
          join v_transactions as txs on txs.hash = instructions.transaction_hash;
 
 create view if not exists v_assets as
-select case assets.definition_domain = assets.owned_by_domain
+select *,
+       case assets.definition_domain = assets.owned_by_domain
            when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
            else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
                        assets.owned_by_domain) end as id,
        value
 from assets;
+
+create view if not exists v_nfts as
+select
+    *,
+    format('%s$%s', nfts.name, nfts.domain) as id,
+    format('%s@%s', nfts.owned_by_signatory, nfts.owned_by_domain) as owned_by
+from nfts;
