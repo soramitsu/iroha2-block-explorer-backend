@@ -273,9 +273,9 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 
 [[package]]
 name = "async-trait"
-version = "0.1.81"
+version = "0.1.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0c28dcc82d7c8ead5cb13beb15405b57b8546e93215673ff8ca0349a028107"
+checksum = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -642,44 +642,17 @@ checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
 
 [[package]]
 name = "color-eyre"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f1885697ee8a177096d42f158922251a41973117f6d8a234cee94b9509157b7"
-dependencies = [
- "backtrace",
- "color-spantrace 0.1.6",
- "eyre",
- "indenter",
- "once_cell",
- "owo-colors 1.3.0",
- "tracing-error 0.1.2",
-]
-
-[[package]]
-name = "color-eyre"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55146f5e46f237f7423d74111267d4597b59b0dad0ffaf7303bce9945d843ad5"
 dependencies = [
  "backtrace",
- "color-spantrace 0.2.1",
+ "color-spantrace",
  "eyre",
  "indenter",
  "once_cell",
- "owo-colors 3.5.0",
- "tracing-error 0.2.0",
-]
-
-[[package]]
-name = "color-spantrace"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6eee477a4a8a72f4addd4de416eb56d54bc307b284d6601bafdee1f4ea462d1"
-dependencies = [
- "once_cell",
- "owo-colors 1.3.0",
- "tracing-core",
- "tracing-error 0.1.2",
+ "owo-colors",
+ "tracing-error",
 ]
 
 [[package]]
@@ -689,9 +662,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd6be1b2a7e382e2b98b43b2adcca6bb0e465af0bdd38123873ae61eb17a72c2"
 dependencies = [
  "once_cell",
- "owo-colors 3.5.0",
+ "owo-colors",
  "tracing-core",
- "tracing-error 0.2.0",
+ "tracing-error",
 ]
 
 [[package]]
@@ -707,6 +680,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+]
+
+[[package]]
+name = "console"
+version = "0.15.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "once_cell",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -805,6 +790,27 @@ checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
 dependencies = [
  "generic-array",
  "typenum",
+]
+
+[[package]]
+name = "csv"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acdc4883a9c96732e4733212c01447ebd805833b7275a73ca3ee080fd77afdaf"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -1044,13 +1050,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "encoding_rs"
-version = "0.8.34"
+name = "encode_unicode"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b45de904aa0b010bce2ab45264d0631681847fa7b6f2eaa7dab7619943bc4f59"
-dependencies = [
- "cfg-if",
-]
+checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "equivalent"
@@ -1188,21 +1191,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "foreign-types"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
-dependencies = [
- "foreign-types-shared",
-]
-
-[[package]]
-name = "foreign-types-shared"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
-
-[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1225,7 +1213,6 @@ checksum = "645c6916888f6cb6350d2550b80fb63e734897a8498abe35cfb732b6487804b0"
 dependencies = [
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -2063,40 +2050,6 @@ dependencies = [
  "pin-project-lite",
  "smallvec",
  "tokio",
- "want",
-]
-
-[[package]]
-name = "hyper-rustls"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee4be2c948921a1a5320b629c4193916ed787a7f7f293fd3f7f5a6c9de74155"
-dependencies = [
- "futures-util",
- "http 1.1.0",
- "hyper",
- "hyper-util",
- "rustls 0.23.12",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls 0.26.0",
- "tower-service",
-]
-
-[[package]]
-name = "hyper-tls"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
-dependencies = [
- "bytes",
- "http-body-util",
- "hyper",
- "hyper-util",
- "native-tls",
- "tokio",
- "tokio-native-tls",
- "tower-service",
 ]
 
 [[package]]
@@ -2106,17 +2059,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde7055719c54e36e95e8719f95883f22072a48ede39db7fc17a4e1d5281e9b9"
 dependencies = [
  "bytes",
- "futures-channel",
  "futures-util",
  "http 1.1.0",
  "http-body",
  "hyper",
  "pin-project-lite",
- "socket2",
  "tokio",
- "tower",
- "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -2207,15 +2155,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipnet"
-version = "2.9.0"
+name = "insta"
+version = "1.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f518f335dce6725a761382244631d86cf0ccb2863413590b31338feb467f9c3"
+checksum = "50259abbaa67d11d2bcafc7ba1d094ed7a0c70e3ce893f0d0997f73558cb3084"
+dependencies = [
+ "console",
+ "csv",
+ "linked-hash-map",
+ "once_cell",
+ "pin-project",
+ "serde",
+ "similar",
+]
 
 [[package]]
 name = "iroha"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "attohttpc",
  "base64",
@@ -2252,7 +2209,7 @@ dependencies = [
 [[package]]
 name = "iroha_config"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "cfg-if",
  "derive_more",
@@ -2272,14 +2229,14 @@ dependencies = [
  "strum",
  "thiserror",
  "tracing",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
  "url",
 ]
 
 [[package]]
 name = "iroha_config_base"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "derive_more",
  "drop_bomb",
@@ -2296,7 +2253,7 @@ dependencies = [
 [[package]]
 name = "iroha_config_base_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -2309,7 +2266,7 @@ dependencies = [
 [[package]]
 name = "iroha_crypto"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "aead",
  "arrayref",
@@ -2345,7 +2302,7 @@ dependencies = [
 [[package]]
 name = "iroha_data_model"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "base64",
  "derive-where",
@@ -2370,7 +2327,7 @@ dependencies = [
 [[package]]
 name = "iroha_data_model_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -2383,7 +2340,7 @@ dependencies = [
 [[package]]
 name = "iroha_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -2396,7 +2353,7 @@ dependencies = [
 [[package]]
 name = "iroha_executor_data_model"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "derive_more",
  "iroha_data_model",
@@ -2409,7 +2366,7 @@ dependencies = [
 [[package]]
 name = "iroha_executor_data_model_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "manyhow",
  "proc-macro2",
@@ -2424,17 +2381,14 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
- "color-eyre 0.5.11",
  "expect-test",
  "eyre",
- "futures",
- "hex",
  "http 0.2.12",
+ "insta",
  "iroha",
+ "iroha_crypto",
  "iroha_telemetry",
  "nonzero_ext",
- "parity-scale-codec",
- "reqwest",
  "serde",
  "serde_json",
  "serde_with",
@@ -2443,7 +2397,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "tracing",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
  "url",
  "utoipa",
  "utoipa-scalar",
@@ -2452,7 +2406,7 @@ dependencies = [
 [[package]]
 name = "iroha_futures"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_config",
  "iroha_futures_derive",
@@ -2468,7 +2422,7 @@ dependencies = [
 [[package]]
 name = "iroha_futures_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_macro_utils",
  "manyhow",
@@ -2480,9 +2434,9 @@ dependencies = [
 [[package]]
 name = "iroha_logger"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
- "color-eyre 0.6.3",
+ "color-eyre",
  "derive_more",
  "iroha_config",
  "iroha_data_model",
@@ -2491,15 +2445,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-core",
- "tracing-error 0.2.0",
+ "tracing-error",
  "tracing-futures",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "iroha_macro"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_derive",
 ]
@@ -2507,7 +2461,7 @@ dependencies = [
 [[package]]
 name = "iroha_macro_utils"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "drop_bomb",
@@ -2520,7 +2474,7 @@ dependencies = [
 [[package]]
 name = "iroha_numeric"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -2535,7 +2489,7 @@ dependencies = [
 [[package]]
 name = "iroha_primitives"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "derive_more",
  "displaydoc",
@@ -2556,7 +2510,7 @@ dependencies = [
 [[package]]
 name = "iroha_primitives_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_numeric",
  "manyhow",
@@ -2568,7 +2522,7 @@ dependencies = [
 [[package]]
 name = "iroha_schema"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_schema_derive",
  "serde",
@@ -2577,7 +2531,7 @@ dependencies = [
 [[package]]
 name = "iroha_schema_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "iroha_macro_utils",
@@ -2590,7 +2544,7 @@ dependencies = [
 [[package]]
 name = "iroha_telemetry"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2615,7 +2569,7 @@ dependencies = [
 [[package]]
 name = "iroha_telemetry_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_macro_utils",
  "manyhow",
@@ -2627,7 +2581,7 @@ dependencies = [
 [[package]]
 name = "iroha_torii_const"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_primitives",
 ]
@@ -2635,7 +2589,7 @@ dependencies = [
 [[package]]
 name = "iroha_version"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "iroha_macro",
  "iroha_version_derive",
@@ -2648,7 +2602,7 @@ dependencies = [
 [[package]]
 name = "iroha_version_derive"
 version = "2.0.0-rc.1.0"
-source = "git+https://github.com/hyperledger/iroha.git?tag=v2.0.0-rc.1.0#13d953d0f61ab8d2f9097e34cfa1b5a5bb2ec286"
+source = "git+https://github.com/hyperledger/iroha.git?rev=22d84e7ba64df81c63b2006ced467f6be5752833#22d84e7ba64df81c63b2006ced467f6be5752833"
 dependencies = [
  "darling",
  "manyhow",
@@ -2775,6 +2729,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "linked-hash-map"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2894,23 +2854,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "native-tls"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8614eb2c83d59d1c8cc974dd3f920198647674a0a035e1af1fa58707e317466"
-dependencies = [
- "libc",
- "log",
- "openssl",
- "openssl-probe",
- "openssl-sys",
- "schannel",
- "security-framework",
- "security-framework-sys",
- "tempfile",
-]
-
-[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3019,9 +2962,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.19.0"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "opaque-debug"
@@ -3030,60 +2973,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
-name = "openssl"
-version = "0.10.66"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9529f4786b70a3e8c61e11179af17ab6188ad8d0ded78c5529441ed39d4bd9c1"
-dependencies = [
- "bitflags 2.6.0",
- "cfg-if",
- "foreign-types",
- "libc",
- "once_cell",
- "openssl-macros",
- "openssl-sys",
-]
-
-[[package]]
-name = "openssl-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.74",
-]
-
-[[package]]
 name = "openssl-probe"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
-name = "openssl-sys"
-version = "0.9.103"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9e8deee91df40a943c71b917e5874b951d32a802526c85721ce3b776c929d6"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
 name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
-
-[[package]]
-name = "owo-colors"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
 name = "owo-colors"
@@ -3476,49 +3375,6 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
-
-[[package]]
-name = "reqwest"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7d6d2a27d57148378eb5e111173f4276ad26340ecc5c49a4a2152167a2d6a37"
-dependencies = [
- "base64",
- "bytes",
- "encoding_rs",
- "futures-core",
- "futures-util",
- "h2",
- "http 1.1.0",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-tls",
- "hyper-util",
- "ipnet",
- "js-sys",
- "log",
- "mime",
- "native-tls",
- "once_cell",
- "percent-encoding",
- "pin-project-lite",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper 1.0.1",
- "system-configuration",
- "tokio",
- "tokio-native-tls",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "winreg",
-]
 
 [[package]]
 name = "rfc6979"
@@ -3930,6 +3786,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4296,27 +4158,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7065abeca94b6a8a577f9bd45aa0867a2238b74e8eb67cf10d492bc39351394"
 
 [[package]]
-name = "system-configuration"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
-dependencies = [
- "bitflags 1.3.2",
- "core-foundation",
- "system-configuration-sys",
-]
-
-[[package]]
-name = "system-configuration-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
-dependencies = [
- "core-foundation-sys",
- "libc",
-]
-
-[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4451,33 +4292,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-native-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
-dependencies = [
- "native-tls",
- "tokio",
-]
-
-[[package]]
 name = "tokio-rustls"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
 dependencies = [
  "rustls 0.22.4",
- "rustls-pki-types",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
-dependencies = [
- "rustls 0.23.12",
  "rustls-pki-types",
  "tokio",
 ]
@@ -4506,7 +4326,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.25.0",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -4648,22 +4468,12 @@ dependencies = [
 
 [[package]]
 name = "tracing-error"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4d7c0b83d4a500748fa5879461652b361edf5c9d51ede2a2ac03875ca185e24"
-dependencies = [
- "tracing",
- "tracing-subscriber 0.2.25",
-]
-
-[[package]]
-name = "tracing-error"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4699,17 +4509,6 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.2.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
-dependencies = [
- "sharded-slab",
- "thread_local",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-subscriber"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad0f048c97dbd9faa9b7df56362b8ebcaa52adb06b498c050d2f4e32f90a7a8b"
@@ -4728,12 +4527,6 @@ dependencies = [
  "tracing-log",
  "tracing-serde",
 ]
-
-[[package]]
-name = "try-lock"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstenite"
@@ -4953,15 +4746,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "want"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
-dependencies = [
- "try-lock",
-]
-
-[[package]]
 name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5000,18 +4784,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-bindgen-futures"
-version = "0.4.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61e9300f63a621e96ed275155c108eb6f843b6a26d053f122ab69724559dc8ed"
-dependencies = [
- "cfg-if",
- "js-sys",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "wasm-bindgen-macro"
 version = "0.2.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5039,16 +4811,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c62a0a307cb4a311d3a07867860911ca130c3494e8c2719593806c08bc5d0484"
-
-[[package]]
-name = "web-sys"
-version = "0.3.70"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26fdeaafd9bd129f65e7c031593c24d62186301e0c72c8978fa1678be7d532c0"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
-]
 
 [[package]]
 name = "whoami"
@@ -5082,7 +4844,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5264,16 +5026,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68a9bda4691f099d435ad181000724da8e5899daa10713c2d432552b9ccd3a6f"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "winreg"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
-dependencies = [
- "cfg-if",
- "windows-sys 0.48.0",
 ]
 
 [[package]]

@@ -3,7 +3,6 @@ use chrono::DateTime;
 use eyre::Result;
 use iroha::client::Client;
 use iroha::data_model::prelude::*;
-use serde_json::json;
 use sqlx::types::Json;
 use sqlx::{query, QueryBuilder, SqliteConnection};
 use tokio::task::spawn_blocking;
@@ -16,13 +15,14 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
 
     debug!("Fetching data from Iroha...");
     let client = client.clone();
-    let (domains, accounts, blocks, assets_definitions, assets) = spawn_blocking(move || {
+    let (domains, accounts, blocks, assets_definitions, assets, nfts) = spawn_blocking(move || {
         let domains = client.query(FindDomains).execute_all()?;
         let accounts = client.query(FindAccounts).execute_all()?;
         let blocks = client.query(FindBlocks).execute_all()?;
         let assets_definitions = client.query(FindAssetsDefinitions).execute_all()?;
         let assets = client.query(FindAssets).execute_all()?;
-        Ok::<_, eyre::Report>((domains, accounts, blocks, assets_definitions, assets))
+        let nfts = client.query(FindNfts).execute_all()?;
+        Ok::<_, eyre::Report>((domains, accounts, blocks, assets_definitions, assets, nfts))
     })
     .await??;
     debug!("Done fetching");
@@ -84,7 +84,7 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     value.header().creation_time().as_millis() as i64,
                 ))
                 .push_bind(value.header().prev_block_hash().map(AsText))
-                .push_bind(AsText(value.header().transactions_hash()));
+                .push_bind(value.header().transactions_hash().map(AsText));
         })
         .build()
         .execute(&mut *conn)
@@ -155,18 +155,7 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     .flatten()
             }),
             |mut b, (tx_hash, value)| {
-                let json = match value {
-                    // https://github.com/hyperledger-iroha/iroha/issues/5305
-                    InstructionBox::Log(log) => Json(json!({
-                        "Log": {
-                            "level": log.level(),
-                            "msg": "[Message could not be extracted at this moment]"
-                        }
-                    })),
-                    other => Json(json!(other)),
-                };
-                // dbg!(&(tx_hash, value));
-                b.push_bind(AsText(tx_hash)).push_bind(json);
+                b.push_bind(AsText(tx_hash)).push_bind(Json(value));
             },
         )
         .build()
@@ -183,8 +172,7 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
             .push("mintable")
             .push("owned_by_signatory")
             .push("owned_by_domain")
-            .push("logo")
-            .push("type");
+            .push("logo");
         b.push(") ")
             .push_values(&assets_definitions, |mut b, value| {
                 b.push_bind(AsText(value.id().name()))
@@ -197,11 +185,7 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     })
                     .push_bind(AsText(value.owned_by().signatory()))
                     .push_bind(AsText(value.owned_by().domain()))
-                    .push_bind(value.logo().as_ref().map(AsText))
-                    .push_bind(match &value.type_() {
-                        AssetType::Store => "Store",
-                        AssetType::Numeric(_) => "Numeric",
-                    });
+                    .push_bind(value.logo().as_ref().map(AsText));
             })
             .build()
             .execute(&mut *conn)
@@ -219,16 +203,28 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     .push_bind(AsText(value.id().definition().domain()))
                     .push_bind(AsText(value.id().account().signatory()))
                     .push_bind(AsText(value.id().account().domain()))
-                    .push_bind(match value.value() {
-                        AssetValue::Store(metadata) => Json(json!({
-                            "kind": "Store",
-                            "value": metadata
-                        })),
-                        AssetValue::Numeric(num) => Json(json!({
-                            "kind": "Numeric",
-                            "value": num
-                        })),
-                    });
+                    .push_bind(Json(value.value()));
+            })
+            .build()
+            .execute(&mut *conn)
+            .await?;
+    }
+    if !nfts.is_empty() {
+        debug!("Inserting NFTs...");
+        let mut b = QueryBuilder::new("insert into nfts(");
+        b.separated(", ")
+            .push("name")
+            .push("domain")
+            .push("content")
+            .push("owned_by_signatory")
+            .push("owned_by_domain");
+        b.push(") ")
+            .push_values(&nfts, |mut b, value| {
+                b.push_bind(AsText(value.id().name()))
+                    .push_bind(AsText(value.id().domain()))
+                    .push_bind(Json(value.content()))
+                    .push_bind(AsText(value.owned_by().signatory()))
+                    .push_bind(AsText(value.owned_by().domain()));
             })
             .build()
             .execute(&mut *conn)
@@ -246,26 +242,54 @@ mod tests {
     use super::*;
     use crate::iroha_client_wrap::ClientWrap;
     use iroha::crypto::KeyPair;
+    use iroha::data_model::Level;
+    use serde_json::json;
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::{ConnectOptions, Connection};
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // This is more for the development of scanning rather than for its testing
+    /// This function automates the creation of `test_dump.sql`, and is meant to be run manually.
+    ///
+    /// **Prerequisites:**
+    ///
+    /// - Installed `sqlite3` (to make dumps);
+    /// - Running one of the Docker Compose configs from Iroha repo, e.g.:
+    ///
+    /// ```sh
+    /// docker-compose -f defaults/docker-compose.local.yml up
+    /// ```
+    ///
+    /// When run, it fills Iroha with data, scans into an SQLite database, saves it into `test_dump_db.sqlite`,
+    /// and dumps it into `src/repo/test_dump.sql`.
+    ///
+    /// The saved `.sqlite` file could be useful for debugging.
     #[ignore]
     #[tokio::test]
-    async fn sandbox() {
-        let key_pair: KeyPair = serde_json::from_value(serde_json::json!({
-            "public_key": "ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E",
-            "private_key": "802620E28031CC65994ADE240E32FCFD0405DF30A47BDD6ABAF76C8C3C5A4F3DE96F75"
-        }))
-        .unwrap();
+    async fn create_test_dump() -> Result<()> {
+        let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_dump_db.sqlite");
+        let dump_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/repo/test_dump.sql");
 
-        let client = ClientWrap::new(
-            AccountId::new("wonderland".parse().unwrap(), key_pair.public_key().clone()),
+        // copy of `defaults/client.toml` (in Iroha repo)
+        let key_pair: KeyPair = serde_json::from_value(serde_json::json!({
+            "public_key": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03",
+            "private_key": "802620CCF31D85E3B32A4BEA59987CE0C78E3B8E2DB93881468AB2435FE45D5C9DCD53"
+        }))?;
+        let account = AccountId::new("wonderland".parse()?, key_pair.public_key().clone());
+        let torii_api_url = "http://127.0.0.1:8080/".parse()?;
+        let client = Client::new(iroha::config::Config {
+            account,
             key_pair,
-            "http://fujiwara.sora.org/v5/".parse().unwrap(),
-        );
+            torii_api_url,
+            basic_auth: None,
+            chain: ChainId::from("00000000-0000-0000-0000-000000000000"),
+            transaction_add_nonce: false,
+            transaction_status_timeout: Duration::from_secs(10),
+            transaction_ttl: Duration::from_secs(300),
+        });
+        let client_wrap = ClientWrap::from(client.clone());
 
         tracing_subscriber::registry()
             .with(
@@ -275,16 +299,161 @@ mod tests {
             .with(tracing_subscriber::fmt::layer())
             .init();
 
-        let mut conn = SqliteConnectOptions::new()
-            .in_memory(true)
-            // .filename("./sandbox.sqlite")
-            .connect()
-            .await
-            .unwrap();
-        scan_into(&client, &mut conn)
-            .await
-            .expect("should scan without errors");
+        debug!("Filling Iroha...");
+        spawn_blocking(move || fill_iroha(&client)).await??;
 
-        conn.close().await.unwrap();
+        if db_path.exists() {
+            debug!("Removing previous DB file");
+            tokio::fs::remove_file(&db_path).await?;
+        }
+
+        let mut conn = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .connect()
+            .await?;
+        scan_into(&client_wrap, &mut conn).await?;
+        redact_wasm_blobs(&mut conn).await?;
+        conn.close().await?;
+        sqlite3_dump(db_path, dump_path).await?;
+
+        debug!("Dump is written!");
+
+        Ok(())
+    }
+
+    async fn redact_wasm_blobs(conn: &mut SqliteConnection) -> Result<()> {
+        sqlx::query(
+            r#"update instructions \
+                   set value = '{"Upgrade":"MHgwMDk5MjI="}' \
+                   from json_each(instructions.value) \
+                   where json_each.key = 'Upgrade'"#,
+        )
+        .execute(conn)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn sqlite3_dump(db_path: impl AsRef<Path>, dump_path: impl AsRef<Path>) -> Result<()> {
+        let output = tokio::process::Command::new("sqlite3")
+            .arg(db_path.as_ref())
+            .arg(".dump")
+            .output()
+            .await?;
+
+        let content = String::from_utf8(output.stdout)?;
+        tokio::fs::write(dump_path, content.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    /// Goals:
+    ///
+    /// - Around 20-25 blocks
+    /// - Several domains and accounts
+    /// - Fungible and non-fungible assets
+    /// - Successful and failed transactions
+    /// - **All kinds of instructions**
+    /// - Metadata for most of the entities
+    fn fill_iroha(client: &Client) -> Result<()> {
+        let acc1_key = KeyPair::random();
+        let acc1 = AccountId::new("wonderland".parse()?, acc1_key.public_key().clone());
+        let acc2_key = KeyPair::random();
+        let acc2 = AccountId::new("looking_glass".parse()?, acc2_key.public_key().clone());
+
+        client.submit_blocking(Register::domain(
+            Domain::new("looking_glass".parse()?)
+                .with_logo("/ipns/QmSrPmbaUKA3ZodhzPWZnpFgcPMFWF4QsxXbkWfEptTBJd".parse()?)
+                .with_metadata(
+                    Metadata::default()
+                        .put("important_data".parse()?, json!(["secret-code", 1, 2, 3]))
+                        .put(
+                            "very_important_data".parse()?,
+                            json!({"very":{"important":{"data":{"is":{"deep":{"inside":42}}}}}}),
+                        ),
+                ),
+        ))?;
+
+        client.submit_blocking(Register::account(
+            Account::new(acc1.clone())
+                .with_metadata(Metadata::default().put("alias".parse()?, json!("bob"))),
+        ))?;
+        client
+            .submit_blocking(Register::account(Account::new(acc2.clone()).with_metadata(
+                Metadata::default().put("alias".parse()?, json!("mad_hatter")),
+            )))?;
+        client.submit_blocking(Register::nft(Nft::new(
+            "snowflake$wonderland".parse()?,
+            Metadata::default().put("what-am-i".parse()?, json!("an nft, unique as a snowflake")),
+        )))?;
+        client.submit_blocking(SetKeyValue::account(
+            client.account.clone(),
+            "alias".parse()?,
+            json!("alice"),
+        ))?;
+        client.submit_blocking(SetKeyValue::nft(
+            "snowflake$wonderland".parse()?,
+            "another-rather-unique-metadata-set-later".parse()?,
+            json!([5, 1, 2, 3, 4]),
+        ))?;
+        let _ = client
+            .submit_blocking(RemoveKeyValue::account(
+                acc2.clone(),
+                "non-existing".parse()?,
+            ))
+            .unwrap_err();
+        client.submit_blocking(Mint::asset_numeric(
+            100_123u64,
+            AssetId::new("rose#wonderland".parse()?, acc1.clone()),
+        ))?;
+        client.submit_blocking(Burn::asset_numeric(
+            123u64,
+            AssetId::new("rose#wonderland".parse()?, acc1.clone()),
+        ))?;
+        client.submit_blocking(Transfer::nft(
+            client.account.clone(),
+            "snowflake$wonderland".parse()?,
+            acc2.clone(),
+        ))?;
+
+        let _ = client
+            .submit_blocking(Revoke::account_role(
+                "RoleThatDoesNotExist".parse()?,
+                acc1.clone(),
+            ))
+            .unwrap_err();
+        client.submit_blocking(Log::new(
+            Level::ERROR,
+            "A disrupting message of sorts".to_owned(),
+        ))?;
+        let _ = client
+            .submit_blocking(CustomInstruction::new(
+                json!({ "kind": "custom", "value": false }),
+            ))
+            .unwrap_err();
+        let _ = client
+            .submit_blocking(ExecuteTrigger::new("ping".parse()?).with_args(&json!([
+                "do this",
+                "then this",
+                "and that afterwards"
+            ])))
+            .unwrap_err();
+
+        // let empty block to appear
+        std::thread::sleep(Duration::from_secs(2));
+
+        Ok(())
+    }
+
+    trait MetadataExt {
+        fn put(self, key: Name, value: impl Into<iroha::data_model::prelude::Json>) -> Self;
+    }
+
+    impl MetadataExt for Metadata {
+        fn put(mut self, key: Name, value: impl Into<iroha::data_model::prelude::Json>) -> Self {
+            self.insert(key, value);
+            self
+        }
     }
 }

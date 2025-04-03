@@ -377,6 +377,52 @@ impl Repo {
             .await?)
     }
 
+    pub async fn list_nfts(&self, params: ListNftsParams) -> Result<Page<Nft>> {
+        let mut conn = self.acquire_conn().await;
+        let (total,): (u64,) = QueryBuilder::new("with main as (")
+            .push_custom(SelectNfts {
+                with_where: &params,
+            })
+            .push(") select count(*) from main")
+            .build_query_as()
+            .fetch_one(&mut *conn)
+            .await?;
+        let Some(total) = NonZero::new(total) else {
+            return Ok(Page::empty(params.pagination.per_page));
+        };
+        let pagination = DirectPagination::new(
+            params.pagination.page.unwrap_or(nonzero!(1u64)),
+            params.pagination.per_page,
+            total,
+        );
+        let items = QueryBuilder::new("with main as (")
+            .push_custom(SelectNfts {
+                with_where: &params,
+            })
+            .push(") select * from main ")
+            .push_custom(LimitOffset::from(pagination.range()))
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await?;
+        Ok(Page::new(items, pagination.into()))
+    }
+
+    pub async fn find_nft(&self, id: data_model::NftId) -> Result<Nft> {
+        Ok(QueryBuilder::new("")
+            .push_custom(SelectNfts {
+                with_where: push_fn(|builder| {
+                    let mut sep = builder.separated(" and ");
+                    sep.push("v_nfts.name = ")
+                        .push_bind_unseparated(AsText(id.name()))
+                        .push("v_nfts.domain = ")
+                        .push_bind_unseparated(AsText(id.domain()));
+                }),
+            })
+            .build_query_as()
+            .fetch_one(&mut *(self.acquire_conn().await))
+            .await?)
+    }
+
     async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
         loop {
             let guard = self.conn.lock().await;
@@ -645,14 +691,13 @@ pub struct SelectAssets<W> {
 
 impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectAssets<W> {
     fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
-        builder.push("\
-select case assets.definition_domain = assets.owned_by_domain
-           when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
-           else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
-                       assets.owned_by_domain) end as id,
-       value
-from assets
-where ")
+        builder
+            .push(
+                "\
+select *
+from v_assets
+where ",
+            )
             .push_custom(self.with_where);
     }
 }
@@ -677,6 +722,47 @@ impl<'a> PushCustom<'a> for &'a ListAssetsParams {
             sep.push("definition_name = ")
                 .push_bind_unseparated(id.name().as_ref())
                 .push("definition_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct SelectNfts<W> {
+    pub with_where: W,
+}
+
+impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectNfts<W> {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        builder
+            .push(
+                "\
+select *
+from v_nfts
+where ",
+            )
+            .push_custom(self.with_where);
+    }
+}
+
+pub struct ListNftsParams {
+    pub pagination: PaginationQueryParams,
+    pub domain: Option<data_model::DomainId>,
+    pub owned_by: Option<data_model::AccountId>,
+}
+
+impl<'a> PushCustom<'a> for &'a ListNftsParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.domain {
+            sep.push("v_nfts.domain = ")
+                .push_bind_unseparated(id.name().as_ref());
+        }
+        if let Some(id) = &self.owned_by {
+            sep.push("v_nfts.owned_by_signatory like ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("v_nfts.owned_by_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
         }
     }
@@ -733,17 +819,14 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::{assert_csv_snapshot, assert_debug_snapshot};
     use serde_json::json;
     use sqlx::types::JsonValue;
     use sqlx::{query, query_as, Connection};
 
     async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
-        query(include_str!("./repo/create_tables.sql"))
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        query(include_str!("./repo/test-dump.sql"))
+        query(include_str!("./repo/test_dump.sql"))
             .execute(&mut conn)
             .await
             .unwrap();
@@ -775,11 +858,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(txs.pagination.page.0, 18);
-        assert_eq!(txs.pagination.per_page.0, 5);
-        assert_eq!(txs.pagination.total_pages.0, 18);
-        assert_eq!(txs.pagination.total_items.0, 90);
-        assert_eq!(txs.items.len(), 5);
+        assert_debug_snapshot!(txs.pagination);
+        assert_eq!(
+            txs.items.len(),
+            txs.pagination.per_page.0 as usize + txs.pagination.total_items.0 as usize % 5
+        );
     }
 
     #[tokio::test]
@@ -798,8 +881,8 @@ mod tests {
 
         assert_eq!(txs.pagination.page.0, 1);
         assert_eq!(txs.pagination.total_pages.0, 1);
-        assert_eq!(txs.pagination.total_items.0, 3);
-        assert_eq!(txs.items.len(), 3);
+        assert_eq!(txs.pagination.total_items.0, 4);
+        assert_eq!(txs.items.len(), 4);
     }
 
     #[tokio::test]
@@ -816,7 +899,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 60);
+        assert_eq!(data.pagination.total_items.0, 4);
         assert!(data
             .items
             .iter()
@@ -832,7 +915,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 30);
+        assert_eq!(data.pagination.total_items.0, 14);
         assert!(data
             .items
             .iter()
@@ -855,10 +938,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.page.0, 2);
-        assert_eq!(data.pagination.total_pages.0, 2);
-        assert_eq!(data.pagination.total_items.0, 15);
-        assert_eq!(data.items.len(), 15);
+        assert_eq!(data.pagination.page.0, 1);
+        assert_eq!(data.pagination.total_pages.0, 1);
+        assert_eq!(data.pagination.total_items.0, 3);
+        assert_eq!(data.items.len(), 3);
         assert!(data
             .items
             .iter()
@@ -885,8 +968,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.items.len(), 3);
-        assert_eq!(data.pagination.total_pages.0, 1);
+        assert_eq!(data.items.len(), 11);
+        assert_eq!(data.pagination.total_pages.0, 2);
         assert!(data
             .items
             .iter()
@@ -928,7 +1011,7 @@ mod tests {
             .await
             .unwrap();
 
-        dbg!(data);
+        assert_debug_snapshot!(data.pagination);
     }
 
     #[tokio::test]
@@ -937,8 +1020,13 @@ mod tests {
 
         let data = repo.list_blocks(default_pagination()).await.unwrap();
 
-        assert_eq!(data.pagination.total_pages.0, 3);
-        assert_eq!(data.pagination.total_items.0, 21);
+        assert_debug_snapshot!(data.pagination);
+        let meta: Vec<_> = data
+            .items
+            .iter()
+            .map(|x| (x.height, x.transactions_total, x.transactions_rejected))
+            .collect();
+        assert_csv_snapshot!(meta);
     }
 
     #[tokio::test]
@@ -954,7 +1042,23 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.items.len(), 1);
+        assert_debug_snapshot!(data);
+    }
+
+    #[tokio::test]
+    async fn list_nfts() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_nfts(ListNftsParams {
+                pagination: default_pagination(),
+                owned_by: None,
+                domain: None,
+            })
+            .await
+            .unwrap();
+
+        assert_debug_snapshot!(data);
     }
 
     #[tokio::test]

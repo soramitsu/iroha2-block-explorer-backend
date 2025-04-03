@@ -1,0 +1,18 @@
+---
+source: src/repo.rs
+expression: data.pagination
+---
+Pagination {
+    page: BigInt(
+        4,
+    ),
+    per_page: BigInt(
+        10,
+    ),
+    total_pages: BigInt(
+        4,
+    ),
+    total_items: BigInt(
+        38,
+    ),
+}

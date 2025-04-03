@@ -1,0 +1,58 @@
+---
+source: src/repo.rs
+expression: data
+---
+Page {
+    pagination: Pagination {
+        page: BigInt(
+            1,
+        ),
+        per_page: BigInt(
+            10,
+        ),
+        total_pages: BigInt(
+            1,
+        ),
+        total_items: BigInt(
+            3,
+        ),
+    },
+    items: [
+        Asset {
+            id: AssetId(
+                AsText(
+                    rose##ed012086FB90BDD5CF6979D6B37B9B37AAA94AE39D2F728266A8C09F9DFE8A9E14DA08@wonderland,
+                ),
+            ),
+            value: Json(
+                Numeric {
+                    inner: 100000,
+                },
+            ),
+        },
+        Asset {
+            id: AssetId(
+                AsText(
+                    cabbage#garden_of_live_flowers#ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland,
+                ),
+            ),
+            value: Json(
+                Numeric {
+                    inner: 44,
+                },
+            ),
+        },
+        Asset {
+            id: AssetId(
+                AsText(
+                    rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland,
+                ),
+            ),
+            value: Json(
+                Numeric {
+                    inner: 13,
+                },
+            ),
+        },
+    ],
+}

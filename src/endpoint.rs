@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -22,8 +20,8 @@ use crate::{
 
 #[derive(Clone)]
 pub struct AppState {
-    iroha: Arc<ClientWrap>,
     repo: Repo,
+    status_provider: StatusProvider,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -38,6 +36,9 @@ pub enum AppError {
     Repo(#[from] repo::Error),
     #[error("{0}")]
     Other(#[from] eyre::Report),
+    #[cfg(debug_assertions)]
+    #[error("Status is not implemented")]
+    DummyStatus,
 }
 
 impl IntoResponse for AppError {
@@ -70,6 +71,12 @@ impl IntoResponse for AppError {
 
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
+            #[cfg(debug_assertions)]
+            AppError::DummyStatus => (
+                StatusCode::NOT_IMPLEMENTED,
+                "Status is not implemented when running `serve-test`",
+            )
+                .into_response(),
         }
     }
 }
@@ -359,6 +366,45 @@ async fn assets_show(
     Ok(Json(item.into()))
 }
 
+/// List NFTs
+#[utoipa::path(
+    get,
+    path = "/api/v1/nfts",
+    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+    responses(
+        (status = 200, description = "OK", body = [schema::Nft])
+    )
+)]
+async fn nfts_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetDefinitionsIndexFilter>,
+) -> Result<Json<Page<schema::Nft>>, AppError> {
+    let page = state
+        .repo
+        .list_nfts(repo::ListNftsParams {
+            pagination,
+            domain: filter.domain.map(|x| x.0),
+            owned_by: filter.owned_by.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Nft::from);
+    Ok(Json(page))
+}
+
+/// Find an asset definition
+#[utoipa::path(get, path = "/api/v1/nfts/{id}", responses(
+    (status = 200, description = "Found", body = schema::Nft),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::NftId, description = "Asset Definition ID")))]
+async fn nfts_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::NftId>,
+) -> Result<Json<schema::Nft>, AppError> {
+    let item = state.repo.find_nft(id.0).await?.into();
+    Ok(Json(item))
+}
+
 #[derive(Deserialize, IntoParams)]
 struct InstructionsIndexFilter {
     transaction_hash: Option<schema::Hash>,
@@ -401,6 +447,29 @@ async fn instructions_index(
     Ok(Json(items))
 }
 
+#[derive(Clone)]
+pub enum StatusProvider {
+    Iroha(ClientWrap),
+    #[cfg(debug_assertions)]
+    None,
+}
+
+impl StatusProvider {
+    async fn get_status(&self) -> Result<iroha_telemetry::metrics::Status, AppError> {
+        match self {
+            Self::Iroha(client) => {
+                let client = client.clone();
+                let status = spawn_blocking(move || client.get_status())
+                    .await
+                    .wrap_err("failed to get status")??;
+                Ok(status)
+            }
+            #[cfg(debug_assertions)]
+            Self::None => Err(AppError::DummyStatus),
+        }
+    }
+}
+
 /// Show peer status
 #[utoipa::path(
     get,
@@ -420,14 +489,11 @@ async fn instructions_index(
     )
 )]
 pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::Status>, AppError> {
-    let client = state.iroha.clone();
-    let status = spawn_blocking(move || client.get_status())
-        .await
-        .wrap_err("failed to join task")??;
+    let status = state.status_provider.get_status().await?;
     Ok(Json(status.into()))
 }
 
-pub fn router(iroha: ClientWrap, repo: Repo) -> Router {
+pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/:id", get(domains_show))
@@ -437,6 +503,8 @@ pub fn router(iroha: ClientWrap, repo: Repo) -> Router {
         .route("/assets-definitions/:id", get(assets_definitions_show))
         .route("/assets", get(assets_index))
         .route("/assets/:id", get(assets_show))
+        .route("/nfts", get(nfts_index))
+        .route("/nfts/:id", get(nfts_show))
         .route("/blocks", get(blocks_index))
         .route("/blocks/:height_or_hash", get(blocks_show))
         .route("/transactions", get(transactions_index))
@@ -444,7 +512,7 @@ pub fn router(iroha: ClientWrap, repo: Repo) -> Router {
         .route("/instructions", get(instructions_index))
         .route("/status", get(status_show))
         .with_state(AppState {
-            iroha: Arc::new(iroha),
             repo,
+            status_provider,
         })
 }

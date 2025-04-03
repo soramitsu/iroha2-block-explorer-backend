@@ -34,3 +34,9 @@ impl ClientWrap {
         Self(client)
     }
 }
+
+impl From<Client> for ClientWrap {
+    fn from(value: Client) -> Self {
+        Self(value)
+    }
+}

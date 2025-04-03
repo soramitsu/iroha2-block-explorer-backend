@@ -9,8 +9,9 @@ mod repo;
 mod schema;
 mod util;
 
+use crate::endpoint::StatusProvider;
 use crate::iroha_client_wrap::ClientWrap;
-use crate::repo::Repo;
+use crate::repo::{scan_iroha, Repo};
 use axum::routing::get;
 use axum::{
     extract::{MatchedPath, Request},
@@ -34,38 +35,68 @@ use utoipa_scalar::{Scalar, Servable};
 #[derive(Debug, Parser)]
 #[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
 pub struct Args {
-    /// Account ID in a form of `signatory@domain` on which behalf to perform Iroha Queries
-    #[clap(long, env)]
-    pub account: AccountId,
-
-    /// Multihash of the account's private key
-    #[clap(long, env)]
-    pub account_private_key: PrivateKey,
-
-    /// Iroha Torii URL
-    #[clap(long, env)]
-    pub torii_url: Url,
-
     #[command(subcommand)]
     pub command: Subcommand,
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Subcommand {
-    /// Scan Iroha into an `SQLite` database and save it to file
-    Scan {
-        /// Path to `SQLite` database to scan Iroha to
-        out_file: PathBuf,
-    },
     /// Run the server
-    Serve {
-        /// Port to run the server on
-        #[clap(short, long, default_value = "4000", env)]
-        port: u16,
-        /// IP to run the server on
-        #[clap(long, default_value = "127.0.0.1", env = "IROHA_EXPLORER_IP")]
-        ip: IpAddr,
-    },
+    Serve(ServeArgs),
+    #[cfg(debug_assertions)]
+    /// DEBUG-ONLY: run server with test data
+    ServeTest(ServeBaseArgs),
+    /// Scan Iroha into an `SQLite` database and save it to file
+    Scan(ScanArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct IrohaCredentialsArgs {
+    /// Account ID in a form of `signatory@domain` on which behalf to perform Iroha Queries
+    #[clap(long, env)]
+    pub account: AccountId,
+    /// Multihash of the account's private key
+    #[clap(long, env)]
+    pub account_private_key: PrivateKey,
+    /// Iroha Torii URL
+    #[clap(long, env)]
+    pub torii_url: Url,
+}
+
+impl IrohaCredentialsArgs {
+    fn client(self) -> ClientWrap {
+        ClientWrap::new(
+            self.account,
+            KeyPair::from(self.account_private_key),
+            self.torii_url,
+        )
+    }
+}
+
+#[derive(Parser, Debug)]
+pub struct ScanArgs {
+    #[command(flatten)]
+    creds: IrohaCredentialsArgs,
+    /// Path to `SQLite` database to scan Iroha to
+    out_file: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+pub struct ServeBaseArgs {
+    /// Port to run the server on
+    #[clap(short, long, default_value = "4000", env)]
+    port: u16,
+    /// IP to run the server on
+    #[clap(long, default_value = "127.0.0.1", env = "IROHA_EXPLORER_IP")]
+    ip: IpAddr,
+}
+
+#[derive(Parser, Debug)]
+pub struct ServeArgs {
+    #[command(flatten)]
+    base: ServeBaseArgs,
+    #[command(flatten)]
+    creds: IrohaCredentialsArgs,
 }
 
 // TODO: utoipa v5-alpha supports nested OpenApi impls (we use v4 now). Use it for `endpoint` module.
@@ -76,6 +107,8 @@ pub enum Subcommand {
         endpoint::accounts_show,
         endpoint::assets_index,
         endpoint::assets_show,
+        endpoint::nfts_index,
+        endpoint::nfts_show,
         endpoint::assets_definitions_index,
         endpoint::assets_definitions_show,
         endpoint::domains_index,
@@ -94,8 +127,8 @@ pub enum Subcommand {
         schema::AssetId,
         schema::AssetDefinition,
         schema::AssetDefinitionId,
-        schema::AssetType,
-        schema::AssetValue,
+        schema::NftId,
+        schema::Nft,
         schema::Mintable,
         schema::Account,
         schema::AccountId,
@@ -129,29 +162,61 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(
+            // TODO: configure filter via env + use different defaults for debug and release
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let key_pair = KeyPair::from(args.account_private_key);
-    let iroha_client = ClientWrap::new(args.account, key_pair, args.torii_url);
+    // let key_pair = KeyPair::from(args.account_private_key);
+    // let iroha_client = ClientWrap::new(args.account, key_pair, args.torii_url);
 
     match args.command {
-        Subcommand::Serve { port, ip } => serve(iroha_client, port, ip).await,
-        Subcommand::Scan { out_file } => scan(iroha_client, out_file).await.unwrap(),
+        Subcommand::Serve(args) => serve(args).await,
+        #[cfg(debug_assertions)]
+        Subcommand::ServeTest(args) => serve_test(args).await,
+        Subcommand::Scan(args) => scan(args).await.unwrap(),
     }
 }
 
-async fn serve(client: ClientWrap, port: u16, ip: IpAddr) {
+async fn serve(args: ServeArgs) {
     let repo = Repo::new(None);
+    let client = args.creds.client();
 
+    let mut set = JoinSet::<()>::new();
+    set.spawn({
+        let repo = repo.clone();
+        let client = client.clone();
+        async move {
+            do_serve(repo, StatusProvider::Iroha(client), args.base).await;
+        }
+    });
+    set.spawn(async move {
+        DatabaseUpdateLoop::new(repo, client).run().await;
+    });
+    set.join_all().await;
+}
+
+#[cfg(debug_assertions)]
+async fn serve_test(args: ServeBaseArgs) {
+    let repo = Repo::new(None);
+    fill_repo_with_test_data(&repo).await.unwrap();
+    tracing::info!("test data is ready");
+
+    let mut set = JoinSet::<()>::new();
+    set.spawn(async move {
+        do_serve(repo.clone(), StatusProvider::None, args).await;
+    });
+    set.join_all().await;
+}
+
+async fn do_serve(repo: Repo, status_provider: StatusProvider, args: ServeBaseArgs) {
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/api/docs", ApiDoc::openapi()))
         .route("/api/health", get(|| async { "healthy" }))
-        .nest("/api/v1", endpoint::router(client.clone(), repo.clone()))
+        .nest("/api/v1", endpoint::router(repo, status_provider))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched
@@ -172,27 +237,46 @@ async fn serve(client: ClientWrap, port: u16, ip: IpAddr) {
                 .on_failure(()),
         );
 
-    let listener = tokio::net::TcpListener::bind((ip, port)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind((args.ip, args.port))
+        .await
+        .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
 
-    let mut set = JoinSet::<()>::new();
-    set.spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    set.spawn(async move {
-        DatabaseUpdateLoop::new(repo, client).run().await;
-    });
-    set.join_all().await;
+    axum::serve(listener, app).await.unwrap()
 }
 
-async fn scan(client: ClientWrap, out_file: PathBuf) -> eyre::Result<()> {
+#[cfg(debug_assertions)]
+async fn fill_repo_with_test_data(repo: &Repo) -> eyre::Result<()> {
     let mut conn = SqliteConnectOptions::new()
-        .filename(&out_file)
+        .in_memory(true)
+        .connect()
+        .await?;
+    sqlx::query(include_str!("./repo/test_dump.sql"))
+        .execute(&mut conn)
+        .await?;
+    repo.swap(conn).await;
+    Ok(())
+}
+
+async fn scan(args: ScanArgs) -> eyre::Result<()> {
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&args.out_file)
         .create_if_missing(true)
         .connect()
         .await?;
-    repo::scan_iroha(&client, &mut conn).await?;
+    scan_iroha(&args.creds.client(), &mut conn).await?;
     conn.close().await?;
-    tracing::info!(?out_file, "written");
+    tracing::info!(?args.out_file, "written");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli() {
+        use clap::CommandFactory;
+        Args::command().debug_assert();
+    }
 }

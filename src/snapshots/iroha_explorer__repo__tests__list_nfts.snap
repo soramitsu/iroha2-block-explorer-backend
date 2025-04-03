@@ -1,0 +1,50 @@
+---
+source: src/repo.rs
+expression: data
+---
+Page {
+    pagination: Pagination {
+        page: BigInt(
+            1,
+        ),
+        per_page: BigInt(
+            10,
+        ),
+        total_pages: BigInt(
+            1,
+        ),
+        total_items: BigInt(
+            1,
+        ),
+    },
+    items: [
+        Nft {
+            id: NftId(
+                AsText(
+                    snowflake$wonderland,
+                ),
+            ),
+            owned_by: AccountId(
+                AsText(
+                    ed012048791391BC8BB9662F5E513B168F887F7E1CA6982877168B35963EB31C3A0591@looking_glass,
+                ),
+            ),
+            content: Metadata(
+                Some(
+                    Json(
+                        Metadata(
+                            {
+                                "another-rather-unique-metadata-set-later": Json(
+                                    "[5,1,2,3,4]",
+                                ),
+                                "what-am-i": Json(
+                                    "\"an nft, unique as a snowflake\"",
+                                ),
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        },
+    ],
+}

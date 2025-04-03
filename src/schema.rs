@@ -94,7 +94,6 @@ impl From<repo::AccountId> for AccountId {
 #[derive(ToSchema, Serialize)]
 pub struct AssetDefinition {
     id: AssetDefinitionId,
-    r#type: AssetType,
     mintable: Mintable,
     logo: Option<IpfsPath>,
     metadata: Metadata,
@@ -106,10 +105,6 @@ impl From<repo::AssetDefinition> for AssetDefinition {
     fn from(value: repo::AssetDefinition) -> Self {
         Self {
             id: AssetDefinitionId(value.id.0 .0),
-            r#type: match value.r#type {
-                repo::AssetType::Numeric => AssetType::Numeric,
-                repo::AssetType::Store => AssetType::Store,
-            },
             mintable: match value.mintable {
                 repo::Mintable::Infinitely => Mintable::Infinitely,
                 repo::Mintable::Once => Mintable::Once,
@@ -123,16 +118,32 @@ impl From<repo::AssetDefinition> for AssetDefinition {
     }
 }
 
+#[derive(ToSchema, Serialize)]
+pub struct Nft {
+    id: NftId,
+    owned_by: AccountId,
+    content: Metadata,
+}
+
+impl From<repo::Nft> for Nft {
+    fn from(value: repo::Nft) -> Self {
+        Self {
+            id: NftId(value.id.0 .0),
+            content: Metadata(value.content.into()),
+            owned_by: AccountId(value.owned_by.0 .0),
+        }
+    }
+}
+
 /// Asset Definition ID. Represented in a form of `asset#domain`.
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses#wonderland")]
 pub struct AssetDefinitionId(pub iroha::AssetDefinitionId);
 
-#[derive(ToSchema, Serialize)]
-pub enum AssetType {
-    Numeric,
-    Store,
-}
+/// Non-fungible token ID. Represented in a form of `nft$domain`.
+#[derive(ToSchema, Serialize, Deserialize)]
+#[schema(value_type = String, example = "rose$wonderland")]
+pub struct NftId(pub iroha::NftId);
 
 #[derive(ToSchema, Serialize)]
 pub enum Mintable {
@@ -144,21 +155,14 @@ pub enum Mintable {
 #[derive(ToSchema, Serialize)]
 pub struct Asset {
     id: AssetId,
-    value: AssetValue,
+    value: Decimal,
 }
 
 impl From<repo::Asset> for Asset {
     fn from(value: repo::Asset) -> Self {
         Self {
             id: AssetId(value.id.0 .0),
-            value: match value.value.0 {
-                repo::AssetValue::Numeric(numeric) => AssetValue::Numeric {
-                    value: Decimal::from(&numeric),
-                },
-                repo::AssetValue::Store(map) => AssetValue::Store {
-                    metadata: Metadata(map.into()),
-                },
-            },
+            value: Decimal::from(&value.value.0),
         }
     }
 }
@@ -172,13 +176,6 @@ impl From<repo::Asset> for Asset {
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland")]
 pub struct AssetId(pub iroha::AssetId);
-
-#[derive(ToSchema, Serialize)]
-#[serde(tag = "kind")]
-pub enum AssetValue {
-    Numeric { value: Decimal },
-    Store { metadata: Metadata },
-}
 
 // TODO: figure out how to represent decimal
 #[derive(ToSchema, Serialize)]
@@ -509,8 +506,10 @@ pub struct Block {
     hash: Hash,
     /// Hash of the previous block in the chain
     prev_block_hash: Option<Hash>,
-    /// Hash of merkle tree root of transactions' hashes
-    transactions_hash: Hash,
+    /// Hash of merkle tree root of transactions' hashes.
+    ///
+    /// The block is _empty_ if this is `null`.
+    transactions_hash: Option<Hash>,
     /// Timestamp of creation
     created_at: TimeStamp,
     transactions_total: u32,
@@ -523,7 +522,7 @@ impl From<repo::Block> for Block {
             hash: Hash(value.hash.0 .0),
             height: BigInt(value.height.get() as u128),
             prev_block_hash: value.prev_block_hash.map(Hash::from),
-            transactions_hash: Hash(value.transactions_hash.0 .0),
+            transactions_hash: value.transactions_hash.map(Hash::from),
             created_at: TimeStamp(value.created_at),
             transactions_total: value.transactions_total,
             transactions_rejected: value.transactions_rejected,

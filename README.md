@@ -1,6 +1,7 @@
 # Iroha 2 Explorer Backend
 
-This is a backend service for the [web Explorer application](https://github.com/soramitsu/iroha2-block-explorer-web).
+This is a backend service for
+the [Iroha 2 Block Explorer Web application](https://github.com/soramitsu/iroha2-block-explorer-web).
 It is written in Rust and provides a classic HTTP-API way to observe data
 in [Iroha 2](https://github.com/hyperledger/iroha).
 
@@ -32,8 +33,9 @@ cargo run --release -- help
 
 Use `help` for detailed usage documentation. In short:
 
+- `serve` to run the server
+- `scan` to scan Iroha ones and save into a database (for troubleshooting)
 - pass `--torii-url`, `--account`, and `--account-private-key` options to configure connection to Iroha
-- use `serve` command to run the server, and `scan` command to scan Iroha
 
 For example:
 
@@ -54,3 +56,15 @@ With the running server, open `/api/docs` path (e.g. `http://localhost:4123/api/
 ```shell
 test "$(curl -fsSL localhost:4000/api/health)" = "healthy" && echo OK || echo FAIL
 ```
+
+### Serve with test data
+
+_Only available in debug builds._
+
+Serve test data without connecting to Iroha:
+
+```shell
+cargo run -- serve-test
+```
+
+> `/status` endpoint would not work in this case
