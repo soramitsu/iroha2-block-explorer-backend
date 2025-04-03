@@ -51,6 +51,12 @@ iroha_explorer scan ./scanned.sqlite
 
 With the running server, open `/api/docs` path (e.g. `http://localhost:4123/api/docs`) for API documentation.
 
+To configure **logging**, use `RUST_LOG` env var. For example:
+
+```shell
+RUST_LOG=iroha_explorer=debug,sqlx=debug
+```
+
 ### Health check
 
 ```shell
@@ -68,3 +74,5 @@ cargo run -- serve-test
 ```
 
 > `/status` endpoint would not work in this case
+
+

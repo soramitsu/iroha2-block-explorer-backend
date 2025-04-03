@@ -53,13 +53,13 @@ pub enum Subcommand {
 #[derive(Parser, Debug)]
 pub struct IrohaCredentialsArgs {
     /// Account ID in a form of `signatory@domain` on which behalf to perform Iroha Queries
-    #[clap(long, env)]
+    #[clap(long, env = "IROHA_EXPLORER_ACCOUNT")]
     pub account: AccountId,
     /// Multihash of the account's private key
-    #[clap(long, env)]
+    #[clap(long, env = "IROHA_EXPLORER_ACCOUNT_PRIVATE_KEY")]
     pub account_private_key: PrivateKey,
     /// Iroha Torii URL
-    #[clap(long, env)]
+    #[clap(long, env = "IROHA_EXPLORER_TORII_URL")]
     pub torii_url: Url,
 }
 
@@ -84,7 +84,7 @@ pub struct ScanArgs {
 #[derive(Parser, Debug)]
 pub struct ServeBaseArgs {
     /// Port to run the server on
-    #[clap(short, long, default_value = "4000", env)]
+    #[clap(short, long, default_value = "4000", env = "IROHA_EXPLORER_PORT")]
     port: u16,
     /// IP to run the server on
     #[clap(long, default_value = "127.0.0.1", env = "IROHA_EXPLORER_IP")]
@@ -106,15 +106,19 @@ pub struct ServeArgs {
 )]
 struct Api;
 
+#[cfg(debug_assertions)]
+const DEFAULT_LOG: &str = "iroha_explorer=debug,tower_http=debug,sqlx=debug";
+#[cfg(not(debug_assertions))]
+const DEFAULT_LOG: &str = "info";
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
     tracing_subscriber::registry()
         .with(
-            // TODO: configure filter via env + use different defaults for debug and release
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG.into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -247,7 +251,7 @@ mod tests {
         // tracing_subscriber::registry()
         //     .with(
         //         tracing_subscriber::EnvFilter::try_from_default_env()
-        //             .unwrap_or_else(|_| "iroha_explorer=debug,tower_http=debug,sqlx=debug".into()),
+        //             .unwrap_or_else(|_| DEFAULT_LOG.into()),
         //     )
         //     .with(tracing_subscriber::fmt::layer())
         //     .init();
