@@ -3,11 +3,12 @@ use iroha::crypto::KeyPair;
 use iroha::data_model::account::AccountId;
 use iroha::data_model::ChainId;
 use std::ops::Deref;
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone)]
-pub struct ClientWrap(Client);
+pub struct ClientWrap(Arc<Client>);
 
 impl Deref for ClientWrap {
     type Target = Client;
@@ -19,7 +20,7 @@ impl Deref for ClientWrap {
 
 impl ClientWrap {
     pub fn new(authority: AccountId, key_pair: KeyPair, torii_url: Url) -> Self {
-        let client = Client::new(iroha::config::Config {
+        Client::new(iroha::config::Config {
             account: authority,
             key_pair,
             torii_api_url: torii_url,
@@ -30,7 +31,13 @@ impl ClientWrap {
             transaction_add_nonce: false,
             transaction_status_timeout: Duration::from_secs(0),
             transaction_ttl: Duration::from_secs(0),
-        });
-        Self(client)
+        })
+        .into()
+    }
+}
+
+impl From<Client> for ClientWrap {
+    fn from(value: Client) -> Self {
+        Self(Arc::new(value))
     }
 }
