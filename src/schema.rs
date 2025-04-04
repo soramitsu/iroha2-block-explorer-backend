@@ -5,6 +5,7 @@ use chrono::Utc;
 use nonzero_ext::nonzero;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
+use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
 use std::borrow::Cow;
@@ -12,7 +13,7 @@ use std::num::NonZero;
 use std::ops::Deref;
 use std::str::FromStr;
 use utoipa::openapi::{RefOr, Schema};
-use utoipa::{IntoParams, PartialSchema, ToSchema};
+use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
     pub use iroha::crypto::*;
@@ -216,16 +217,20 @@ impl From<repo::Metadata> for Metadata {
 #[schema(value_type = String)]
 pub struct IpfsPath(String);
 
+// #[derive(ToSchema)]
+// #[schema(bound = "T: parity_scale_codec::Encode")]
 pub struct ScaleBinary<T>(T);
 
 impl<T> PartialSchema for ScaleBinary<T> {
     fn schema() -> RefOr<Schema> {
         utoipa::openapi::ObjectBuilder::new()
             .description(Some(
-                "Generic container of some value, represented as a SCALE-encoded binary data in base64. \
-                 Should usually be decoded on the client side using Iroha JavaScript"
+                "Value represented as SCALE-encoded binary data in base64.\n\n\
+                 Should usually be decoded on the client side using [`@iroha/core`](https://jsr.io/@iroha/core).",
             ))
             .schema_type(utoipa::openapi::schema::Type::String)
+            .content_encoding("base64")
+            .examples([json!("AQIMd3Vm")])
             .into()
     }
 }
@@ -250,6 +255,24 @@ where
     }
 }
 
+// /// Generic container of some value, representing it in both JSON and SCALE
+// #[derive(ToSchema, Serialize)]
+// #[schema(
+//     example = json!({"scale": "AQIMd3Vm","json": {"level": "INFO","msg": "wuf"}})
+// )]
+// pub struct ReprScaleJson2 {
+//     /// JSON representation of the value
+//     #[schema(value_type = Object)]
+//     json: Box<dyn Serialize>,
+//     /// SCALE representation of the value, `base64`-encoded
+//     #[schema(value_type = String, content_encoding = "base64")]
+//     scale: Box<dyn ScaleEncode>,
+// }
+
+// impl ReprScaleJson2 {
+//     fn
+// }
+
 pub struct ReprScaleJson<T>(T);
 
 impl<T> PartialSchema for ReprScaleJson<T> {
@@ -262,9 +285,13 @@ impl<T> PartialSchema for ReprScaleJson<T> {
             .property(
                 "json",
                 utoipa::openapi::ObjectBuilder::new()
-                    .schema_type(utoipa::openapi::schema::Type::Object)
-                    .description(Some("JSON representation of the value")),
+                    .schema_type(utoipa::openapi::schema::SchemaType::AnyValue)
+                    .description(Some("Value represented as JSON")),
             )
+            .examples([json!({
+                "scale": "AQIMd3Vm",
+                "json": {"level": "INFO","msg": "wuf"}
+            })])
             .into()
     }
 }
@@ -273,6 +300,22 @@ impl<T> ToSchema for ReprScaleJson<T> {
     fn name() -> Cow<'static, str> {
         Cow::Borrowed("ReprScaleJson")
     }
+
+    // fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
+    //     schemas.push((
+    //         "Object".to_string(),
+    //         schema!(
+    //             #[inline]
+    //             Value
+    //         )
+    //         .description(Some("TODO schemas desc"))
+    //         .into(),
+    //     ));
+    //     schemas.push((
+    //         ScaleBinary::<()>::name().into(),
+    //         ScaleBinary::<()>::schema(),
+    //     ));
+    // }
 }
 
 impl<T> Serialize for ReprScaleJson<T>
@@ -518,9 +561,18 @@ pub struct TransactionDetailed {
     signature: Signature,
     nonce: Option<PositiveInteger>,
     metadata: Metadata,
-    time_to_live: Duration,
-    /// Corresponding type: [`TransactionRejectionReason`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/TransactionRejectionReason)
-    rejection_reason: Option<TransactionRejectionReason>,
+    time_to_live: TimeDuration,
+    // FIXME: make it nullable
+    #[schema(schema_with = rejection_reason_schema)]
+    rejection_reason: Option<ReprScaleJson<iroha::TransactionRejectionReason>>,
+}
+
+fn rejection_reason_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("_(nullable)_ Corresponding type: [`TransactionRejectionReason`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/TransactionRejectionReason)".to_owned());
+    object
 }
 
 impl From<repo::TransactionDetailed> for TransactionDetailed {
@@ -532,20 +584,23 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
                 PositiveInteger(NonZero::new(int.get() as u64).expect("it is non-zero"))
             }),
             metadata: value.metadata.into(),
-            time_to_live: Duration {
+            time_to_live: TimeDuration {
                 ms: BigInt(value.time_to_live_ms as u128),
             },
-            rejection_reason: value
-                .rejection_reason
-                .map(|reason| TransactionRejectionReason(ReprScaleJson(reason.0))),
+            rejection_reason: value.rejection_reason.map(|reason| ReprScaleJson(reason.0)),
         }
     }
 }
 
-/// Transaction rejection reason
-#[derive(Serialize, ToSchema)]
-#[schema(value_type = Object)]
-pub struct TransactionRejectionReason(ReprScaleJson<iroha::TransactionRejectionReason>);
+// /// Transaction rejection reason
+// #[derive(Serialize, ToSchema)]
+// // #[schema(value_type = Object)]
+// // #[schema(schema_with = ReprScaleJson::<iroha::InstructionBox>::schema)]
+// pub struct TransactionRejectionReason(
+//     // #[schema(schema_with = ReprScaleJson::<iroha::TransactionRejectionReason>::schema)]
+//     // ReprScaleJson<iroha::TransactionRejectionReason>,
+//     // ScaleBinary<iroha::TransactionRejectionReason>,
+// );
 
 /// Operations executable on-chain
 #[derive(Serialize, ToSchema)]
@@ -571,11 +626,8 @@ impl From<repo::Executable> for Executable {
 pub struct Instruction {
     /// Kind of instruction.
     kind: InstructionKind,
-    /// `InstructionBox` enumeration as a whole.
-    ///
-    /// Corresponding type: [`InstructionBox`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/InstructionBox)
-    #[schema(schema_with = ReprScaleJson::<iroha::InstructionBox>::schema)]
-    payload: ReprScaleJson<iroha::InstructionBox>,
+    #[schema(schema_with = isi_box_schema)]
+    r#box: ReprScaleJson<iroha::InstructionBox>,
     transaction_hash: Hash,
     transaction_status: TransactionStatus,
     block: BigInt,
@@ -583,11 +635,19 @@ pub struct Instruction {
     created_at: TimeStamp,
 }
 
+fn isi_box_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("Corresponding type: [`InstructionBox`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/InstructionBox)".to_owned());
+    object
+}
+
 impl From<repo::Instruction> for Instruction {
     fn from(value: repo::Instruction) -> Self {
         Self {
             kind: value.kind,
-            payload: ReprScaleJson(value.payload.0),
+            r#box: ReprScaleJson(value.r#box.0),
             transaction_hash: Hash(value.transaction_hash.0 .0),
             transaction_status: value.transaction_status,
             block: BigInt(value.block as u128),
@@ -685,12 +745,12 @@ impl From<repo::Signature> for Signature {
 
 /// Duration
 #[derive(ToSchema, Serialize)]
-pub struct Duration {
+pub struct TimeDuration {
     /// Number of milliseconds
     ms: BigInt,
 }
 
-impl From<std::time::Duration> for Duration {
+impl From<std::time::Duration> for TimeDuration {
     fn from(value: std::time::Duration) -> Self {
         Self {
             ms: BigInt(value.as_millis()),
@@ -727,7 +787,7 @@ pub struct Status {
     txs_rejected: u32,
     view_changes: u32,
     queue_size: u32,
-    uptime: Duration,
+    uptime: TimeDuration,
 }
 
 impl From<iroha_telemetry::metrics::Status> for Status {
@@ -739,7 +799,7 @@ impl From<iroha_telemetry::metrics::Status> for Status {
             txs_rejected: value.txs_rejected as u32,
             view_changes: value.view_changes,
             queue_size: value.queue_size as u32,
-            uptime: Duration::from(value.uptime.0),
+            uptime: TimeDuration::from(value.uptime.0),
         }
     }
 }

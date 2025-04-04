@@ -769,7 +769,7 @@ from transactions;
 CREATE VIEW v_instructions
 as
 select json_each.key                                                as kind,
-       instructions.value                                           as payload,
+       instructions.value                                           as box,
        created_at,
        transaction_hash,
        case when error is null then 'committed' else 'rejected' end as transaction_status,
