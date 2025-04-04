@@ -47,14 +47,14 @@ create table if not exists asset_definitions
 
 create table if not exists nfts
 (
-    name               text                                                   not null,
-    domain             text                                                   not null references domains (name),
-    owned_by_signatory text                                                   not null,
-    owned_by_domain    text                                                   not null,
+    name               text not null,
+    domain             text not null references domains (name),
+    owned_by_signatory text not null,
+    owned_by_domain    text not null,
     content            json,
     primary key (name, domain),
     foreign key (owned_by_signatory, owned_by_domain) references accounts (signatory, domain)
-    );
+);
 
 create table if not exists assets
 (
@@ -102,12 +102,13 @@ from transactions;
 create view if not exists v_instructions
 as
 select json_each.key                                                as kind,
-       case
-           /* TODO: truncate payload for `Upgrade` instruction kind? */
-           when json_each.type in ('null', 'text', 'integer', 'real') then json_quote(json_each.value)
-           when json_each.type in ('false', 'true') then json_each.type
-           else json_each.value
-           end                                                      as payload,
+       instructions.value                                           as box,
+--        case
+--            /* TODO: truncate payload for `Upgrade` instruction kind? */
+--            when json_each.type in ('null', 'text', 'integer', 'real') then json_quote(json_each.value)
+--            when json_each.type in ('false', 'true') then json_each.type
+--            else json_each.value
+--            end                                                      as payload,
        created_at,
        transaction_hash,
        case when error is null then 'committed' else 'rejected' end as transaction_status,
@@ -127,8 +128,7 @@ select *,
 from assets;
 
 create view if not exists v_nfts as
-select
-    *,
-    format('%s$%s', nfts.name, nfts.domain) as id,
-    format('%s@%s', nfts.owned_by_signatory, nfts.owned_by_domain) as owned_by
+select *,
+       format('%s$%s', nfts.name, nfts.domain)                        as id,
+       format('%s@%s', nfts.owned_by_signatory, nfts.owned_by_domain) as owned_by
 from nfts;

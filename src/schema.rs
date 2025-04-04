@@ -1,15 +1,19 @@
+use crate::repo;
+use crate::util::{DirectPagination, ReversePagination};
+use base64::Engine;
+use chrono::Utc;
+use nonzero_ext::nonzero;
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::json;
+use serde_with::DeserializeFromStr;
+use sqlx::prelude::FromRow;
+use std::borrow::Cow;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::str::FromStr;
-
-use crate::repo;
-use crate::util::{DirectPagination, ReversePagination};
-use chrono::Utc;
-use nonzero_ext::nonzero;
-use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
-use sqlx::prelude::FromRow;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::openapi::{RefOr, Schema};
+use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
     pub use iroha::crypto::*;
@@ -213,12 +217,128 @@ impl From<repo::Metadata> for Metadata {
 #[schema(value_type = String)]
 pub struct IpfsPath(String);
 
+// #[derive(ToSchema)]
+// #[schema(bound = "T: parity_scale_codec::Encode")]
+pub struct ScaleBinary<T>(T);
+
+impl<T> PartialSchema for ScaleBinary<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Value represented as SCALE-encoded binary data in base64.\n\n\
+                 Should usually be decoded on the client side using [`@iroha/core`](https://jsr.io/@iroha/core).",
+            ))
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .content_encoding("base64")
+            .examples([json!("AQIMd3Vm")])
+            .into()
+    }
+}
+
+impl<T> ToSchema for ScaleBinary<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ScaleBinary")
+    }
+}
+
+impl<T> Serialize for ScaleBinary<T>
+where
+    T: parity_scale_codec::Encode,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let scale = self.0.encode();
+        let as_str = base64::prelude::BASE64_STANDARD.encode(&scale);
+        serializer.serialize_str(&as_str)
+    }
+}
+
+// /// Generic container of some value, representing it in both JSON and SCALE
+// #[derive(ToSchema, Serialize)]
+// #[schema(
+//     example = json!({"scale": "AQIMd3Vm","json": {"level": "INFO","msg": "wuf"}})
+// )]
+// pub struct ReprScaleJson2 {
+//     /// JSON representation of the value
+//     #[schema(value_type = Object)]
+//     json: Box<dyn Serialize>,
+//     /// SCALE representation of the value, `base64`-encoded
+//     #[schema(value_type = String, content_encoding = "base64")]
+//     scale: Box<dyn ScaleEncode>,
+// }
+
+// impl ReprScaleJson2 {
+//     fn
+// }
+
+pub struct ReprScaleJson<T>(T);
+
+impl<T> PartialSchema for ReprScaleJson<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Generic container of some value, representing it in both JSON and SCALE",
+            ))
+            .property("scale", ScaleBinary::<T>::schema())
+            .property(
+                "json",
+                utoipa::openapi::ObjectBuilder::new()
+                    .schema_type(utoipa::openapi::schema::SchemaType::AnyValue)
+                    .description(Some("Value represented as JSON")),
+            )
+            .examples([json!({
+                "scale": "AQIMd3Vm",
+                "json": {"level": "INFO","msg": "wuf"}
+            })])
+            .into()
+    }
+}
+
+impl<T> ToSchema for ReprScaleJson<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ReprScaleJson")
+    }
+
+    // fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
+    //     schemas.push((
+    //         "Object".to_string(),
+    //         schema!(
+    //             #[inline]
+    //             Value
+    //         )
+    //         .description(Some("TODO schemas desc"))
+    //         .into(),
+    //     ));
+    //     schemas.push((
+    //         ScaleBinary::<()>::name().into(),
+    //         ScaleBinary::<()>::schema(),
+    //     ));
+    // }
+}
+
+impl<T> Serialize for ReprScaleJson<T>
+where
+    T: parity_scale_codec::Encode + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("scale", &ScaleBinary(&self.0))?;
+        map.serialize_entry("json", &self.0)?;
+        map.end()
+    }
+}
+
 /// Big integer numeric value.
 ///
 /// Serialized as a **number** when safely fits into `f64` max safe integer
 /// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
 ///
-/// On JavaScript side is recommended to parse with `BigInt`.
+/// On the JavaScript side is recommended to parse with `BigInt`.
 #[derive(Debug, ToSchema)]
 // TODO set `value_type` to union of string and number
 #[schema(example = 42)]
@@ -441,8 +561,18 @@ pub struct TransactionDetailed {
     signature: Signature,
     nonce: Option<PositiveInteger>,
     metadata: Metadata,
-    time_to_live: Duration,
-    rejection_reason: Option<TransactionRejectionReason>,
+    time_to_live: TimeDuration,
+    // FIXME: make it nullable
+    #[schema(schema_with = rejection_reason_schema)]
+    rejection_reason: Option<ReprScaleJson<iroha::TransactionRejectionReason>>,
+}
+
+fn rejection_reason_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("_(nullable)_ Corresponding type: [`TransactionRejectionReason`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/TransactionRejectionReason)".to_owned());
+    object
 }
 
 impl From<repo::TransactionDetailed> for TransactionDetailed {
@@ -454,20 +584,23 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
                 PositiveInteger(NonZero::new(int.get() as u64).expect("it is non-zero"))
             }),
             metadata: value.metadata.into(),
-            time_to_live: Duration {
+            time_to_live: TimeDuration {
                 ms: BigInt(value.time_to_live_ms as u128),
             },
-            rejection_reason: value
-                .rejection_reason
-                .map(|reason| TransactionRejectionReason(reason.0)),
+            rejection_reason: value.rejection_reason.map(|reason| ReprScaleJson(reason.0)),
         }
     }
 }
 
-/// Transaction rejection reason
-#[derive(Serialize, ToSchema)]
-#[schema(value_type = Object)]
-pub struct TransactionRejectionReason(iroha::TransactionRejectionReason);
+// /// Transaction rejection reason
+// #[derive(Serialize, ToSchema)]
+// // #[schema(value_type = Object)]
+// // #[schema(schema_with = ReprScaleJson::<iroha::InstructionBox>::schema)]
+// pub struct TransactionRejectionReason(
+//     // #[schema(schema_with = ReprScaleJson::<iroha::TransactionRejectionReason>::schema)]
+//     // ReprScaleJson<iroha::TransactionRejectionReason>,
+//     // ScaleBinary<iroha::TransactionRejectionReason>,
+// );
 
 /// Operations executable on-chain
 #[derive(Serialize, ToSchema)]
@@ -489,11 +622,12 @@ impl From<repo::Executable> for Executable {
 
 /// Iroha Special Instruction (ISI)
 #[derive(Serialize, ToSchema)]
+#[schema(bound = "")]
 pub struct Instruction {
-    /// Kind of instruction. TODO: add strict enumeration
+    /// Kind of instruction.
     kind: InstructionKind,
-    /// Instruction payload, some JSON. TODO: add typed output
-    payload: serde_json::Value,
+    #[schema(schema_with = isi_box_schema)]
+    r#box: ReprScaleJson<iroha::InstructionBox>,
     transaction_hash: Hash,
     transaction_status: TransactionStatus,
     block: BigInt,
@@ -501,11 +635,19 @@ pub struct Instruction {
     created_at: TimeStamp,
 }
 
+fn isi_box_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("Corresponding type: [`InstructionBox`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/InstructionBox)".to_owned());
+    object
+}
+
 impl From<repo::Instruction> for Instruction {
     fn from(value: repo::Instruction) -> Self {
         Self {
             kind: value.kind,
-            payload: value.payload.0,
+            r#box: ReprScaleJson(value.r#box.0),
             transaction_hash: Hash(value.transaction_hash.0 .0),
             transaction_status: value.transaction_status,
             block: BigInt(value.block as u128),
@@ -603,12 +745,12 @@ impl From<repo::Signature> for Signature {
 
 /// Duration
 #[derive(ToSchema, Serialize)]
-pub struct Duration {
+pub struct TimeDuration {
     /// Number of milliseconds
     ms: BigInt,
 }
 
-impl From<std::time::Duration> for Duration {
+impl From<std::time::Duration> for TimeDuration {
     fn from(value: std::time::Duration) -> Self {
         Self {
             ms: BigInt(value.as_millis()),
@@ -645,7 +787,7 @@ pub struct Status {
     txs_rejected: u32,
     view_changes: u32,
     queue_size: u32,
-    uptime: Duration,
+    uptime: TimeDuration,
 }
 
 impl From<iroha_telemetry::metrics::Status> for Status {
@@ -657,14 +799,15 @@ impl From<iroha_telemetry::metrics::Status> for Status {
             txs_rejected: value.txs_rejected as u32,
             view_changes: value.view_changes,
             queue_size: value.queue_size as u32,
-            uptime: Duration::from(value.uptime.0),
+            uptime: TimeDuration::from(value.uptime.0),
         }
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::iroha::KeyPair;
+    use insta::assert_json_snapshot;
     use serde_json::json;
 
     use super::*;
@@ -733,5 +876,26 @@ mod test {
 
         expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
             .assert_eq(&serde_json::to_string(&Signature(value)).unwrap());
+    }
+
+    #[test]
+    fn serialize_unified_repr_int() {
+        let value = ReprScaleJson(5);
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_str() {
+        let value = ReprScaleJson("test string");
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_iroha() {
+        let value = ReprScaleJson(Some(iroha::Log::new(
+            "INFO".parse().unwrap(),
+            "wuf".to_owned(),
+        )));
+        assert_json_snapshot!(value);
     }
 }

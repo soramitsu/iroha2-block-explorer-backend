@@ -171,6 +171,6 @@ pub struct Instruction {
     pub transaction_status: TransactionStatus,
     pub created_at: DateTime<Utc>,
     pub kind: schema::InstructionKind,
-    pub payload: Json<serde_json::Value>,
+    pub r#box: Json<prelude::InstructionBox>,
     pub authority: AccountId,
 }

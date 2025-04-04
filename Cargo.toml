@@ -1,5 +1,6 @@
 [package]
 name = "iroha_explorer"
+description = "Backend API of Iroha 2 Explorer"
 version = "0.2.0"
 edition = "2021"
 
@@ -20,12 +21,14 @@ url = "2.4.0"
 axum = { version = "0.8.3", features = ["http2", "macros"] }
 tokio = { version = "1.40.0", features = ["macros", "rt"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
-utoipa = { version = "5.3.1", features = ["axum_extras", "chrono"] }
+utoipa = { version = "5.3.1", features = ["axum_extras", "chrono", "preserve_order", "preserve_path_order"] }
 utoipa-scalar = { version = "0.3.0", features = ["axum"] }
 nonzero_ext = "0.3.0"
 serde_with = "3.9.0"
 sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
 eyre = "0.6.12"
+parity-scale-codec = "3.7.4"
+base64 = "0.22.1"
 
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
