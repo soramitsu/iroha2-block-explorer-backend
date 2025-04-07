@@ -1,3 +1,4 @@
+use crate::schema::ToriiUrl;
 use iroha::client::Client;
 use iroha::crypto::KeyPair;
 use iroha::data_model::account::AccountId;
@@ -5,7 +6,6 @@ use iroha::data_model::ChainId;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct ClientWrap(Arc<Client>);
@@ -19,11 +19,11 @@ impl Deref for ClientWrap {
 }
 
 impl ClientWrap {
-    pub fn new(authority: AccountId, key_pair: KeyPair, torii_url: Url) -> Self {
+    pub fn new(authority: AccountId, key_pair: KeyPair, torii_url: ToriiUrl) -> Self {
         Client::new(iroha::config::Config {
             account: authority,
             key_pair,
-            torii_api_url: torii_url,
+            torii_api_url: torii_url.0,
             basic_auth: None,
 
             // we only use queries, and these fields are unused
@@ -33,6 +33,10 @@ impl ClientWrap {
             transaction_ttl: Duration::from_secs(0),
         })
         .into()
+    }
+
+    pub fn torii_url(&self) -> &ToriiUrl {
+        todo!()
     }
 }
 
