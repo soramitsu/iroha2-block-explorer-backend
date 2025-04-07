@@ -1,7 +1,7 @@
 use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
 use base64::Engine;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use nonzero_ext::nonzero;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -9,13 +9,16 @@ use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::str::FromStr;
+use url::Url;
 use utoipa::openapi::{RefOr, Schema};
 use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
+    pub use iroha::client::ConfigGetDTO;
     pub use iroha::crypto::*;
     pub use iroha::data_model::prelude::*;
 }
@@ -344,10 +347,16 @@ where
 /// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
 ///
 /// On the JavaScript side is recommended to parse with `BigInt`.
-#[derive(Debug, ToSchema)]
+#[derive(Debug, ToSchema, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 // TODO set `value_type` to union of string and number
 #[schema(example = 42)]
 pub struct BigInt(pub u128);
+
+impl From<u32> for BigInt {
+    fn from(value: u32) -> Self {
+        Self(value as u128)
+    }
+}
 
 impl From<u64> for BigInt {
     fn from(value: u64) -> Self {
@@ -521,9 +530,15 @@ const fn default_per_page() -> PositiveInteger {
 }
 
 /// Timestamp
-#[derive(Serialize, ToSchema, Debug)]
+#[derive(Serialize, ToSchema, Debug, Clone)]
 #[schema(example = "2024-08-11T23:08:58Z")]
 pub struct TimeStamp(chrono::DateTime<Utc>);
+
+impl From<DateTime<Utc>> for TimeStamp {
+    fn from(value: DateTime<Utc>) -> Self {
+        Self(value)
+    }
+}
 
 /// Transaction status
 #[derive(
@@ -749,7 +764,7 @@ impl From<repo::Signature> for Signature {
 }
 
 /// Duration
-#[derive(ToSchema, Serialize)]
+#[derive(ToSchema, Serialize, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub struct TimeDuration {
     /// Number of milliseconds
     ms: BigInt,
@@ -760,6 +775,12 @@ impl From<std::time::Duration> for TimeDuration {
         Self {
             ms: BigInt(value.as_millis()),
         }
+    }
+}
+
+impl TimeDuration {
+    pub fn from_millis(ms: impl Into<BigInt>) -> Self {
+        Self { ms: ms.into() }
     }
 }
 
@@ -783,31 +804,148 @@ impl FromStr for BlockHeightOrHash {
     }
 }
 
-/// Peer status
-#[derive(Serialize, ToSchema)]
-pub struct Status {
-    peers: u32,
-    blocks: u32,
-    txs_accepted: u32,
-    txs_rejected: u32,
-    view_changes: u32,
-    queue_size: u32,
-    uptime: TimeDuration,
+/// Metrics of the network as a whole
+#[derive(Serialize, ToSchema, Clone)]
+pub struct NetworkStatus {
+    /// Count of peers in the network
+    pub peers: u32,
+    /// Count of registered domains
+    pub domains: u32,
+    /// Count of registered accounts
+    pub accounts: u32,
+    /// Count of registered assets (definitions) and NFTs
+    pub assets: u32,
+    /// Accepted transactions
+    pub transactions_accepted: u32,
+    /// Rejected transactions
+    pub transactions_rejected: u32,
+    /// Height of the latest committed block
+    pub block: u32,
+    /// Timestamp when the last block was created (not committed)
+    pub block_created_at: TimeStamp,
+    /// Finalized block, the one that __cannot be reverted__ under normal network conditions
+    ///
+    /// Might be not available if there are not enough metrics from peers
+    pub finalized_block: Option<u32>,
+    /// Average commit time among all peers during a certain observation period
+    ///
+    /// Might be not available if there are not enough metrics from peers
+    pub avg_commit_time: Option<TimeDuration>,
+    /// Average time between created blocks during a certain observation period
+    pub avg_block_time: TimeDuration,
+    // /// Pipeline time calculated from Sumeragi parameters
+    // pub pipeline_time: TimeDuration,
+    // TODO: pipeline time? txs per block?
 }
 
-impl From<iroha_telemetry::metrics::Status> for Status {
-    fn from(value: iroha_telemetry::metrics::Status) -> Self {
+// On frontend, create two maps: Map<url, peer info> | Map<pub key, peer status>
+// In the main table, display based on the info map (url, connected, lookup metrics)
+// Also collect "unknown" peers and display them in a separate space
+// When info
+
+/// Metrics of a single peer
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct PeerStatus {
+    /// Peer URL
+    pub url: ToriiUrl,
+    /// Block height
+    pub block: u32,
+    /// Commit time of the last block
+    pub commit_time: TimeDuration,
+    /// Average commit time on this peer during a certain observation period
+    pub avg_commit_time: TimeDuration,
+    /// Current queue size
+    pub queue_size: u32,
+    /// Uptime since genesis block commit
+    pub uptime: TimeDuration,
+}
+
+/// Static information about peer
+#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+pub struct PeerInfo {
+    /// Peer URL
+    pub url: ToriiUrl,
+    /// Connection status to the peer
+    pub connected: bool,
+    /// Peer configuration, including its public key and some other parameters.
+    ///
+    /// Always present when connected, but could be null if peer was never connected.
+    pub config: Option<PeerConfig>,
+    /// Location of the peer, if known
+    pub location: Option<GeoLocation>,
+    /// List of peers it is connected to
+    pub connected_peers: Option<BTreeSet<PublicKey>>,
+}
+
+// TODO: use config dto from iroha directly
+#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+pub struct PeerConfig {
+    pub public_key: PublicKey,
+    pub queue_capacity: u32,
+    pub network_block_gossip_size: u32,
+    pub network_block_gossip_period: TimeDuration,
+    pub network_tx_gossip_size: u32,
+    pub network_tx_gossip_period: TimeDuration,
+}
+
+impl From<iroha::ConfigGetDTO> for PeerConfig {
+    fn from(value: iroha::ConfigGetDTO) -> Self {
         Self {
-            peers: value.peers as u32,
-            blocks: value.blocks as u32,
-            txs_accepted: value.txs_approved as u32,
-            txs_rejected: value.txs_rejected as u32,
-            view_changes: value.view_changes,
-            queue_size: value.queue_size as u32,
-            uptime: TimeDuration::from(value.uptime.0),
+            public_key: PublicKey(value.public_key),
+            queue_capacity: value.queue.capacity.get() as u32,
+            network_block_gossip_size: value.network.block_gossip_size.get(),
+            network_block_gossip_period: TimeDuration::from_millis(
+                value.network.block_gossip_period_ms,
+            ),
+            network_tx_gossip_size: value.network.transaction_gossip_size.get(),
+            network_tx_gossip_period: TimeDuration::from_millis(
+                value.network.transaction_gossip_period_ms,
+            ),
         }
     }
 }
+
+#[derive(Clone, Serialize)]
+pub enum TelemetryStreamMessage {
+    NetworkStatus(NetworkStatus),
+    PeerStatus(PeerStatus),
+    PeerInfo(PeerInfo),
+}
+
+/// Public key multihash
+#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[schema(value_type = String)]
+pub struct PublicKey(pub iroha::PublicKey);
+
+/// Geographical location
+#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+pub struct GeoLocation {
+    /// Latitude
+    pub lat: u32,
+    /// Longitude
+    pub long: u32,
+    /// Country name
+    pub country: String,
+    /// City name
+    pub city: String,
+}
+
+/// Torii URL
+#[derive(
+    Ord,
+    PartialOrd,
+    Eq,
+    PartialEq,
+    Hash,
+    Clone,
+    Debug,
+    derive_more::Display,
+    derive_more::FromStr,
+    ToSchema,
+    Serialize,
+)]
+#[schema(value_type = String)]
+pub struct ToriiUrl(pub Url);
 
 #[cfg(test)]
 mod tests {

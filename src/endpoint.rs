@@ -1,18 +1,17 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{sse, IntoResponse},
     routing::get,
     Json, Router,
 };
-use eyre::Context;
-use iroha::data_model::{query::error::QueryExecutionFail, ValidationFail};
+use futures_util::Stream;
+use futures_util::StreamExt;
 use serde::Deserialize;
-use tokio::task::spawn_blocking;
 use utoipa::{IntoParams, OpenApi};
 
-use crate::iroha_client_wrap::ClientWrap;
 use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
+use crate::telemetry::Telemetry;
 use crate::{
     repo::{self, Repo},
     schema,
@@ -20,38 +19,23 @@ use crate::{
 
 #[derive(Clone)]
 pub struct AppState {
+    telemetry: Telemetry,
     repo: Repo,
-    status_provider: StatusProvider,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
-    #[error("failed to perform Iroha query: {0}")]
-    IrohaQueryError(#[from] iroha::client::QueryError),
     #[error("database-related error: {0}")]
     Repo(#[from] repo::Error),
+    #[error("Network status is not yet available")]
+    NetworkStatusNotAvailable,
     #[error("{0}")]
     Other(#[from] eyre::Report),
-    #[cfg(debug_assertions)]
-    #[error("Status is not implemented")]
-    DummyStatus,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            AppError::IrohaQueryError(iroha::client::QueryError::Validation(
-                ValidationFail::QueryFailed(QueryExecutionFail::Find(error)),
-            )) => (
-                StatusCode::NOT_FOUND,
-                format!("Iroha couldn't find requested resource: {error}"),
-            )
-                .into_response(),
-            AppError::IrohaQueryError(err) => {
-                tracing::error!(%err, "iroha query error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
-            }
-            // AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
             AppError::Repo(repo::Error::Pagination(x)) => {
                 (StatusCode::BAD_REQUEST, format!("{x}")).into_response()
             }
@@ -62,17 +46,16 @@ impl IntoResponse for AppError {
                 tracing::error!(%err, "sqlx error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
+            AppError::NetworkStatusNotAvailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Network status is not yet available. Please try again later.",
+            )
+                .into_response(),
             AppError::Other(report) => {
                 tracing::error!(%report, "other error");
 
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
-            #[cfg(debug_assertions)]
-            AppError::DummyStatus => (
-                StatusCode::NOT_IMPLEMENTED,
-                "Status is not implemented when running `serve-test`",
-            )
-                .into_response(),
         }
     }
 }
@@ -334,7 +317,7 @@ struct AssetsIndexFilter {
 )]
 async fn assets_index(
     State(state): State<AppState>,
-    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(pagination): Query<PaginationQueryParams>,
     Query(filter): Query<AssetsIndexFilter>,
 ) -> Result<Json<Page<schema::Asset>>, AppError> {
     let page = state
@@ -443,53 +426,43 @@ async fn instructions_index(
     Ok(Json(items))
 }
 
-#[derive(Clone)]
-pub enum StatusProvider {
-    Iroha(ClientWrap),
-    #[cfg(debug_assertions)]
-    None,
+pub async fn telemetry_network(
+    State(state): State<AppState>,
+) -> Result<Json<schema::NetworkStatus>, AppError> {
+    let data = state
+        .telemetry
+        .network()
+        .await?
+        .ok_or(AppError::NetworkStatusNotAvailable)?;
+    Ok(Json(data))
 }
 
-impl StatusProvider {
-    async fn get_status(&self) -> Result<iroha_telemetry::metrics::Status, AppError> {
-        match self {
-            Self::Iroha(client) => {
-                let client = client.clone();
-                let status = spawn_blocking(move || client.get_status())
-                    .await
-                    .wrap_err("failed to get status")??;
-                Ok(status)
-            }
-            #[cfg(debug_assertions)]
-            Self::None => Err(AppError::DummyStatus),
-        }
-    }
+pub async fn telemetry_peers(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<schema::PeerStatus>>, AppError> {
+    let data = state.telemetry.peers().await?;
+    Ok(Json(data))
 }
 
-/// Show peer status
-#[utoipa::path(
-    get,
-    path = "/status",
-    responses(
-        (status = 200, body = schema::Status, example = json!({
-          "peers": 0,
-          "blocks": 31,
-          "txs_accepted": 74,
-          "txs_rejected": 35,
-          "view_changes": 0,
-          "queue_size": 0,
-          "uptime": {
-            "ms": 1_134_142_427
-          }
-        }))
-    )
-)]
-pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::Status>, AppError> {
-    let status = state.status_provider.get_status().await?;
-    Ok(Json(status.into()))
+pub async fn telemetry_live(
+    State(state): State<AppState>,
+) -> Result<sse::Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>, AppError> {
+    let stream = state
+        .telemetry
+        .live()
+        .await?
+        .map(|data| sse::Event::default().json_data(data));
+    Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
 }
 
-pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
+pub async fn peers_index(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<schema::PeerInfo>>, AppError> {
+    let data = state.telemetry.peers_info().await?;
+    Ok(Json(data))
+}
+
+pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/{:id}", get(domains_show))
@@ -506,13 +479,14 @@ pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
         .route("/transactions", get(transactions_index))
         .route("/transactions/{:hash}", get(transactions_show))
         .route("/instructions", get(instructions_index))
-        .route("/status", get(status_show))
-        .with_state(AppState {
-            repo,
-            status_provider,
-        })
+        .route("/peers", get(peers_index))
+        .route("/telemetry/network", get(telemetry_network))
+        .route("/telemetry/peers", get(telemetry_peers))
+        .route("/telemetry/live", get(telemetry_live))
+        .with_state(AppState { repo, telemetry })
 }
 
+// TODO: add new paths
 #[derive(OpenApi)]
 #[openapi(paths(
     accounts_index,
@@ -530,6 +504,5 @@ pub fn router(repo: Repo, status_provider: StatusProvider) -> Router {
     transactions_index,
     transactions_show,
     instructions_index,
-    status_show
 ))]
 pub struct Api;

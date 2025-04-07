@@ -1,23 +1,26 @@
 use crate::iroha_client_wrap::ClientWrap;
 use crate::repo::{scan_iroha, Repo};
+use crate::telemetry::blockchain::State;
+use crate::telemetry::Telemetry;
 use eyre::WrapErr;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::ConnectOptions;
 use std::time::Duration;
-use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
 pub struct DatabaseUpdateLoop {
     repo: Repo,
     client: ClientWrap,
-    last_update_block: u64,
+    telemetry: Telemetry,
+    last_update_block: u32,
 }
 
 impl DatabaseUpdateLoop {
-    pub fn new(repo: Repo, client: ClientWrap) -> Self {
+    pub fn new(repo: Repo, client: ClientWrap, telemetry: Telemetry) -> Self {
         Self {
             repo,
             client,
+            telemetry,
             last_update_block: 0,
         }
     }
@@ -39,13 +42,13 @@ impl DatabaseUpdateLoop {
     }
 
     async fn attempt(&mut self) -> eyre::Result<()> {
-        let client_clone = self.client.clone();
-        let status = spawn_blocking(move || client_clone.get_status())
-            .await?
-            .wrap_err("Failed to fetch Iroha status")?;
+        let Some(metrics) = self.telemetry.single_peer(self.client.torii_url()).await? else {
+            tracing::warn!("Skipping database update - peer metrics are not available");
+            return Ok(());
+        };
 
-        if status.blocks == self.last_update_block {
-            tracing::debug!("No new blocks - skipping update");
+        if metrics.block == self.last_update_block {
+            tracing::debug!("Skipping database update - no blocks difference");
             return Ok(());
         }
 
@@ -59,9 +62,18 @@ impl DatabaseUpdateLoop {
             .wrap_err("Failed to scan Iroha")?;
         self.repo.swap(conn).await;
 
-        self.last_update_block = status.blocks;
+        self.last_update_block = metrics.block;
         tracing::info!(%self.last_update_block, "Updated the database");
 
+        if let Err(err) = self.update_telemetry().await {
+            tracing::error!(?err, "Failed to update blockchain state in telemetry")
+        }
+
         Ok(())
+    }
+
+    async fn update_telemetry(&self) -> eyre::Result<()> {
+        let state = State::scan(&self.repo).await?;
+        self.telemetry.update_blockchain_state(state).await
     }
 }
