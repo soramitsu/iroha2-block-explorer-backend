@@ -1,6 +1,6 @@
 use crate::schema::GeoLocation;
 use crate::schema::ToriiUrl;
-use crate::telemetry::AverageCommitTime;
+use crate::telemetry::{AverageCommitTime, AVG_COMMIT_BLOCK_TIME_WINDOW};
 use eyre::eyre;
 use http::StatusCode;
 use iroha::client::{ConfigGetDTO, Status};
@@ -27,7 +27,6 @@ const GET_GEO_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const GET_CONFIG_INIT_INTERVAL: Duration = Duration::from_secs(15);
 const GET_CONFIG_MAX_INTERVAL: Duration = Duration::from_secs(300);
 const GET_CONFIG_INTERVAL_MULTIPLIER: f64 = 1.67;
-const AVG_COMMIT_TIME_WINDOW: usize = 16;
 
 #[instrument(fields(%torii_url))]
 pub fn run(torii_url: ToriiUrl) -> (mpsc::Receiver<Update>, impl Future<Output = ()> + Sized) {
@@ -247,7 +246,7 @@ async fn get_metrics_periodic_timeout(torii_url: &ToriiUrl, tx: mpsc::Sender<Upd
         NotImplemented,
     }
 
-    let mut avg_commit_time = AverageCommitTime::<AVG_COMMIT_TIME_WINDOW>::new();
+    let mut avg_commit_time = AverageCommitTime::<AVG_COMMIT_BLOCK_TIME_WINDOW>::new();
     let client = Client::new();
     let url = torii_url.0.join("/status").expect("valid url");
     let get = || async {

@@ -248,8 +248,6 @@ mod tests {
     use sqlx::{ConnectOptions, Connection};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
 
     /// This function automates the creation of `test_dump.sql`, and is meant to be run manually.
     ///
