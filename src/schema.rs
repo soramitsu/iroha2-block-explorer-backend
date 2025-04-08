@@ -9,6 +9,7 @@ use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::num::NonZero;
 use std::ops::Deref;
@@ -860,13 +861,29 @@ pub struct PeerStatus {
     pub uptime: TimeDuration,
 }
 
+impl PartialEq for PeerStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.url.eq(&other.url)
+    }
+}
+
+impl PartialOrd for PeerStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.url.partial_cmp(&other.url)
+    }
+}
+
 /// Static information about peer
-#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct PeerInfo {
     /// Peer URL
     pub url: ToriiUrl,
     /// Connection status to the peer
     pub connected: bool,
+    /// Peer does not support telemetry.
+    ///
+    /// Therefore, its status is not available.
+    pub telemetry_unsupported: bool,
     /// Peer configuration, including its public key and some other parameters.
     ///
     /// Always present when connected, but could be null if peer was never connected.
@@ -878,7 +895,7 @@ pub struct PeerInfo {
 }
 
 // TODO: use config dto from iroha directly
-#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct PeerConfig {
     pub public_key: PublicKey,
     pub queue_capacity: u32,
@@ -918,12 +935,12 @@ pub enum TelemetryStreamMessage {
 pub struct PublicKey(pub iroha::PublicKey);
 
 /// Geographical location
-#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, ToSchema, Clone, Debug, PartialEq)]
 pub struct GeoLocation {
     /// Latitude
-    pub lat: u32,
+    pub lat: f64,
     /// Longitude
-    pub long: u32,
+    pub lon: f64,
     /// Country name
     pub country: String,
     /// City name

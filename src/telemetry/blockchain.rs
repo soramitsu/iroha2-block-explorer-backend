@@ -17,7 +17,7 @@ pub struct State {
 }
 
 impl State {
-    pub async fn scan(repo: &Repo) -> Result<Self, crate::repo::Error> {
+    pub async fn scan(_repo: &Repo) -> Result<Self, crate::repo::Error> {
         todo!()
     }
 }

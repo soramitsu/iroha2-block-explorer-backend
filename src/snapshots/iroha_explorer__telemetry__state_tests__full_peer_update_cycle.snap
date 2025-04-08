@@ -5,6 +5,7 @@ expression: info
 {
   "url": "http://iroha.tech/test",
   "connected": true,
+  "telemetry_unsupported": false,
   "config": {
     "public_key": "ed0120F6E4EF7509559C05F361B36CEB3473BE8A2D5A6A1903BC887261746FDBA36728",
     "queue_capacity": 65536,
@@ -18,8 +19,8 @@ expression: info
     }
   },
   "location": {
-    "lat": 55,
-    "long": 32,
+    "lat": 55.0,
+    "lon": 32.0,
     "country": "Wonderland",
     "city": "Makondo"
   },
