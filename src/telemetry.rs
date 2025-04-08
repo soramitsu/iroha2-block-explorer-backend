@@ -350,7 +350,7 @@ impl State {
             transactions_rejected: state.txs_rejected,
             block: state.block,
             block_created_at: state.block_created_at.into(),
-            avg_block_time: state.avg_block_time.into(),
+            avg_block_time: state.avg_block_time.0.into(),
             avg_commit_time: self.avg_commit_time().map(From::from),
             finalized_block: self.finalized_block(),
         })
@@ -459,6 +459,8 @@ struct AverageCommitTime<const N: usize> {
     last_height: Option<u64>,
 }
 
+const AVG_COMMIT_BLOCK_TIME_WINDOW: usize = 16;
+
 impl<const N: usize> AverageCommitTime<N> {
     fn new() -> Self {
         Self::default()
@@ -532,6 +534,7 @@ mod avg_commit_tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
+    use crate::telemetry::blockchain::DurationMillis;
     use crate::telemetry::peer_monitor::{Metrics, Update};
     use insta::assert_json_snapshot;
     use iroha::client::ConfigGetDTO;
@@ -559,7 +562,7 @@ mod state_tests {
             // parameter_max_block_time: Duration::ZERO,
             // parameter_max_commit_time: Duration::ZERO,
             // parameter_max_txs_per_block: 0,
-            avg_block_time: Duration::ZERO,
+            avg_block_time: DurationMillis(Duration::ZERO),
         }
     }
 
