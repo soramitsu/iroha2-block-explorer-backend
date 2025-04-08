@@ -275,6 +275,17 @@ async fn scan(args: ScanArgs) -> eyre::Result<()> {
 }
 
 #[cfg(test)]
+fn init_test_logger() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| DEFAULT_LOG.into()),
+        )
+        .with(tracing_subscriber::fmt::layer().pretty())
+        .init();
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use reqwest::StatusCode;
@@ -309,13 +320,7 @@ mod tests {
     #[tokio::test]
     async fn serve_test_ok() -> eyre::Result<()> {
         // Uncomment for troubleshooting
-        // tracing_subscriber::registry()
-        //     .with(
-        //         tracing_subscriber::EnvFilter::try_from_default_env()
-        //             .unwrap_or_else(|_| DEFAULT_LOG.into()),
-        //     )
-        //     .with(tracing_subscriber::fmt::layer())
-        //     .init();
+        // init_test_logger();
 
         spawn(serve_test(ServeBaseArgs {
             ip: "127.0.0.1".parse()?,

@@ -269,6 +269,9 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn create_test_dump() -> Result<()> {
+        // Uncomment for troubleshooting
+        // crate::init_test_logger();
+
         let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_dump_db.sqlite");
         let dump_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/repo/test_dump.sql");
 
@@ -290,14 +293,6 @@ mod tests {
             transaction_ttl: Duration::from_secs(300),
         });
         let client_wrap = ClientWrap::from(client.clone());
-
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "iroha_explorer=debug,sqlx=debug".into()),
-            )
-            .with(tracing_subscriber::fmt::layer())
-            .init();
 
         debug!("Filling Iroha...");
         spawn_blocking(move || fill_iroha(&client)).await??;

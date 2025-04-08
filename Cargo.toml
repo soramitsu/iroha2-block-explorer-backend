@@ -31,12 +31,13 @@ futures-util = "0.3.30"
 async-stream = "0.3.6"
 derive_more = { version = "2.0.1", features = ["display", "from_str"] }
 circular-buffer = "1.1.0"
+reqwest = { version = "0.12.15", features = ["json"] }
+backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
 iroha_crypto = { path = "../iroha/crates/iroha_crypto", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
-reqwest = { version = "0.12.15", features = ["json"] }
 
 

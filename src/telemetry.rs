@@ -51,25 +51,14 @@ impl Telemetry {
                 let (mut recv, monitor_fut) = peer_monitor::run(url.clone());
                 set.spawn(monitor_fut);
                 set.spawn(async move {
-                    loop {
-                        match recv.recv().await {
-                            Ok(message) => {
-                                if let Err(err) = actor
-                                    .send(ActorMessage::HandlePeerMonitorUpdate(
-                                        url.clone(),
-                                        message,
-                                    ))
-                                    .await
-                                {
-                                    tracing::warn!(?err, "Actor is down");
-                                    break;
-                                };
-                            }
-                            Err(broadcast::error::RecvError::Lagged(amount)) => {
-                                tracing::warn!(%amount, "Peer monitor message receiver lagged");
-                            }
-                            Err(broadcast::error::RecvError::Closed) => break,
-                        }
+                    while let Some(message) = recv.recv().await {
+                        if let Err(err) = actor
+                            .send(ActorMessage::HandlePeerMonitorUpdate(url.clone(), message))
+                            .await
+                        {
+                            tracing::error!(?err, "Actor is down");
+                            break;
+                        };
                     }
                 });
             }
@@ -323,9 +312,15 @@ impl State {
                 state.metrics = None;
                 UpdatedSegment::Info(state.info())
             }
+            peer_monitor::Update::TelemetryUnsupported => {
+                debug_assert!(state.connected);
+                state.telemetry_unsupported = true;
+                UpdatedSegment::Info(state.info())
+            }
             peer_monitor::Update::Metrics(metrics) => {
                 debug_assert!(state.connected);
                 state.metrics = Some(metrics);
+                state.telemetry_unsupported = false;
                 UpdatedSegment::Status(state.status().expect("must exists after setting metrics"))
             }
             peer_monitor::Update::Peers(peers) => {
@@ -411,6 +406,7 @@ struct PeerNotFound;
 struct PeerState {
     url: ToriiUrl,
     connected: bool,
+    telemetry_unsupported: bool,
     config: Option<ConfigGetDTO>,
     geo: Option<GeoLocation>,
     connected_peers: Option<BTreeSet<PublicKey>>,
@@ -422,6 +418,7 @@ impl PeerState {
         Self {
             url,
             connected: false,
+            telemetry_unsupported: false,
             config: None,
             geo: None,
             connected_peers: None,
@@ -433,6 +430,7 @@ impl PeerState {
         PeerInfo {
             url: self.url.clone(),
             connected: self.connected,
+            telemetry_unsupported: self.telemetry_unsupported,
             config: self.config.as_ref().map(|x| x.clone().into()),
             location: self.geo.clone(),
             connected_peers: self.connected_peers.as_ref().map(|x| {
@@ -587,7 +585,7 @@ mod state_tests {
 
     fn factory_metrics() -> Metrics {
         Metrics {
-            peers: 0,
+            // peers: 0,
             block: 0,
             block_commit_time: Duration::ZERO,
             avg_commit_time: Duration::ZERO,
@@ -746,8 +744,8 @@ mod state_tests {
         let _ = state.update_peer(
             &url,
             Update::Geo(GeoLocation {
-                lat: 55,
-                long: 32,
+                lat: 55.0,
+                lon: 32.0,
                 country: "Wonderland".to_owned(),
                 city: "Makondo".to_owned(),
             }),
@@ -788,5 +786,45 @@ mod state_tests {
     fn no_peers_no_avg_block() {
         let state = State::new(<_>::default());
         assert_eq!(state.avg_commit_time(), None);
+    }
+
+    #[test]
+    fn geo_could_arrive_before_connection() {
+        let url = factory_url("test");
+        let mut state = State::new([&url].into_iter().cloned().collect());
+
+        let geo = GeoLocation {
+            lat: 5.0,
+            lon: 3.0,
+            city: "test".to_owned(),
+            country: "test".to_owned(),
+        };
+        state.update_peer(&url, Update::Geo(geo.clone())).unwrap();
+
+        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        assert_eq!(info.location, Some(geo));
+    }
+
+    #[test]
+    fn telemetry_unsupported() {
+        let url = factory_url("test");
+        let mut state = State::new([&url].into_iter().cloned().collect());
+
+        state
+            .update_peer(&url, Update::Connected(factory_config(b"test")))
+            .unwrap();
+        state
+            .update_peer(&url, Update::TelemetryUnsupported)
+            .unwrap();
+
+        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        assert!(info.telemetry_unsupported);
+
+        state
+            .update_peer(&url, Update::Metrics(factory_metrics()))
+            .unwrap();
+
+        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        assert!(!info.telemetry_unsupported);
     }
 }
