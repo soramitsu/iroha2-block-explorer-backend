@@ -455,7 +455,7 @@ pub async fn telemetry_live(
     Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
 }
 
-pub async fn peers_index(
+pub async fn telemetry_peers_info(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<schema::PeerInfo>>, AppError> {
     let data = state.telemetry.peers_info().await?;
@@ -479,9 +479,9 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
         .route("/transactions", get(transactions_index))
         .route("/transactions/{:hash}", get(transactions_show))
         .route("/instructions", get(instructions_index))
-        .route("/peers", get(peers_index))
         .route("/telemetry/network", get(telemetry_network))
         .route("/telemetry/peers", get(telemetry_peers))
+        .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))
         .with_state(AppState { repo, telemetry })
 }

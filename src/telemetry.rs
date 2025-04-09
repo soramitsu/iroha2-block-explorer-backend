@@ -2,7 +2,8 @@ pub mod blockchain;
 mod peer_monitor;
 
 use crate::schema::{
-    GeoLocation, NetworkStatus, PeerInfo, PeerStatus, TelemetryStreamMessage, ToriiUrl,
+    GeoLocation, NetworkStatus, PeerInfo, PeerStatus, TelemetryStreamFirstMessage,
+    TelemetryStreamMessage, ToriiUrl,
 };
 use async_stream::stream;
 use circular_buffer::CircularBuffer;
@@ -110,8 +111,10 @@ impl Telemetry {
         self.actor
             .send(ActorMessage::Stream { reply: reply_tx })
             .await?;
-        let mut rx = reply_rx.await?;
+        let (first, mut rx) = reply_rx.await?;
+        let first = TelemetryStreamMessage::First(first);
         let stream = stream! {
+            yield first;
             loop {
                 match rx.recv().await {
                     Ok(data) => yield data,
@@ -171,7 +174,10 @@ enum ActorMessage {
         reply: oneshot::Sender<Option<PeerStatus>>,
     },
     Stream {
-        reply: oneshot::Sender<broadcast::Receiver<TelemetryStreamMessage>>,
+        reply: oneshot::Sender<(
+            TelemetryStreamFirstMessage,
+            broadcast::Receiver<TelemetryStreamMessage>,
+        )>,
     },
 }
 
@@ -210,7 +216,12 @@ impl TelemetryActor {
                 }
                 ActorMessage::Stream { reply } => {
                     let rx = self.live.subscribe();
-                    let _: Result<_, _> = reply.send(rx);
+                    let first = TelemetryStreamFirstMessage {
+                        peers_info: self.state.peers_info().collect(),
+                        peers_status: self.state.peers_status().collect(),
+                        network_status: self.state.network_status(),
+                    };
+                    let _: Result<_, _> = reply.send((first, rx));
                 }
                 ActorMessage::UpdateBlockchainState(state) => {
                     self.state.update_blockchain(state);
@@ -226,9 +237,12 @@ impl TelemetryActor {
                 ActorMessage::HandlePeerMonitorUpdate(url, update) => {
                     tracing::trace!(%url, ?update, "Peer update");
                     match self.state.update_peer(&url, update) {
-                        Ok(segment) => {
+                        Ok(Some(segment)) => {
                             tracing::trace!(?segment, "Broadcast live update of peer");
                             let _: Result<_, _> = self.live.send(segment.into());
+                        }
+                        Ok(None) => {
+                            tracing::trace!("No live updates");
                         }
                         Err(PeerNotFound) => {
                             tracing::error!(%url, "Received peer update for an unknown peer");
@@ -295,7 +309,7 @@ impl State {
         &mut self,
         peer: &ToriiUrl,
         update: peer_monitor::Update,
-    ) -> Result<UpdatedSegment, PeerNotFound> {
+    ) -> Result<Option<UpdatedSegment>, PeerNotFound> {
         let state = self.peers.get_mut(peer).ok_or(PeerNotFound)?;
 
         let ret = match update {
@@ -303,34 +317,45 @@ impl State {
                 debug_assert!(!state.connected);
                 state.connected = true;
                 state.config = Some(config);
-                UpdatedSegment::Info(state.info())
+                Some(UpdatedSegment::Info(state.info()))
             }
             peer_monitor::Update::Disconnected => {
                 debug_assert!(state.connected);
                 state.connected = false;
                 state.connected_peers = None;
                 state.metrics = None;
-                UpdatedSegment::Info(state.info())
+                Some(UpdatedSegment::Info(state.info()))
             }
             peer_monitor::Update::TelemetryUnsupported => {
                 debug_assert!(state.connected);
                 state.telemetry_unsupported = true;
-                UpdatedSegment::Info(state.info())
+                Some(UpdatedSegment::Info(state.info()))
             }
             peer_monitor::Update::Metrics(metrics) => {
                 debug_assert!(state.connected);
                 state.metrics = Some(metrics);
                 state.telemetry_unsupported = false;
-                UpdatedSegment::Status(state.status().expect("must exists after setting metrics"))
+                Some(UpdatedSegment::Status(
+                    state.status().expect("must exists after setting metrics"),
+                ))
             }
             peer_monitor::Update::Peers(peers) => {
                 debug_assert!(state.connected);
-                state.connected_peers = Some(peers);
-                UpdatedSegment::Info(state.info())
+                let same = state
+                    .connected_peers
+                    .as_ref()
+                    .map(|prev| prev == &peers)
+                    .unwrap_or(false);
+                if same {
+                    None
+                } else {
+                    state.connected_peers = Some(peers);
+                    Some(UpdatedSegment::Info(state.info()))
+                }
             }
             peer_monitor::Update::Geo(geo) => {
                 state.geo = Some(geo);
-                UpdatedSegment::Info(state.info())
+                Some(UpdatedSegment::Info(state.info()))
             }
         };
         Ok(ret)
@@ -491,13 +516,13 @@ mod avg_commit_tests {
     use super::*;
 
     #[test]
-    fn avg_commit_time_is_empty() {
+    fn is_empty() {
         let avg = AverageCommitTime::<5>::new();
         assert!(avg.calculate().is_none())
     }
 
     #[test]
-    fn avg_commit_time_calculates_latest_n_window() {
+    fn calculates_latest_n_window() {
         // duration, windowed mean (4)
         let series = [
             (100u64, 100u128),
@@ -519,7 +544,7 @@ mod avg_commit_tests {
     }
 
     #[test]
-    fn avg_commit_time_deduplicates_by_height() {
+    fn deduplicates_by_height() {
         let mut avg = AverageCommitTime::<10>::new();
 
         avg.observe(1, Duration::from_millis(100));
@@ -540,17 +565,17 @@ mod state_tests {
     use iroha::client::ConfigGetDTO;
     use serde_json::json;
 
-    fn factory_key(seed: impl AsRef<[u8]>) -> PublicKey {
+    pub fn factory_key(seed: impl AsRef<[u8]>) -> PublicKey {
         iroha_crypto::KeyPair::from_seed(seed.as_ref().into(), <_>::default())
             .public_key()
             .clone()
     }
 
-    fn factory_url(id: impl std::fmt::Display) -> ToriiUrl {
+    pub fn factory_url(id: impl std::fmt::Display) -> ToriiUrl {
         ToriiUrl(format!("http://iroha.tech/{}", id).parse().unwrap())
     }
 
-    fn factory_block_state() -> blockchain::State {
+    pub fn factory_block_state() -> blockchain::State {
         blockchain::State {
             block: 0,
             block_created_at: <_>::default(),
@@ -566,7 +591,7 @@ mod state_tests {
         }
     }
 
-    fn factory_config(seed: impl AsRef<[u8]>) -> ConfigGetDTO {
+    pub fn factory_config(seed: impl AsRef<[u8]>) -> ConfigGetDTO {
         serde_json::from_value(json!({
             "public_key": factory_key(seed),
             "logger": {
@@ -586,7 +611,7 @@ mod state_tests {
         .unwrap()
     }
 
-    fn factory_metrics() -> Metrics {
+    pub fn factory_metrics() -> Metrics {
         Metrics {
             // peers: 0,
             block: 0,
@@ -829,5 +854,124 @@ mod state_tests {
 
         let info = state.peers_info().find(|x| &x.url == &url).unwrap();
         assert!(!info.telemetry_unsupported);
+    }
+
+    #[test]
+    fn no_update_when_peers_are_same() {
+        let url = factory_url("test");
+        let mut state = State::new([&url].into_iter().cloned().collect());
+        let mut peers: BTreeSet<_> = [factory_key(b"foo"), factory_key(b"bar")]
+            .into_iter()
+            .collect();
+
+        state
+            .update_peer(&url, Update::Connected(factory_config(b"test")))
+            .unwrap();
+        state
+            .update_peer(&url, Update::Peers(peers.clone()))
+            .unwrap()
+            .expect("updated");
+        assert!(state
+            .update_peer(&url, Update::Peers(peers.clone()))
+            .unwrap()
+            .is_none());
+
+        peers.insert(factory_key(b"baz"));
+        state
+            .update_peer(&url, Update::Peers(peers))
+            .unwrap()
+            .expect("updated");
+    }
+}
+
+#[cfg(test)]
+mod actor_tests {
+    use super::*;
+    use crate::telemetry::blockchain::DurationMillis;
+    use crate::telemetry::peer_monitor::Update;
+    use crate::telemetry::state_tests::{
+        factory_block_state, factory_config, factory_metrics, factory_url,
+    };
+    use futures_util::{pin_mut, StreamExt};
+    use tokio::time::timeout;
+
+    const CHANNEL_TIMEOUT: Duration = Duration::from_millis(100);
+
+    #[tokio::test]
+    async fn subscription() {
+        let urls = [factory_url("foo"), factory_url("bar")];
+        let (tx, rx) = mpsc::channel(100);
+        tokio::task::spawn(TelemetryActor::new(urls.iter().cloned().collect(), rx).run());
+        let handle = Telemetry { actor: tx.clone() };
+
+        let stream = timeout(CHANNEL_TIMEOUT, handle.live())
+            .await
+            .unwrap()
+            .unwrap();
+        pin_mut!(stream);
+
+        // first must come immediately
+        let TelemetryStreamMessage::First(first) = timeout(CHANNEL_TIMEOUT, stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("must be first")
+        };
+        assert!(first.network_status.is_none());
+        assert_eq!(first.peers_info.len(), 2);
+        assert_eq!(first.peers_status.len(), 0);
+
+        // update blockchain data
+        tx.send(ActorMessage::UpdateBlockchainState(blockchain::State {
+            block: 3,
+            avg_block_time: DurationMillis(Duration::from_millis(120)),
+            ..factory_block_state()
+        }))
+        .await
+        .unwrap();
+
+        let TelemetryStreamMessage::NetworkStatus(network) =
+            timeout(CHANNEL_TIMEOUT, stream.next())
+                .await
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("must be network status update")
+        };
+        assert_eq!(network.avg_block_time, Duration::from_millis(120).into());
+        assert_eq!(network.block, 3);
+
+        // update peer
+        tx.send(ActorMessage::HandlePeerMonitorUpdate(
+            urls[0].clone(),
+            Update::Connected(factory_config(b"foo")),
+        ))
+        .await
+        .unwrap();
+        tx.send(ActorMessage::HandlePeerMonitorUpdate(
+            urls[0].clone(),
+            Update::Metrics(factory_metrics()),
+        ))
+        .await
+        .unwrap();
+
+        let TelemetryStreamMessage::PeerInfo(info) = timeout(CHANNEL_TIMEOUT, stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("must be peer info update")
+        };
+        assert_eq!(info.url, urls[0]);
+
+        let TelemetryStreamMessage::PeerStatus(status) = timeout(CHANNEL_TIMEOUT, stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("must be peer status update")
+        };
+        assert_eq!(status.url, urls[0]);
     }
 }
