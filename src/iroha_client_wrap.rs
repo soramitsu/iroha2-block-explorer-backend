@@ -35,8 +35,8 @@ impl ClientWrap {
         .into()
     }
 
-    pub fn torii_url(&self) -> &ToriiUrl {
-        todo!()
+    pub fn torii_url(&self) -> ToriiUrl {
+        ToriiUrl(self.torii_url.clone())
     }
 }
 

@@ -869,7 +869,15 @@ impl PartialEq for PeerStatus {
 
 impl PartialOrd for PeerStatus {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.url.partial_cmp(&other.url)
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PeerStatus {}
+
+impl Ord for PeerStatus {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.url.cmp(&other.url)
     }
 }
 
@@ -892,6 +900,26 @@ pub struct PeerInfo {
     pub location: Option<GeoLocation>,
     /// List of peers it is connected to
     pub connected_peers: Option<BTreeSet<PublicKey>>,
+}
+
+impl PartialEq for PeerInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.url.eq(&other.url)
+    }
+}
+
+impl PartialOrd for PeerInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PeerInfo {}
+
+impl Ord for PeerInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.url.cmp(&other.url)
+    }
 }
 
 // TODO: use config dto from iroha directly
@@ -922,11 +950,20 @@ impl From<iroha::ConfigGetDTO> for PeerConfig {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TelemetryStreamMessage {
+    First(TelemetryStreamFirstMessage),
     NetworkStatus(NetworkStatus),
     PeerStatus(PeerStatus),
     PeerInfo(PeerInfo),
+}
+
+#[derive(Serialize, ToSchema, Clone)]
+pub struct TelemetryStreamFirstMessage {
+    pub peers_info: BTreeSet<PeerInfo>,
+    pub peers_status: BTreeSet<PeerStatus>,
+    pub network_status: Option<NetworkStatus>,
 }
 
 /// Public key multihash

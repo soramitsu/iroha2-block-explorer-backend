@@ -25,7 +25,7 @@ const GET_PEERS_INTERVAL: Duration = Duration::from_secs(60);
 const TELEMETRY_UNSUPPORTED_CHECK_INTERVAL: Duration = Duration::from_secs(300);
 const GET_GEO_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const GET_CONFIG_INIT_INTERVAL: Duration = Duration::from_secs(15);
-const GET_CONFIG_MAX_INTERVAL: Duration = Duration::from_secs(300);
+const GET_CONFIG_MAX_INTERVAL: Duration = Duration::from_secs(120);
 const GET_CONFIG_INTERVAL_MULTIPLIER: f64 = 1.67;
 
 #[instrument(fields(%torii_url))]
@@ -284,7 +284,9 @@ async fn get_metrics_periodic_timeout(torii_url: &ToriiUrl, tx: mpsc::Sender<Upd
                 tracing::warn!(?err, "Failed to get status");
                 let elapsed = Instant::now() - count_failure_from;
                 if elapsed >= GET_STATUS_DISCONNECT_TIMEOUT {
-                    tracing::warn!(%url, "")
+                    tracing::warn!(%url, "Peer does not respond for too long, terminate status checks");
+                    // disconnected message is sent externally
+                    break;
                 }
             }
             Err(GetError::NotImplemented) => {

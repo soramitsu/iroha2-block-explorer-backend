@@ -154,12 +154,16 @@ const DEFAULT_LOG: &str = "info";
 async fn main() {
     let args = Args::parse();
 
+    #[cfg(debug_assertions)]
+    let fmt_layer = tracing_subscriber::fmt::layer().pretty();
+    #[cfg(not(debug_assertions))]
+    let fmt_layer = tracing_subscriber::fmt::layer();
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| DEFAULT_LOG.into()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(fmt_layer)
         .init();
 
     match args.command {

@@ -42,7 +42,7 @@ impl DatabaseUpdateLoop {
     }
 
     async fn attempt(&mut self) -> eyre::Result<()> {
-        let Some(metrics) = self.telemetry.single_peer(self.client.torii_url()).await? else {
+        let Some(metrics) = self.telemetry.single_peer(&self.client.torii_url()).await? else {
             tracing::warn!("Skipping database update - peer metrics are not available");
             return Ok(());
         };
