@@ -814,7 +814,7 @@ pub struct NetworkStatus {
     pub domains: u32,
     /// Count of registered accounts
     pub accounts: u32,
-    /// Count of registered assets (definitions) and NFTs
+    /// Count of assets and NFTs
     pub assets: u32,
     /// Accepted transactions
     pub transactions_accepted: u32,
@@ -824,13 +824,13 @@ pub struct NetworkStatus {
     pub block: u32,
     /// Timestamp when the last block was created (not committed)
     pub block_created_at: TimeStamp,
-    /// Finalized block, the one that __cannot be reverted__ under normal network conditions
+    /// Finalized block, the one that __cannot be reverted__ under normal network conditions.
     ///
-    /// Might be not available if there are not enough metrics from peers
+    /// Might be not available if there are not enough metrics from peers.
     pub finalized_block: Option<u32>,
-    /// Average commit time among all peers during a certain observation period
+    /// Average commit time among all peers during a certain observation period.
     ///
-    /// Might be not available if there are not enough metrics from peers
+    /// Might be not available if there are not enough metrics from peers.
     pub avg_commit_time: Option<TimeDuration>,
     /// Average time between created blocks during a certain observation period
     pub avg_block_time: TimeDuration,
@@ -898,7 +898,7 @@ pub struct PeerInfo {
     pub config: Option<PeerConfig>,
     /// Location of the peer, if known
     pub location: Option<GeoLocation>,
-    /// List of peers it is connected to
+    /// Set of connected peers
     pub connected_peers: Option<BTreeSet<PublicKey>>,
 }
 
@@ -922,14 +922,20 @@ impl Ord for PeerInfo {
     }
 }
 
-// TODO: use config dto from iroha directly
+/// Peer configuration
 #[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct PeerConfig {
+    /// Public key of the peer
     pub public_key: PublicKey,
+    /// Queue capacity
     pub queue_capacity: u32,
+    /// Block gossip batch size
     pub network_block_gossip_size: u32,
+    /// Block gossip period
     pub network_block_gossip_period: TimeDuration,
+    /// Transactions gossip batch size
     pub network_tx_gossip_size: u32,
+    /// Transactions gossip period
     pub network_tx_gossip_period: TimeDuration,
 }
 
@@ -950,19 +956,31 @@ impl From<iroha::ConfigGetDTO> for PeerConfig {
     }
 }
 
+/// Container for possible messages returned from the telemetry live updates stream.
+///
+/// Variants are distinguished by the `kind` tag.
 #[derive(Clone, Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TelemetryStreamMessage {
+    /// First message, reflecting system metrics at the beginning of the connection.
+    ///
+    /// Sent immediately upon connection.
     First(TelemetryStreamFirstMessage),
+    /// Network status update
     NetworkStatus(NetworkStatus),
+    /// Peer status (i.e. dynamic metrics) update
     PeerStatus(PeerStatus),
+    /// Peer info (i.e. more static data) update
     PeerInfo(PeerInfo),
 }
 
 #[derive(Serialize, ToSchema, Clone)]
 pub struct TelemetryStreamFirstMessage {
+    /// Available peers info
     pub peers_info: BTreeSet<PeerInfo>,
+    /// Available peers status
     pub peers_status: BTreeSet<PeerStatus>,
+    /// Available network status
     pub network_status: Option<NetworkStatus>,
 }
 
