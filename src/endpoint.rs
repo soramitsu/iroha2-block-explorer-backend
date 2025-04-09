@@ -69,6 +69,7 @@ struct DomainsIndexFilter {
 #[utoipa::path(
     get,
     path = "/domains",
+    tags = ["Blockchain entities"],
     responses(
         (status = 200, description = "OK", body = Page<schema::Domain>)
     ),
@@ -92,7 +93,9 @@ async fn domains_index(
 }
 
 /// Find a domain
-#[utoipa::path(get, path = "/domains/{id}", responses(
+#[utoipa::path(get, path = "/domains/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Domain Found", body = schema::Domain),
     (status = 404, description = "Domain Not Found")
 ), params(("id" = schema::DomainId, description = "Domain ID", example = "genesis")))]
@@ -109,6 +112,7 @@ async fn domains_show(
 #[utoipa::path(
     get,
     path = "/blocks",
+    tags = ["Blockchain entities"],
     responses(
         (status = 200, description = "OK", body = [schema::Block]),
     ),
@@ -130,6 +134,7 @@ async fn blocks_index(
 #[utoipa::path(
     get,
     path = "/blocks/{height_or_hash}",
+    tags = ["Blockchain entities"],
     params(
         ("height_or_hash", description = "Height or hash of the block", example = "12")
     ),
@@ -167,6 +172,7 @@ struct TransactionsIndexFilter {
 #[utoipa::path(
     get,
     path = "/transactions",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, TransactionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = Page<schema::TransactionBase>)
@@ -191,7 +197,9 @@ async fn transactions_index(
 }
 
 /// Find a transaction by its hash
-#[utoipa::path(get, path = "/transactions/{hash}", params(
+#[utoipa::path(get, path = "/transactions/{hash}",
+    tags = ["Blockchain entities"],
+    params(
     ("hash" = schema::Hash, description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
 ), responses(
     (status = 200, description = "Transaction Found", body = schema::TransactionDetailed),
@@ -217,6 +225,7 @@ struct AccountsIndexFilter {
 #[utoipa::path(
     get,
     path = "/accounts",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AccountsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Account])
@@ -240,7 +249,9 @@ async fn accounts_index(
 }
 
 /// Find an account
-#[utoipa::path(get, path = "/accounts/{id}", responses(
+#[utoipa::path(get, path = "/accounts/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::Account),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AccountId, description = "Account ID")))]
@@ -263,6 +274,7 @@ struct AssetDefinitionsIndexFilter {
 #[utoipa::path(
     get,
     path = "/assets-definitions",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::AssetDefinition])
@@ -286,7 +298,9 @@ async fn assets_definitions_index(
 }
 
 /// Find an asset definition
-#[utoipa::path(get, path = "/assets-definitions/{id}", responses(
+#[utoipa::path(get, path = "/assets-definitions/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::AssetDefinition),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
@@ -310,6 +324,7 @@ struct AssetsIndexFilter {
 #[utoipa::path(
     get,
     path = "/assets",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AssetsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Asset])
@@ -333,7 +348,9 @@ async fn assets_index(
 }
 
 /// Find an asset
-#[utoipa::path(get, path = "/assets/{id}", responses(
+#[utoipa::path(get, path = "/assets/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::Asset),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetId, description = "Asset ID")))]
@@ -349,6 +366,7 @@ async fn assets_show(
 #[utoipa::path(
     get,
     path = "/nfts",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Nft])
@@ -372,7 +390,9 @@ async fn nfts_index(
 }
 
 /// Find an asset definition
-#[utoipa::path(get, path = "/nfts/{id}", responses(
+#[utoipa::path(get, path = "/nfts/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::Nft),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::NftId, description = "Asset Definition ID")))]
@@ -401,6 +421,7 @@ struct InstructionsIndexFilter {
 #[utoipa::path(
     get,
     path = "/instructions",
+    tags = ["Blockchain entities"],
     params(PaginationQueryParams, InstructionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Instruction])
@@ -426,6 +447,16 @@ async fn instructions_index(
     Ok(Json(items))
 }
 
+/// Get overall network telemetry
+#[utoipa::path(
+    get,
+    path = "/network",
+    tags = ["Telemetry"],
+    responses(
+        (status = 200, description = "OK", body = schema::NetworkStatus),
+        (status = 503, description = "Explorer has not yet gathered sufficient data to serve this request")
+    )
+)]
 pub async fn telemetry_network(
     State(state): State<AppState>,
 ) -> Result<Json<schema::NetworkStatus>, AppError> {
@@ -437,6 +468,15 @@ pub async fn telemetry_network(
     Ok(Json(data))
 }
 
+/// Get telemetry for all connected peers
+#[utoipa::path(
+    get,
+    path = "/peers",
+    tags = ["Telemetry"],
+    responses(
+        (status = 200, description = "OK", body = [schema::PeerStatus])
+    )
+)]
 pub async fn telemetry_peers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<schema::PeerStatus>>, AppError> {
@@ -444,6 +484,20 @@ pub async fn telemetry_peers(
     Ok(Json(data))
 }
 
+/// Receive live updates of telemetry
+#[utoipa::path(
+    get,
+    path = "/live",
+    tags = ["Telemetry"],
+    responses(
+        (
+            status = 200,
+            description = "OK, stream is ready",
+            content_type = "text/event-stream",
+            body = schema::TelemetryStreamMessage
+        )
+    )
+)]
 pub async fn telemetry_live(
     State(state): State<AppState>,
 ) -> Result<sse::Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>, AppError> {
@@ -455,6 +509,15 @@ pub async fn telemetry_live(
     Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
 }
 
+/// Get static telemetry information about peers
+#[utoipa::path(
+    get,
+    path = "/peers-info",
+    tags = ["Telemetry"],
+    responses(
+        (status = 200, description = "OK", body = [schema::PeerInfo])
+    )
+)]
 pub async fn telemetry_peers_info(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<schema::PeerInfo>>, AppError> {
@@ -488,21 +551,37 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
 
 // TODO: add new paths
 #[derive(OpenApi)]
-#[openapi(paths(
-    accounts_index,
-    accounts_show,
-    assets_index,
-    assets_show,
-    nfts_index,
-    nfts_show,
-    assets_definitions_index,
-    assets_definitions_show,
-    domains_index,
-    domains_show,
-    blocks_index,
-    blocks_show,
-    transactions_index,
-    transactions_show,
-    instructions_index,
-))]
+#[openapi(
+    paths(
+        accounts_index,
+        accounts_show,
+        assets_index,
+        assets_show,
+        nfts_index,
+        nfts_show,
+        assets_definitions_index,
+        assets_definitions_show,
+        domains_index,
+        domains_show,
+        blocks_index,
+        blocks_show,
+        transactions_index,
+        transactions_show,
+        instructions_index,
+    ),
+    nest((path = "/telemetry", api = TelemetryApi)),
+    tags(
+        (name = "Blockchain entities", description = "Routes serving blockchain entities such as blocks, transactions, domains etc"),
+        (name = "Telemetry", description = "Routes serving network and peers telemetry data")
+    )
+)]
 pub struct Api;
+
+#[derive(OpenApi)]
+#[openapi(paths(
+    telemetry_network,
+    telemetry_peers,
+    telemetry_peers_info,
+    telemetry_live
+))]
+struct TelemetryApi;

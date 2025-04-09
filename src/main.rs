@@ -248,7 +248,9 @@ async fn do_serve(repo: Repo, telemetry: Telemetry, args: ServeBaseArgs) {
 }
 
 /// Health check
-#[utoipa::path(get, path = "/api/health")]
+#[utoipa::path(get, path = "/api/health", tag = "Misc", responses(
+    (status = 200, description = "Explorer is up and running", content_type = "text/plain", example = json!("healthy"))
+))]
 async fn health_check() -> &'static str {
     "healthy"
 }
@@ -380,6 +382,12 @@ mod tests {
         )
         .await;
         ensure_status(&client, path("/api/v1/telemetry/peers"), StatusCode::OK).await;
+        ensure_status(
+            &client,
+            path("/api/v1/telemetry/peers-info"),
+            StatusCode::OK,
+        )
+        .await;
         ensure_status(&client, path("/api/v1/telemetry/live"), StatusCode::OK).await;
 
         Ok(())
