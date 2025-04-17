@@ -43,6 +43,8 @@ pub struct Domain {
     accounts: u32,
     /// Total number of assets _definitions_ in this domain
     assets: u32,
+    /// Total number of NFTs in this domain
+    nfts: u32,
 }
 
 impl From<repo::Domain> for Domain {
@@ -54,6 +56,7 @@ impl From<repo::Domain> for Domain {
             owned_by: AccountId(value.owned_by.0 .0),
             accounts: value.accounts,
             assets: value.assets,
+            nfts: value.nfts,
         }
     }
 }
@@ -70,6 +73,7 @@ pub struct Account {
     metadata: Metadata,
     owned_domains: u32,
     owned_assets: u32,
+    owned_nfts: u32,
 }
 
 impl From<repo::Account> for Account {
@@ -78,6 +82,7 @@ impl From<repo::Account> for Account {
             id: AccountId(value.id.0 .0),
             metadata: Metadata(value.metadata.into()),
             owned_assets: value.owned_assets,
+            owned_nfts: value.owned_nfts,
             owned_domains: value.owned_domains,
         }
     }

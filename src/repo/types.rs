@@ -18,6 +18,7 @@ pub struct Domain {
     pub owned_by: AccountId,
     pub accounts: u32,
     pub assets: u32,
+    pub nfts: u32,
 }
 
 #[derive(Debug, Type)]
@@ -132,6 +133,7 @@ pub struct Account {
     pub metadata: Metadata,
     pub owned_domains: u32,
     pub owned_assets: u32,
+    pub owned_nfts: u32,
 }
 
 #[derive(Debug, FromRow)]

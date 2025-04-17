@@ -466,10 +466,13 @@ where
 select format('%s@%s', accounts.signatory, accounts.domain) as id,
        accounts.metadata,
        count(distinct assets.definition_name)               as owned_assets,
+       count(distinct v_nfts.id)                            as owned_nfts,
        count(distinct domain_owners.domain)                 as owned_domains
 from accounts
      left join assets on assets.owned_by_signatory like  accounts.signatory
-and assets.owned_by_domain = accounts.domain
+                         and assets.owned_by_domain = accounts.domain
+     left join v_nfts on v_nfts.owned_by_signatory like  accounts.signatory
+                         and v_nfts.owned_by_domain = accounts.domain
      left join domain_owners on domain_owners.account_domain = accounts.domain
 and domain_owners.account_signatory like  accounts.signatory
 where ",
@@ -615,12 +618,14 @@ select
     domains.logo,
     domains.metadata,
     format('%s@%s', account_signatory, account_domain) as owned_by,
-    count(distinct accounts.signatory) as accounts,
-    count(distinct asset_definitions.name) as assets
+    count(distinct accounts.signatory)                 as accounts,
+    count(distinct asset_definitions.name)             as assets,
+    count(distinct nfts.name)                          as nfts
 from domains
          join domain_owners on domain_owners.domain = domains.name
 left join accounts on accounts.domain = domains.name
 left join asset_definitions on asset_definitions.domain = domains.name
+left join nfts on nfts.domain = domains.name
 where ",
             )
             .push_custom(self.with_where)
@@ -833,7 +838,7 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use insta::{assert_csv_snapshot, assert_debug_snapshot};
+    use insta::{assert_csv_snapshot, assert_debug_snapshot, assert_json_snapshot};
     use serde_json::json;
     use sqlx::types::JsonValue;
     use sqlx::{query, query_as, Connection};
@@ -1056,7 +1061,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_debug_snapshot!(data);
+        let mapped = data.map(crate::schema::Asset::from);
+        assert_json_snapshot!(mapped);
     }
 
     #[tokio::test]
@@ -1065,7 +1071,8 @@ mod tests {
 
         let data = repo.find_asset("rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland".parse().unwrap()).await.unwrap();
 
-        assert_debug_snapshot!(data);
+        let mapped = crate::schema::Asset::from(data);
+        assert_json_snapshot!(mapped);
     }
 
     #[tokio::test]
@@ -1081,7 +1088,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_debug_snapshot!(data);
+        let mapped = data.map(crate::schema::AssetDefinition::from);
+        assert_json_snapshot!(mapped);
     }
 
     #[tokio::test]
@@ -1097,7 +1105,41 @@ mod tests {
             .await
             .unwrap();
 
-        assert_debug_snapshot!(data);
+        let mapped = data.map(crate::schema::Nft::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_domains() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_domains(ListDomainParams {
+                pagination: default_pagination(),
+                owned_by: None,
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::Domain::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_accounts() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_accounts(ListAccountsParams {
+                pagination: default_pagination(),
+                with_asset: None,
+                domain: None,
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::Account::from);
+        assert_json_snapshot!(mapped);
     }
 
     #[tokio::test]
