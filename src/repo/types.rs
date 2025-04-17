@@ -18,6 +18,7 @@ pub struct Domain {
     pub owned_by: AccountId,
     pub accounts: u32,
     pub assets: u32,
+    pub nfts: u32,
 }
 
 #[derive(Debug, Type)]
@@ -27,6 +28,18 @@ pub struct DomainId(pub AsText<domain::DomainId>);
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
 pub struct AccountId(pub AsText<account::AccountId>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct AssetId(pub AsText<prelude::AssetId>);
+
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
+pub struct NftId(pub AsText<prelude::NftId>);
 
 #[derive(Debug, Type)]
 #[sqlx(transparent)]
@@ -47,7 +60,8 @@ pub struct Block {
     pub hash: Hash,
     pub height: NonZero<u64>,
     pub prev_block_hash: Option<Hash>,
-    pub transactions_hash: Hash,
+    /// None for an empty block
+    pub transactions_hash: Option<Hash>,
     pub created_at: DateTime<Utc>,
     pub transactions_total: u32,
     pub transactions_rejected: u32,
@@ -119,6 +133,7 @@ pub struct Account {
     pub metadata: Metadata,
     pub owned_domains: u32,
     pub owned_assets: u32,
+    pub owned_nfts: u32,
 }
 
 #[derive(Debug, FromRow)]
@@ -128,7 +143,6 @@ pub struct AssetDefinition {
     pub logo: Option<IpfsPath>,
     pub metadata: Metadata,
     pub mintable: Mintable,
-    pub r#type: AssetType,
     pub assets: u32,
 }
 
@@ -139,32 +153,18 @@ pub enum Mintable {
     Not,
 }
 
-#[derive(Debug, Type)]
-pub enum AssetType {
-    Numeric,
-    Store,
-}
-
-#[derive(Debug, Type)]
-#[sqlx(transparent)]
-pub struct AssetId(pub AsText<prelude::AssetId>);
-
 #[derive(Debug, FromRow)]
 pub struct Asset {
     pub id: AssetId,
-    pub value: Json<AssetValue>,
+    pub value: Json<prelude::Numeric>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", content = "value")]
-pub enum AssetValue {
-    Numeric(prelude::Numeric),
-    Store(Metadata),
+#[derive(Debug, FromRow)]
+pub struct Nft {
+    pub id: NftId,
+    pub owned_by: AccountId,
+    pub content: Metadata,
 }
-
-#[derive(Debug, Type)]
-#[sqlx(transparent)]
-pub struct AssetDefinitionId(pub AsText<asset::AssetDefinitionId>);
 
 #[derive(Debug, FromRow)]
 pub struct Instruction {
@@ -173,6 +173,6 @@ pub struct Instruction {
     pub transaction_status: TransactionStatus,
     pub created_at: DateTime<Utc>,
     pub kind: schema::InstructionKind,
-    pub payload: Json<serde_json::Value>,
+    pub r#box: Json<prelude::InstructionBox>,
     pub authority: AccountId,
 }
