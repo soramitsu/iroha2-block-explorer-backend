@@ -268,7 +268,7 @@ async fn get_metrics_periodic_timeout(torii_url: &ToriiUrl, tx: mpsc::Sender<Upd
             Ok(status) => {
                 tracing::trace!(?status, "Collected status");
                 count_failure_from = Instant::now();
-                let block_commit_time = Duration::from_millis(status.last_block_commit_time_ms);
+                let block_commit_time = Duration::from_millis(status.commit_time_ms);
                 avg_commit_time.observe(status.blocks, block_commit_time);
                 let metrics = Metrics {
                     // peers: status.peers as u32,
