@@ -1,42 +1,22 @@
 ---
 source: src/repo.rs
-expression: data
+expression: mapped
 ---
-Page {
-    pagination: Pagination {
-        page: PositiveInteger(
-            1,
-        ),
-        per_page: PositiveInteger(
-            10,
-        ),
-        total_pages: 1,
-        total_items: 1,
-    },
-    items: [
-        AssetDefinition {
-            id: AssetDefinitionId(
-                AsText(
-                    rose#wonderland,
-                ),
-            ),
-            owned_by: AccountId(
-                AsText(
-                    ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland,
-                ),
-            ),
-            logo: None,
-            metadata: Metadata(
-                Some(
-                    Json(
-                        Metadata(
-                            {},
-                        ),
-                    ),
-                ),
-            ),
-            mintable: Infinitely,
-            assets: 2,
-        },
-    ],
+{
+  "pagination": {
+    "page": 1,
+    "per_page": 10,
+    "total_pages": 1,
+    "total_items": 1
+  },
+  "items": [
+    {
+      "id": "rose#wonderland",
+      "mintable": "Infinitely",
+      "logo": null,
+      "metadata": {},
+      "owned_by": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+      "assets": 2
+    }
+  ]
 }
