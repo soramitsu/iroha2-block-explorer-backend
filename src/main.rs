@@ -311,7 +311,7 @@ mod tests {
         let value: ArgToriiUrls = "http://iroha.tech/1,http://iroha.tech/2".parse().unwrap();
         assert_eq!(value.some(), "http://iroha.tech/1".parse().unwrap());
         assert_eq!(
-            value.all().into_iter().collect::<Vec<_>>(),
+            value.all().iter().collect::<Vec<_>>(),
             vec![
                 &"http://iroha.tech/1".parse::<ToriiUrl>().unwrap(),
                 &"http://iroha.tech/2".parse().unwrap(),

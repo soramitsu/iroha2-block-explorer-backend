@@ -653,7 +653,7 @@ mod state_tests {
         let _ = state.update_peer(
             &url1,
             Update::Connected(ConfigGetDTO {
-                public_key: key1.clone().into(),
+                public_key: key1.clone(),
                 ..factory_config(b"key 1")
             }),
         );
@@ -664,7 +664,7 @@ mod state_tests {
         let _ = state.update_peer(
             &url2,
             Update::Connected(ConfigGetDTO {
-                public_key: key2.clone().into(),
+                public_key: key2.clone(),
                 ..factory_config(b"key 2")
             }),
         );
@@ -681,7 +681,7 @@ mod state_tests {
 
     impl FinalizedBlockHelper {
         fn new<const N: usize>(urls: [&ToriiUrl; N]) -> Self {
-            let mut state = State::new(urls.clone().into_iter().cloned().collect());
+            let mut state = State::new(urls.into_iter().cloned().collect());
             for (i, url) in urls.into_iter().enumerate() {
                 state
                     .update_peer(url, Update::Connected(factory_config([i as u8])))
@@ -693,7 +693,7 @@ mod state_tests {
         fn update_block(&mut self, url: &ToriiUrl, block: u32) {
             self.state
                 .update_peer(
-                    &url,
+                    url,
                     Update::Metrics(Metrics {
                         block,
                         ..factory_metrics()
@@ -794,14 +794,14 @@ mod state_tests {
             ),
         );
 
-        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        let info = state.peers_info().find(|x| x.url == url).unwrap();
         let status = state.single_peer_status(&url).expect("must be");
         assert_json_snapshot!(info);
         assert_json_snapshot!(status);
 
         let _ = state.update_peer(&url, Update::Disconnected);
 
-        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        let info = state.peers_info().find(|x| x.url == url).unwrap();
         assert!(info.config.is_some());
         assert!(info.location.is_some());
         assert!(info.connected_peers.is_none());
@@ -829,7 +829,7 @@ mod state_tests {
         };
         state.update_peer(&url, Update::Geo(geo.clone())).unwrap();
 
-        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        let info = state.peers_info().find(|x| x.url == url).unwrap();
         assert_eq!(info.location, Some(geo));
     }
 
@@ -845,14 +845,14 @@ mod state_tests {
             .update_peer(&url, Update::TelemetryUnsupported)
             .unwrap();
 
-        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        let info = state.peers_info().find(|x| x.url == url).unwrap();
         assert!(info.telemetry_unsupported);
 
         state
             .update_peer(&url, Update::Metrics(factory_metrics()))
             .unwrap();
 
-        let info = state.peers_info().find(|x| &x.url == &url).unwrap();
+        let info = state.peers_info().find(|x| x.url == url).unwrap();
         assert!(!info.telemetry_unsupported);
     }
 
