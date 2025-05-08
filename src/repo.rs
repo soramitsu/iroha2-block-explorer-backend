@@ -438,7 +438,7 @@ impl Repo {
             .await?)
     }
 
-    async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
+    pub async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
         loop {
             let guard = self.conn.lock().await;
             match MutexGuard::try_map(guard, Option::as_mut) {
@@ -836,14 +836,14 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use insta::{assert_csv_snapshot, assert_debug_snapshot, assert_json_snapshot};
     use serde_json::json;
     use sqlx::types::JsonValue;
     use sqlx::{query, query_as, Connection};
 
-    async fn test_repo() -> Repo {
+    pub async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
         query(include_str!("./repo/test_dump.sql"))
             .execute(&mut conn)

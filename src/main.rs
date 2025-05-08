@@ -7,11 +7,12 @@ mod endpoint;
 mod iroha_client_wrap;
 mod repo;
 mod schema;
+mod telemetry;
 mod util;
 
-use crate::endpoint::StatusProvider;
 use crate::iroha_client_wrap::ClientWrap;
 use crate::repo::{scan_iroha, Repo};
+use crate::telemetry::{Telemetry, TelemetryConfig};
 use axum::routing::get;
 use axum::{
     extract::{MatchedPath, Request},
@@ -19,16 +20,19 @@ use axum::{
 };
 use clap::Parser;
 use database_update::DatabaseUpdateLoop;
+use eyre::{eyre, Context};
 use iroha::crypto::{KeyPair, PrivateKey};
 use iroha::data_model::account::AccountId;
+use schema::ToriiUrl;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
-use url::Url;
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
 
@@ -51,32 +55,67 @@ pub enum Subcommand {
 }
 
 #[derive(Parser, Debug)]
-pub struct IrohaCredentialsArgs {
+pub struct IrohaArgs {
     /// Account ID in a form of `signatory@domain` on which behalf to perform Iroha Queries
     #[clap(long, env = "IROHA_EXPLORER_ACCOUNT")]
     pub account: AccountId,
     /// Multihash of the account's private key
     #[clap(long, env = "IROHA_EXPLORER_ACCOUNT_PRIVATE_KEY")]
     pub account_private_key: PrivateKey,
-    /// Iroha Torii URL
-    #[clap(long, env = "IROHA_EXPLORER_TORII_URL")]
-    pub torii_url: Url,
+    /// Iroha Torii URL(s), comma-separated list
+    ///
+    /// At least one is required.
+    #[clap(long, env = "IROHA_EXPLORER_TORII_URLS")]
+    pub torii_urls: ArgToriiUrls,
 }
 
-impl IrohaCredentialsArgs {
-    fn client(self) -> ClientWrap {
+impl IrohaArgs {
+    fn client(&self) -> ClientWrap {
         ClientWrap::new(
-            self.account,
-            KeyPair::from(self.account_private_key),
-            self.torii_url,
+            self.account.clone(),
+            KeyPair::from(self.account_private_key.clone()),
+            self.torii_urls.some(),
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArgToriiUrls(BTreeSet<ToriiUrl>);
+
+impl FromStr for ArgToriiUrls {
+    type Err = eyre::Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let urls = s
+            .split(',')
+            .map(FromStr::from_str)
+            .collect::<Result<BTreeSet<ToriiUrl>, _>>()
+            .wrap_err("Cannot parse URL(s)")?;
+        if urls.is_empty() {
+            Err(eyre!("There should be at least one URL"))
+        } else {
+            Ok(Self(urls))
+        }
+    }
+}
+
+impl ArgToriiUrls {
+    fn some(&self) -> ToriiUrl {
+        self.0
+            .first()
+            .cloned()
+            .expect("there should be at least one")
+    }
+
+    fn all(&self) -> &BTreeSet<ToriiUrl> {
+        &self.0
     }
 }
 
 #[derive(Parser, Debug)]
 pub struct ScanArgs {
     #[command(flatten)]
-    creds: IrohaCredentialsArgs,
+    iroha: IrohaArgs,
     /// Path to `SQLite` database to scan Iroha to
     out_file: PathBuf,
 }
@@ -96,7 +135,7 @@ pub struct ServeArgs {
     #[command(flatten)]
     base: ServeBaseArgs,
     #[command(flatten)]
-    creds: IrohaCredentialsArgs,
+    iroha: IrohaArgs,
 }
 
 #[derive(OpenApi)]
@@ -107,7 +146,7 @@ pub struct ServeArgs {
 struct Api;
 
 #[cfg(debug_assertions)]
-const DEFAULT_LOG: &str = "iroha_explorer=debug,tower_http=debug,sqlx=debug";
+const DEFAULT_LOG: &str = "iroha_explorer=trace,tower_http=debug,sqlx=debug";
 #[cfg(not(debug_assertions))]
 const DEFAULT_LOG: &str = "info";
 
@@ -115,16 +154,17 @@ const DEFAULT_LOG: &str = "info";
 async fn main() {
     let args = Args::parse();
 
+    #[cfg(debug_assertions)]
+    let fmt_layer = tracing_subscriber::fmt::layer().pretty();
+    #[cfg(not(debug_assertions))]
+    let fmt_layer = tracing_subscriber::fmt::layer();
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| DEFAULT_LOG.into()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(fmt_layer)
         .init();
-
-    // let key_pair = KeyPair::from(args.account_private_key);
-    // let iroha_client = ClientWrap::new(args.account, key_pair, args.torii_url);
 
     match args.command {
         Subcommand::Serve(args) => serve(args).await,
@@ -136,18 +176,22 @@ async fn main() {
 
 async fn serve(args: ServeArgs) {
     let repo = Repo::new(None);
-    let client = args.creds.client();
+    let client = args.iroha.client();
 
     let mut set = JoinSet::<()>::new();
+    let (telemetry, telemetry_fut) = Telemetry::start(TelemetryConfig {
+        urls: args.iroha.torii_urls.all().clone(),
+    });
+    set.spawn(telemetry_fut);
     set.spawn({
         let repo = repo.clone();
-        let client = client.clone();
+        let tel = telemetry.clone();
         async move {
-            do_serve(repo, StatusProvider::Iroha(client), args.base).await;
+            do_serve(repo, tel, args.base).await;
         }
     });
     set.spawn(async move {
-        DatabaseUpdateLoop::new(repo, client).run().await;
+        DatabaseUpdateLoop::new(repo, client, telemetry).run().await;
     });
     set.join_all().await;
 }
@@ -159,18 +203,22 @@ async fn serve_test(args: ServeBaseArgs) {
     tracing::info!("test data is ready");
 
     let mut set = JoinSet::<()>::new();
+    let (telemetry, telemetry_fut) = Telemetry::start(TelemetryConfig {
+        urls: <_>::default(),
+    });
+    set.spawn(telemetry_fut);
     set.spawn(async move {
-        do_serve(repo.clone(), StatusProvider::None, args).await;
+        do_serve(repo.clone(), telemetry, args).await;
     });
     set.join_all().await;
 }
 
-async fn do_serve(repo: Repo, status_provider: StatusProvider, args: ServeBaseArgs) {
+async fn do_serve(repo: Repo, telemetry: Telemetry, args: ServeBaseArgs) {
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/api/docs", Api::openapi()))
         .route("/api/health", get(health_check))
-        .nest("/api/v1", endpoint::router(repo, status_provider))
+        .nest("/api/v1", endpoint::router(repo, telemetry))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched
@@ -194,13 +242,15 @@ async fn do_serve(repo: Repo, status_provider: StatusProvider, args: ServeBaseAr
     let listener = tokio::net::TcpListener::bind((args.ip, args.port))
         .await
         .unwrap();
-    tracing::debug!("listening on http://{}", listener.local_addr().unwrap());
+    tracing::info!("listening on http://{}", listener.local_addr().unwrap());
 
     axum::serve(listener, app).await.unwrap()
 }
 
 /// Health check
-#[utoipa::path(get, path = "/api/health")]
+#[utoipa::path(get, path = "/api/health", tag = "Misc", responses(
+    (status = 200, description = "Explorer is up and running", content_type = "text/plain", example = json!("healthy"))
+))]
 async fn health_check() -> &'static str {
     "healthy"
 }
@@ -224,10 +274,21 @@ async fn scan(args: ScanArgs) -> eyre::Result<()> {
         .create_if_missing(true)
         .connect()
         .await?;
-    scan_iroha(&args.creds.client(), &mut conn).await?;
+    scan_iroha(&args.iroha.client(), &mut conn).await?;
     conn.close().await?;
     tracing::info!(?args.out_file, "written");
     Ok(())
+}
+
+#[cfg(test)]
+fn init_test_logger() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| DEFAULT_LOG.into()),
+        )
+        .with(tracing_subscriber::fmt::layer().pretty())
+        .init();
 }
 
 #[cfg(test)]
@@ -245,16 +306,27 @@ mod tests {
         Args::command().debug_assert();
     }
 
+    #[test]
+    fn parse_torii_urls() {
+        let value: ArgToriiUrls = "http://iroha.tech/1,http://iroha.tech/2".parse().unwrap();
+        assert_eq!(value.some(), "http://iroha.tech/1".parse().unwrap());
+        assert_eq!(
+            value.all().iter().collect::<Vec<_>>(),
+            vec![
+                &"http://iroha.tech/1".parse::<ToriiUrl>().unwrap(),
+                &"http://iroha.tech/2".parse().unwrap(),
+            ]
+        );
+
+        let _ = ""
+            .parse::<ArgToriiUrls>()
+            .expect_err("should fail with nothing");
+    }
+
     #[tokio::test]
     async fn serve_test_ok() -> eyre::Result<()> {
         // Uncomment for troubleshooting
-        // tracing_subscriber::registry()
-        //     .with(
-        //         tracing_subscriber::EnvFilter::try_from_default_env()
-        //             .unwrap_or_else(|_| DEFAULT_LOG.into()),
-        //     )
-        //     .with(tracing_subscriber::fmt::layer())
-        //     .init();
+        // init_test_logger();
 
         spawn(serve_test(ServeBaseArgs {
             ip: "127.0.0.1".parse()?,
@@ -303,7 +375,20 @@ mod tests {
             StatusCode::OK,
         )
         .await;
-        ensure_status(&client, path("/api/v1/status"), StatusCode::NOT_IMPLEMENTED).await;
+        ensure_status(
+            &client,
+            path("/api/v1/telemetry/network"),
+            StatusCode::SERVICE_UNAVAILABLE,
+        )
+        .await;
+        ensure_status(&client, path("/api/v1/telemetry/peers"), StatusCode::OK).await;
+        ensure_status(
+            &client,
+            path("/api/v1/telemetry/peers-info"),
+            StatusCode::OK,
+        )
+        .await;
+        ensure_status(&client, path("/api/v1/telemetry/live"), StatusCode::OK).await;
 
         Ok(())
     }

@@ -1,13 +1,11 @@
 [package]
 name = "iroha_explorer"
 description = "Backend API of Iroha 2 Explorer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-# FIXME: `iroha` must expose `Status` struct
-iroha_telemetry = { git = "https://github.com/hyperledger/iroha.git", rev = "22d84e7ba64df81c63b2006ced467f6be5752833" }
-iroha = { git = "https://github.com/hyperledger/iroha.git", rev = "22d84e7ba64df81c63b2006ced467f6be5752833" }
+iroha = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
@@ -29,12 +27,17 @@ sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
 eyre = "0.6.12"
 parity-scale-codec = "3.7.4"
 base64 = "0.22.1"
+futures-util = "0.3.30"
+async-stream = "0.3.6"
+derive_more = { version = "2.0.1", features = ["display", "from_str"] }
+circular-buffer = "1.1.0"
+reqwest = { version = "0.12.15", features = ["json"] }
+backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
-iroha_crypto = { git = "https://github.com/hyperledger/iroha.git", rev = "22d84e7ba64df81c63b2006ced467f6be5752833", features = ["rand"] }
+iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
-reqwest = { version = "0.12.15", features = ["json"] }
 
 

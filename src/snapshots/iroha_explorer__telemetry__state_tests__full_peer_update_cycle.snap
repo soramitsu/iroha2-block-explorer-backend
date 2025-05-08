@@ -1,0 +1,31 @@
+---
+source: src/telemetry.rs
+expression: info
+---
+{
+  "url": "http://iroha.tech/test",
+  "connected": true,
+  "telemetry_unsupported": false,
+  "config": {
+    "public_key": "ed0120F6E4EF7509559C05F361B36CEB3473BE8A2D5A6A1903BC887261746FDBA36728",
+    "queue_capacity": 65536,
+    "network_block_gossip_size": 4,
+    "network_block_gossip_period": {
+      "ms": 10000
+    },
+    "network_tx_gossip_size": 500,
+    "network_tx_gossip_period": {
+      "ms": 1000
+    }
+  },
+  "location": {
+    "lat": 55.0,
+    "lon": 32.0,
+    "country": "Wonderland",
+    "city": "Makondo"
+  },
+  "connected_peers": [
+    "ed0120C9B1EA0502ABE3B25F6A6C9687E22C1665D1AC5BBD98B02006FEFFE259820D44",
+    "ed0120F9C065A8E1A37AF6C4A6CDEE715DFD2E02D29BEE7B8AA9FF1AAE4D19F67A56E5"
+  ]
+}
