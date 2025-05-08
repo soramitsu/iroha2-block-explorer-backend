@@ -5,7 +5,7 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-iroha = { git = "https://github.com/0x009922/iroha.git", branch = "commit-time-metrics" }
+iroha = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
@@ -37,7 +37,7 @@ backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
-iroha_crypto = { git = "https://github.com/0x009922/iroha.git", branch = "commit-time-metrics", features = ["rand"] }
+iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
 
 
