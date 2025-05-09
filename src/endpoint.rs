@@ -1,20 +1,17 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{sse, IntoResponse},
     routing::get,
     Json, Router,
 };
-use eyre::Context;
-use iroha::data_model::{query::error::QueryExecutionFail, ValidationFail};
+use futures_util::Stream;
+use futures_util::StreamExt;
 use serde::Deserialize;
-use tokio::task::spawn_blocking;
-use utoipa::IntoParams;
+use utoipa::{IntoParams, OpenApi};
 
-use crate::iroha_client_wrap::ClientWrap;
 use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
+use crate::telemetry::Telemetry;
 use crate::{
     repo::{self, Repo},
     schema,
@@ -22,20 +19,16 @@ use crate::{
 
 #[derive(Clone)]
 pub struct AppState {
-    iroha: Arc<ClientWrap>,
+    telemetry: Telemetry,
     repo: Repo,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
-    #[error("failed to perform Iroha query: {0}")]
-    IrohaQueryError(#[from] iroha::client::QueryError),
-    // #[error("not found")]
-    // NotFound,
-    // #[error("invalid pagination: {0}")]
-    // BadPage(#[from] ReversePaginationError),
     #[error("database-related error: {0}")]
     Repo(#[from] repo::Error),
+    #[error("Network status is not yet available")]
+    NetworkStatusNotAvailable,
     #[error("{0}")]
     Other(#[from] eyre::Report),
 }
@@ -43,18 +36,6 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            AppError::IrohaQueryError(iroha::client::QueryError::Validation(
-                ValidationFail::QueryFailed(QueryExecutionFail::Find(error)),
-            )) => (
-                StatusCode::NOT_FOUND,
-                format!("Iroha couldn't find requested resource: {error}"),
-            )
-                .into_response(),
-            AppError::IrohaQueryError(err) => {
-                tracing::error!(%err, "iroha query error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
-            }
-            // AppError::NotFound => (StatusCode::NOT_FOUND, "Not found").into_response(),
             AppError::Repo(repo::Error::Pagination(x)) => {
                 (StatusCode::BAD_REQUEST, format!("{x}")).into_response()
             }
@@ -65,6 +46,11 @@ impl IntoResponse for AppError {
                 tracing::error!(%err, "sqlx error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
+            AppError::NetworkStatusNotAvailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Network status is not yet available. Please try again later.",
+            )
+                .into_response(),
             AppError::Other(report) => {
                 tracing::error!(%report, "other error");
 
@@ -82,9 +68,10 @@ struct DomainsIndexFilter {
 /// List domains
 #[utoipa::path(
     get,
-    path = "/api/v1/domains",
+    path = "/domains",
+    tags = ["Blockchain entities"],
     responses(
-        (status = 200, description = "OK", body = schema::DomainsPage)
+        (status = 200, description = "OK", body = Page<schema::Domain>)
     ),
     params(schema::PaginationQueryParams, DomainsIndexFilter)
 )]
@@ -106,7 +93,9 @@ async fn domains_index(
 }
 
 /// Find a domain
-#[utoipa::path(get, path = "/api/v1/domains/{id}", responses(
+#[utoipa::path(get, path = "/domains/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Domain Found", body = schema::Domain),
     (status = 404, description = "Domain Not Found")
 ), params(("id" = schema::DomainId, description = "Domain ID", example = "genesis")))]
@@ -122,7 +111,8 @@ async fn domains_show(
 // TODO: describe page number
 #[utoipa::path(
     get,
-    path = "/api/v1/blocks",
+    path = "/blocks",
+    tags = ["Blockchain entities"],
     responses(
         (status = 200, description = "OK", body = [schema::Block]),
     ),
@@ -143,7 +133,8 @@ async fn blocks_index(
 /// Find a block by its hash/height
 #[utoipa::path(
     get,
-    path = "/api/v1/blocks/{height_or_hash}",
+    path = "/blocks/{height_or_hash}",
+    tags = ["Blockchain entities"],
     params(
         ("height_or_hash", description = "Height or hash of the block", example = "12")
     ),
@@ -180,10 +171,11 @@ struct TransactionsIndexFilter {
 /// List transactions
 #[utoipa::path(
     get,
-    path = "/api/v1/transactions",
+    path = "/transactions",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, TransactionsIndexFilter),
     responses(
-        (status = 200, description = "OK", body = [schema::Transaction])
+        (status = 200, description = "OK", body = Page<schema::TransactionBase>)
     )
 )]
 async fn transactions_index(
@@ -205,10 +197,12 @@ async fn transactions_index(
 }
 
 /// Find a transaction by its hash
-#[utoipa::path(get, path = "/api/v1/transactions/{hash}", params(
+#[utoipa::path(get, path = "/transactions/{hash}",
+    tags = ["Blockchain entities"],
+    params(
     ("hash" = schema::Hash, description = "Hash of the transaction", example = "9FC55BD948D0CDE0838F6D86FA069A258F033156EE9ACEF5A5018BC9589473F3")
 ), responses(
-    (status = 200, description = "Transaction Found", body = schema::TransactionWithHash),
+    (status = 200, description = "Transaction Found", body = schema::TransactionDetailed),
     (status = 404, description = "Transaction Not Found")
 ))]
 async fn transactions_show(
@@ -230,7 +224,8 @@ struct AccountsIndexFilter {
 /// List accounts
 #[utoipa::path(
     get,
-    path = "/api/v1/accounts",
+    path = "/accounts",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AccountsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Account])
@@ -254,7 +249,9 @@ async fn accounts_index(
 }
 
 /// Find an account
-#[utoipa::path(get, path = "/api/v1/accounts/{id}", responses(
+#[utoipa::path(get, path = "/accounts/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::Account),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AccountId, description = "Account ID")))]
@@ -276,7 +273,8 @@ struct AssetDefinitionsIndexFilter {
 /// List asset definitions
 #[utoipa::path(
     get,
-    path = "/api/v1/assets-definitions",
+    path = "/assets-definitions",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::AssetDefinition])
@@ -300,7 +298,9 @@ async fn assets_definitions_index(
 }
 
 /// Find an asset definition
-#[utoipa::path(get, path = "/api/v1/assets-definitions/{id}", responses(
+#[utoipa::path(get, path = "/assets-definitions/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::AssetDefinition),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetDefinitionId, description = "Asset Definition ID")))]
@@ -323,7 +323,8 @@ struct AssetsIndexFilter {
 /// List assets
 #[utoipa::path(
     get,
-    path = "/api/v1/assets",
+    path = "/assets",
+    tags = ["Blockchain entities"],
     params(schema::PaginationQueryParams, AssetsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Asset])
@@ -331,7 +332,7 @@ struct AssetsIndexFilter {
 )]
 async fn assets_index(
     State(state): State<AppState>,
-    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(pagination): Query<PaginationQueryParams>,
     Query(filter): Query<AssetsIndexFilter>,
 ) -> Result<Json<Page<schema::Asset>>, AppError> {
     let page = state
@@ -347,7 +348,9 @@ async fn assets_index(
 }
 
 /// Find an asset
-#[utoipa::path(get, path = "/api/v1/assets/{id}", responses(
+#[utoipa::path(get, path = "/assets/{id}",
+    tags = ["Blockchain entities"],
+    responses(
     (status = 200, description = "Found", body = schema::Asset),
     (status = 404, description = "Not Found")
 ), params(("id" = schema::AssetId, description = "Asset ID")))]
@@ -357,6 +360,48 @@ async fn assets_show(
 ) -> Result<Json<schema::Asset>, AppError> {
     let item = state.repo.find_asset(id.0).await?;
     Ok(Json(item.into()))
+}
+
+/// List NFTs
+#[utoipa::path(
+    get,
+    path = "/nfts",
+    tags = ["Blockchain entities"],
+    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+    responses(
+        (status = 200, description = "OK", body = [schema::Nft])
+    )
+)]
+async fn nfts_index(
+    State(state): State<AppState>,
+    Query(pagination): Query<schema::PaginationQueryParams>,
+    Query(filter): Query<AssetDefinitionsIndexFilter>,
+) -> Result<Json<Page<schema::Nft>>, AppError> {
+    let page = state
+        .repo
+        .list_nfts(repo::ListNftsParams {
+            pagination,
+            domain: filter.domain.map(|x| x.0),
+            owned_by: filter.owned_by.map(|x| x.0),
+        })
+        .await?
+        .map(schema::Nft::from);
+    Ok(Json(page))
+}
+
+/// Find an asset definition
+#[utoipa::path(get, path = "/nfts/{id}",
+    tags = ["Blockchain entities"],
+    responses(
+    (status = 200, description = "Found", body = schema::Nft),
+    (status = 404, description = "Not Found")
+), params(("id" = schema::NftId, description = "Asset Definition ID")))]
+async fn nfts_show(
+    State(state): State<AppState>,
+    Path(id): Path<schema::NftId>,
+) -> Result<Json<schema::Nft>, AppError> {
+    let item = state.repo.find_nft(id.0).await?.into();
+    Ok(Json(item))
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -375,7 +420,8 @@ struct InstructionsIndexFilter {
 /// List instructions
 #[utoipa::path(
     get,
-    path = "/api/v1/instructions",
+    path = "/instructions",
+    tags = ["Blockchain entities"],
     params(PaginationQueryParams, InstructionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Instruction])
@@ -401,50 +447,141 @@ async fn instructions_index(
     Ok(Json(items))
 }
 
-/// Show peer status
+/// Get overall network telemetry
 #[utoipa::path(
     get,
-    path = "/api/v1/status",
+    path = "/network",
+    tags = ["Telemetry"],
     responses(
-        (status = 200, body = schema::Status, example = json!({
-          "peers": 0,
-          "blocks": 31,
-          "txs_accepted": 74,
-          "txs_rejected": 35,
-          "view_changes": 0,
-          "queue_size": 0,
-          "uptime": {
-            "ms": 1_134_142_427
-          }
-        }))
+        (status = 200, description = "OK", body = schema::NetworkStatus),
+        (status = 503, description = "Explorer has not yet gathered sufficient data to serve this request")
     )
 )]
-pub async fn status_show(State(state): State<AppState>) -> Result<Json<schema::Status>, AppError> {
-    let client = state.iroha.clone();
-    let status = spawn_blocking(move || client.get_status())
-        .await
-        .wrap_err("failed to join task")??;
-    Ok(Json(status.into()))
+pub async fn telemetry_network(
+    State(state): State<AppState>,
+) -> Result<Json<schema::NetworkStatus>, AppError> {
+    let data = state
+        .telemetry
+        .network()
+        .await?
+        .ok_or(AppError::NetworkStatusNotAvailable)?;
+    Ok(Json(data))
 }
 
-pub fn router(iroha: ClientWrap, repo: Repo) -> Router {
+/// Get telemetry for all connected peers
+#[utoipa::path(
+    get,
+    path = "/peers",
+    tags = ["Telemetry"],
+    responses(
+        (status = 200, description = "OK", body = [schema::PeerStatus])
+    )
+)]
+pub async fn telemetry_peers(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<schema::PeerStatus>>, AppError> {
+    let data = state.telemetry.peers().await?;
+    Ok(Json(data))
+}
+
+/// Receive live updates of telemetry
+#[utoipa::path(
+    get,
+    path = "/live",
+    tags = ["Telemetry"],
+    responses(
+        (
+            status = 200,
+            description = "OK, stream is ready",
+            content_type = "text/event-stream",
+            body = schema::TelemetryStreamMessage
+        )
+    )
+)]
+pub async fn telemetry_live(
+    State(state): State<AppState>,
+) -> Result<sse::Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>, AppError> {
+    let stream = state
+        .telemetry
+        .live()
+        .await?
+        .map(|data| sse::Event::default().json_data(data));
+    Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
+}
+
+/// Get static telemetry information about peers
+#[utoipa::path(
+    get,
+    path = "/peers-info",
+    tags = ["Telemetry"],
+    responses(
+        (status = 200, description = "OK", body = [schema::PeerInfo])
+    )
+)]
+pub async fn telemetry_peers_info(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<schema::PeerInfo>>, AppError> {
+    let data = state.telemetry.peers_info().await?;
+    Ok(Json(data))
+}
+
+pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
-        .route("/domains/:id", get(domains_show))
+        .route("/domains/{:id}", get(domains_show))
         .route("/accounts", get(accounts_index))
-        .route("/accounts/:id", get(accounts_show))
+        .route("/accounts/{:id}", get(accounts_show))
         .route("/assets-definitions", get(assets_definitions_index))
-        .route("/assets-definitions/:id", get(assets_definitions_show))
+        .route("/assets-definitions/{:id}", get(assets_definitions_show))
         .route("/assets", get(assets_index))
-        .route("/assets/:id", get(assets_show))
+        .route("/assets/{:id}", get(assets_show))
+        .route("/nfts", get(nfts_index))
+        .route("/nfts/{:id}", get(nfts_show))
         .route("/blocks", get(blocks_index))
-        .route("/blocks/:height_or_hash", get(blocks_show))
+        .route("/blocks/{:height_or_hash}", get(blocks_show))
         .route("/transactions", get(transactions_index))
-        .route("/transactions/:hash", get(transactions_show))
+        .route("/transactions/{:hash}", get(transactions_show))
         .route("/instructions", get(instructions_index))
-        .route("/status", get(status_show))
-        .with_state(AppState {
-            iroha: Arc::new(iroha),
-            repo,
-        })
+        .route("/telemetry/network", get(telemetry_network))
+        .route("/telemetry/peers", get(telemetry_peers))
+        .route("/telemetry/peers-info", get(telemetry_peers_info))
+        .route("/telemetry/live", get(telemetry_live))
+        .with_state(AppState { repo, telemetry })
 }
+
+// TODO: add new paths
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        accounts_index,
+        accounts_show,
+        assets_index,
+        assets_show,
+        nfts_index,
+        nfts_show,
+        assets_definitions_index,
+        assets_definitions_show,
+        domains_index,
+        domains_show,
+        blocks_index,
+        blocks_show,
+        transactions_index,
+        transactions_show,
+        instructions_index,
+    ),
+    nest((path = "/telemetry", api = TelemetryApi)),
+    tags(
+        (name = "Blockchain entities", description = "Routes serving blockchain entities such as blocks, transactions, domains etc"),
+        (name = "Telemetry", description = "Routes serving network and peers telemetry data")
+    )
+)]
+pub struct Api;
+
+#[derive(OpenApi)]
+#[openapi(paths(
+    telemetry_network,
+    telemetry_peers,
+    telemetry_peers_info,
+    telemetry_live
+))]
+struct TelemetryApi;

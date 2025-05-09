@@ -1,0 +1,11 @@
+---
+source: src/schema.rs
+expression: value
+---
+{
+  "scale": "AQIMd3Vm",
+  "json": {
+    "level": "INFO",
+    "msg": "wuf"
+  }
+}
