@@ -1,15 +1,25 @@
-use std::{num::NonZero, str::FromStr};
-
 use crate::repo;
 use crate::util::{DirectPagination, ReversePagination};
-use chrono::Utc;
+use base64::Engine;
+use chrono::{DateTime, Utc};
 use nonzero_ext::nonzero;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
-use utoipa::{IntoParams, ToSchema};
+use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
+use std::num::NonZero;
+use std::ops::Deref;
+use std::str::FromStr;
+use url::Url;
+use utoipa::openapi::{RefOr, Schema};
+use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
+    pub use iroha::client::ConfigGetDTO;
     pub use iroha::crypto::*;
     pub use iroha::data_model::prelude::*;
 }
@@ -37,6 +47,8 @@ pub struct Domain {
     accounts: u32,
     /// Total number of assets _definitions_ in this domain
     assets: u32,
+    /// Total number of NFTs in this domain
+    nfts: u32,
 }
 
 impl From<repo::Domain> for Domain {
@@ -48,6 +60,7 @@ impl From<repo::Domain> for Domain {
             owned_by: AccountId(value.owned_by.0 .0),
             accounts: value.accounts,
             assets: value.assets,
+            nfts: value.nfts,
         }
     }
 }
@@ -64,6 +77,7 @@ pub struct Account {
     metadata: Metadata,
     owned_domains: u32,
     owned_assets: u32,
+    owned_nfts: u32,
 }
 
 impl From<repo::Account> for Account {
@@ -72,6 +86,7 @@ impl From<repo::Account> for Account {
             id: AccountId(value.id.0 .0),
             metadata: Metadata(value.metadata.into()),
             owned_assets: value.owned_assets,
+            owned_nfts: value.owned_nfts,
             owned_domains: value.owned_domains,
         }
     }
@@ -94,7 +109,6 @@ impl From<repo::AccountId> for AccountId {
 #[derive(ToSchema, Serialize)]
 pub struct AssetDefinition {
     id: AssetDefinitionId,
-    r#type: AssetType,
     mintable: Mintable,
     logo: Option<IpfsPath>,
     metadata: Metadata,
@@ -106,10 +120,6 @@ impl From<repo::AssetDefinition> for AssetDefinition {
     fn from(value: repo::AssetDefinition) -> Self {
         Self {
             id: AssetDefinitionId(value.id.0 .0),
-            r#type: match value.r#type {
-                repo::AssetType::Numeric => AssetType::Numeric,
-                repo::AssetType::Store => AssetType::Store,
-            },
             mintable: match value.mintable {
                 repo::Mintable::Infinitely => Mintable::Infinitely,
                 repo::Mintable::Once => Mintable::Once,
@@ -123,16 +133,32 @@ impl From<repo::AssetDefinition> for AssetDefinition {
     }
 }
 
+#[derive(ToSchema, Serialize)]
+pub struct Nft {
+    id: NftId,
+    owned_by: AccountId,
+    content: Metadata,
+}
+
+impl From<repo::Nft> for Nft {
+    fn from(value: repo::Nft) -> Self {
+        Self {
+            id: NftId(value.id.0 .0),
+            content: Metadata(value.content.into()),
+            owned_by: AccountId(value.owned_by.0 .0),
+        }
+    }
+}
+
 /// Asset Definition ID. Represented in a form of `asset#domain`.
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses#wonderland")]
 pub struct AssetDefinitionId(pub iroha::AssetDefinitionId);
 
-#[derive(ToSchema, Serialize)]
-pub enum AssetType {
-    Numeric,
-    Store,
-}
+/// Non-fungible token ID. Represented in a form of `nft$domain`.
+#[derive(ToSchema, Serialize, Deserialize)]
+#[schema(value_type = String, example = "rose$wonderland")]
+pub struct NftId(pub iroha::NftId);
 
 #[derive(ToSchema, Serialize)]
 pub enum Mintable {
@@ -144,21 +170,14 @@ pub enum Mintable {
 #[derive(ToSchema, Serialize)]
 pub struct Asset {
     id: AssetId,
-    value: AssetValue,
+    value: Decimal,
 }
 
 impl From<repo::Asset> for Asset {
     fn from(value: repo::Asset) -> Self {
         Self {
             id: AssetId(value.id.0 .0),
-            value: match value.value.0 {
-                repo::AssetValue::Numeric(numeric) => AssetValue::Numeric {
-                    value: Decimal::from(&numeric),
-                },
-                repo::AssetValue::Store(map) => AssetValue::Store {
-                    metadata: Metadata(map.into()),
-                },
-            },
+            value: Decimal::from(&value.value.0),
         }
     }
 }
@@ -172,13 +191,6 @@ impl From<repo::Asset> for Asset {
 #[derive(ToSchema, Serialize, Deserialize)]
 #[schema(value_type = String, example = "roses##ed0120B23E14F659B91736AAB980B6ADDCE4B1DB8A138AB0267E049C082A744471714E@wonderland")]
 pub struct AssetId(pub iroha::AssetId);
-
-#[derive(ToSchema, Serialize)]
-#[serde(tag = "kind")]
-pub enum AssetValue {
-    Numeric { value: Decimal },
-    Store { metadata: Metadata },
-}
 
 // TODO: figure out how to represent decimal
 #[derive(ToSchema, Serialize)]
@@ -214,16 +226,138 @@ impl From<repo::Metadata> for Metadata {
 #[schema(value_type = String)]
 pub struct IpfsPath(String);
 
+// #[derive(ToSchema)]
+// #[schema(bound = "T: parity_scale_codec::Encode")]
+pub struct ScaleBinary<T>(T);
+
+impl<T> PartialSchema for ScaleBinary<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Value represented as SCALE-encoded binary data in base64.\n\n\
+                 Should usually be decoded on the client side using [`@iroha/core`](https://jsr.io/@iroha/core).",
+            ))
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .content_encoding("base64")
+            .examples([json!("AQIMd3Vm")])
+            .into()
+    }
+}
+
+impl<T> ToSchema for ScaleBinary<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ScaleBinary")
+    }
+}
+
+impl<T> Serialize for ScaleBinary<T>
+where
+    T: parity_scale_codec::Encode,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let scale = self.0.encode();
+        let as_str = base64::prelude::BASE64_STANDARD.encode(&scale);
+        serializer.serialize_str(&as_str)
+    }
+}
+
+// /// Generic container of some value, representing it in both JSON and SCALE
+// #[derive(ToSchema, Serialize)]
+// #[schema(
+//     example = json!({"scale": "AQIMd3Vm","json": {"level": "INFO","msg": "wuf"}})
+// )]
+// pub struct ReprScaleJson2 {
+//     /// JSON representation of the value
+//     #[schema(value_type = Object)]
+//     json: Box<dyn Serialize>,
+//     /// SCALE representation of the value, `base64`-encoded
+//     #[schema(value_type = String, content_encoding = "base64")]
+//     scale: Box<dyn ScaleEncode>,
+// }
+
+// impl ReprScaleJson2 {
+//     fn
+// }
+
+pub struct ReprScaleJson<T>(T);
+
+impl<T> PartialSchema for ReprScaleJson<T> {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Generic container of some value, representing it in both JSON and SCALE",
+            ))
+            .property("scale", ScaleBinary::<T>::schema())
+            .property(
+                "json",
+                utoipa::openapi::ObjectBuilder::new()
+                    .schema_type(utoipa::openapi::schema::SchemaType::AnyValue)
+                    .description(Some("Value represented as JSON")),
+            )
+            .examples([json!({
+                "scale": "AQIMd3Vm",
+                "json": {"level": "INFO","msg": "wuf"}
+            })])
+            .into()
+    }
+}
+
+impl<T> ToSchema for ReprScaleJson<T> {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("ReprScaleJson")
+    }
+
+    // fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
+    //     schemas.push((
+    //         "Object".to_string(),
+    //         schema!(
+    //             #[inline]
+    //             Value
+    //         )
+    //         .description(Some("TODO schemas desc"))
+    //         .into(),
+    //     ));
+    //     schemas.push((
+    //         ScaleBinary::<()>::name().into(),
+    //         ScaleBinary::<()>::schema(),
+    //     ));
+    // }
+}
+
+impl<T> Serialize for ReprScaleJson<T>
+where
+    T: parity_scale_codec::Encode + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("scale", &ScaleBinary(&self.0))?;
+        map.serialize_entry("json", &self.0)?;
+        map.end()
+    }
+}
+
 /// Big integer numeric value.
 ///
 /// Serialized as a **number** when safely fits into `f64` max safe integer
 /// (less than `pow(2, 53) - 1`, i.e. `9007199254740991`), and as a **string** otherwise.
 ///
-/// On JavaScript side is recommended to parse with `BigInt`.
-#[derive(Debug, ToSchema)]
+/// On the JavaScript side is recommended to parse with `BigInt`.
+#[derive(Debug, ToSchema, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 // TODO set `value_type` to union of string and number
 #[schema(example = 42)]
 pub struct BigInt(pub u128);
+
+impl From<u32> for BigInt {
+    fn from(value: u32) -> Self {
+        Self(value as u128)
+    }
+}
 
 impl From<u64> for BigInt {
     fn from(value: u64) -> Self {
@@ -260,38 +394,38 @@ impl Serialize for BigInt {
 )]
 pub struct Pagination {
     /// Page number, starts from 1
-    pub page: BigInt,
+    pub page: PositiveInteger,
     /// Items per page, starts from 1
-    pub per_page: BigInt,
+    pub per_page: PositiveInteger,
     /// Total number of pages. Not always available.
-    pub total_pages: BigInt,
+    pub total_pages: u64,
     /// Total number of items. Not always available.
-    pub total_items: BigInt,
+    pub total_items: u64,
 }
 
 impl Pagination {
     pub fn new(
-        page: NonZero<u64>,
-        per_page: NonZero<u64>,
+        page: PositiveInteger,
+        per_page: PositiveInteger,
         total_items: u64,
         total_pages: u64,
     ) -> Self {
         Self {
-            page: BigInt::from(page.get()),
-            per_page: BigInt::from(per_page.get()),
-            total_items: BigInt::from(total_items),
-            total_pages: BigInt::from(total_pages),
+            page,
+            per_page,
+            total_items,
+            total_pages,
         }
     }
 
-    pub fn for_empty_data(per_page: NonZero<u64>) -> Self {
+    pub fn for_empty_data(per_page: PositiveInteger) -> Self {
         Self {
             // "there is one page, it's just empty"
-            page: BigInt(1),
-            per_page: BigInt::from(per_page.get()),
+            page: PositiveInteger(nonzero!(1u64)),
+            per_page,
             // "but there are zero pages of data"
-            total_pages: BigInt(0),
-            total_items: BigInt(0),
+            total_pages: 0,
+            total_items: 0,
         }
     }
 }
@@ -299,8 +433,8 @@ impl Pagination {
 impl From<ReversePagination> for Pagination {
     fn from(value: ReversePagination) -> Self {
         Self::new(
-            value.page(),
-            value.per_page(),
+            PositiveInteger(value.page()),
+            PositiveInteger(value.per_page()),
             value.total_items().get(),
             value.total_pages().get(),
         )
@@ -310,8 +444,8 @@ impl From<ReversePagination> for Pagination {
 impl From<DirectPagination> for Pagination {
     fn from(value: DirectPagination) -> Self {
         Self::new(
-            value.page(),
-            value.per_page(),
+            PositiveInteger(value.page()),
+            PositiveInteger(value.per_page()),
             value.total_items().get(),
             value.total_pages().get(),
         )
@@ -320,7 +454,6 @@ impl From<DirectPagination> for Pagination {
 
 /// Generic paginated data container
 #[derive(Debug, Serialize, ToSchema)]
-#[aliases(DomainsPage = Page<Domain>)]
 pub struct Page<T> {
     /// Pagination info
     pub pagination: Pagination,
@@ -333,7 +466,7 @@ impl<T> Page<T> {
         Self { pagination, items }
     }
 
-    pub fn empty(per_page: NonZero<u64>) -> Self {
+    pub fn empty(per_page: PositiveInteger) -> Self {
         Self::new(vec![], Pagination::for_empty_data(per_page))
     }
 
@@ -345,28 +478,68 @@ impl<T> Page<T> {
     }
 }
 
+/// Integer greater than zero
+#[derive(ToSchema, Copy, Clone, Debug, Serialize, Deserialize)]
+#[schema(value_type = u64)]
+pub struct PositiveInteger(pub NonZero<u64>);
+
+impl Deref for PositiveInteger {
+    type Target = NonZero<u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for PositiveInteger {
+    type Err = <NonZero<u64> as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let value = NonZero::from_str(s)?;
+        Ok(Self(value))
+    }
+}
+
+impl From<PositiveInteger> for NonZero<u64> {
+    fn from(value: PositiveInteger) -> Self {
+        value.0
+    }
+}
+
+impl From<NonZero<u64>> for PositiveInteger {
+    fn from(value: NonZero<u64>) -> Self {
+        Self(value)
+    }
+}
+
 // FIXME: params details is not rendered fully, only docs
 /// Pagination query parameters
 #[derive(Deserialize, IntoParams, Clone, Copy)]
 pub struct PaginationQueryParams {
     /// Page number, optional. Different endpoints interpret value absense differently.
     #[param(example = 3, minimum = 1)]
-    pub page: Option<NonZero<u64>>,
+    pub page: Option<PositiveInteger>,
     /// Items per page
     #[param(example = 15, minimum = 1)]
     #[serde(default = "default_per_page")]
-    pub per_page: NonZero<u64>,
+    pub per_page: PositiveInteger,
 }
 
-const fn default_per_page() -> NonZero<u64> {
+const fn default_per_page() -> PositiveInteger {
     // FIXME: does it work as `const VAR = ...; VAR`?
-    const { nonzero!(10u64) }
+    PositiveInteger(const { nonzero!(10u64) })
 }
 
 /// Timestamp
-#[derive(Serialize, ToSchema, Debug)]
+#[derive(Serialize, ToSchema, Debug, Clone)]
 #[schema(example = "2024-08-11T23:08:58Z")]
 pub struct TimeStamp(chrono::DateTime<Utc>);
+
+impl From<DateTime<Utc>> for TimeStamp {
+    fn from(value: DateTime<Utc>) -> Self {
+        Self(value)
+    }
+}
 
 /// Transaction status
 #[derive(
@@ -407,10 +580,20 @@ pub struct TransactionDetailed {
     #[serde(flatten)]
     base: TransactionBase,
     signature: Signature,
-    nonce: Option<NonZero<u32>>,
+    nonce: Option<PositiveInteger>,
     metadata: Metadata,
-    time_to_live: Duration,
-    rejection_reason: Option<TransactionRejectionReason>,
+    time_to_live: TimeDuration,
+    // FIXME: make it nullable
+    #[schema(schema_with = rejection_reason_schema)]
+    rejection_reason: Option<ReprScaleJson<iroha::TransactionRejectionReason>>,
+}
+
+fn rejection_reason_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("_(nullable)_ Corresponding type: [`TransactionRejectionReason`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/TransactionRejectionReason)".to_owned());
+    object
 }
 
 impl From<repo::TransactionDetailed> for TransactionDetailed {
@@ -418,22 +601,27 @@ impl From<repo::TransactionDetailed> for TransactionDetailed {
         Self {
             base: value.base.into(),
             signature: value.signature.into(),
-            nonce: value.nonce,
+            nonce: value.nonce.map(|int| {
+                PositiveInteger(NonZero::new(int.get() as u64).expect("it is non-zero"))
+            }),
             metadata: value.metadata.into(),
-            time_to_live: Duration {
+            time_to_live: TimeDuration {
                 ms: BigInt(value.time_to_live_ms as u128),
             },
-            rejection_reason: value
-                .rejection_reason
-                .map(|reason| TransactionRejectionReason(reason.0)),
+            rejection_reason: value.rejection_reason.map(|reason| ReprScaleJson(reason.0)),
         }
     }
 }
 
-/// Transaction rejection reason
-#[derive(Serialize, ToSchema)]
-#[schema(value_type = Object)]
-pub struct TransactionRejectionReason(iroha::TransactionRejectionReason);
+// /// Transaction rejection reason
+// #[derive(Serialize, ToSchema)]
+// // #[schema(value_type = Object)]
+// // #[schema(schema_with = ReprScaleJson::<iroha::InstructionBox>::schema)]
+// pub struct TransactionRejectionReason(
+//     // #[schema(schema_with = ReprScaleJson::<iroha::TransactionRejectionReason>::schema)]
+//     // ReprScaleJson<iroha::TransactionRejectionReason>,
+//     // ScaleBinary<iroha::TransactionRejectionReason>,
+// );
 
 /// Operations executable on-chain
 #[derive(Serialize, ToSchema)]
@@ -455,11 +643,12 @@ impl From<repo::Executable> for Executable {
 
 /// Iroha Special Instruction (ISI)
 #[derive(Serialize, ToSchema)]
+#[schema(bound = "")]
 pub struct Instruction {
-    /// Kind of instruction. TODO: add strict enumeration
+    /// Kind of instruction.
     kind: InstructionKind,
-    /// Instruction payload, some JSON. TODO: add typed output
-    payload: serde_json::Value,
+    #[schema(schema_with = isi_box_schema)]
+    r#box: ReprScaleJson<iroha::InstructionBox>,
     transaction_hash: Hash,
     transaction_status: TransactionStatus,
     block: BigInt,
@@ -467,11 +656,19 @@ pub struct Instruction {
     created_at: TimeStamp,
 }
 
+fn isi_box_schema() -> impl Into<RefOr<Schema>> {
+    let RefOr::T(Schema::Object(mut object)) = ReprScaleJson::<()>::schema() else {
+        unreachable!()
+    };
+    object.description = Some("Corresponding type: [`InstructionBox`](https://jsr.io/@iroha/core@0.3.1/doc/data-model/~/InstructionBox)".to_owned());
+    object
+}
+
 impl From<repo::Instruction> for Instruction {
     fn from(value: repo::Instruction) -> Self {
         Self {
             kind: value.kind,
-            payload: value.payload.0,
+            r#box: ReprScaleJson(value.r#box.0),
             transaction_hash: Hash(value.transaction_hash.0 .0),
             transaction_status: value.transaction_status,
             block: BigInt(value.block as u128),
@@ -509,8 +706,10 @@ pub struct Block {
     hash: Hash,
     /// Hash of the previous block in the chain
     prev_block_hash: Option<Hash>,
-    /// Hash of merkle tree root of transactions' hashes
-    transactions_hash: Hash,
+    /// Hash of merkle tree root of transactions' hashes.
+    ///
+    /// The block is _empty_ if this is `null`.
+    transactions_hash: Option<Hash>,
     /// Timestamp of creation
     created_at: TimeStamp,
     transactions_total: u32,
@@ -523,7 +722,7 @@ impl From<repo::Block> for Block {
             hash: Hash(value.hash.0 .0),
             height: BigInt(value.height.get() as u128),
             prev_block_hash: value.prev_block_hash.map(Hash::from),
-            transactions_hash: Hash(value.transactions_hash.0 .0),
+            transactions_hash: value.transactions_hash.map(Hash::from),
             created_at: TimeStamp(value.created_at),
             transactions_total: value.transactions_total,
             transactions_rejected: value.transactions_rejected,
@@ -566,13 +765,13 @@ impl From<repo::Signature> for Signature {
 }
 
 /// Duration
-#[derive(ToSchema, Serialize)]
-pub struct Duration {
+#[derive(ToSchema, Serialize, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+pub struct TimeDuration {
     /// Number of milliseconds
     ms: BigInt,
 }
 
-impl From<std::time::Duration> for Duration {
+impl From<std::time::Duration> for TimeDuration {
     fn from(value: std::time::Duration) -> Self {
         Self {
             ms: BigInt(value.as_millis()),
@@ -580,9 +779,15 @@ impl From<std::time::Duration> for Duration {
     }
 }
 
+impl TimeDuration {
+    pub fn from_millis(ms: impl Into<BigInt>) -> Self {
+        Self { ms: ms.into() }
+    }
+}
+
 #[derive(DeserializeFromStr)]
 pub enum BlockHeightOrHash {
-    Height(NonZero<u64>),
+    Height(PositiveInteger),
     Hash(iroha::Hash),
 }
 
@@ -590,7 +795,7 @@ impl FromStr for BlockHeightOrHash {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(value) = s.parse::<NonZero<u64>>() {
+        if let Ok(value) = s.parse::<PositiveInteger>() {
             return Ok(Self::Height(value));
         }
         if let Ok(value) = s.parse::<iroha::Hash>() {
@@ -600,35 +805,224 @@ impl FromStr for BlockHeightOrHash {
     }
 }
 
-/// Peer status
-#[derive(Serialize, ToSchema)]
-pub struct Status {
-    peers: u32,
-    blocks: u32,
-    txs_accepted: u32,
-    txs_rejected: u32,
-    view_changes: u32,
-    queue_size: u32,
-    uptime: Duration,
+/// Metrics of the network as a whole
+#[derive(Serialize, ToSchema, Clone)]
+pub struct NetworkStatus {
+    /// Count of peers in the network
+    pub peers: u32,
+    /// Count of registered domains
+    pub domains: u32,
+    /// Count of registered accounts
+    pub accounts: u32,
+    /// Count of assets and NFTs
+    pub assets: u32,
+    /// Accepted transactions
+    pub transactions_accepted: u32,
+    /// Rejected transactions
+    pub transactions_rejected: u32,
+    /// Height of the latest committed block
+    pub block: u32,
+    /// Timestamp when the last block was created (not committed)
+    pub block_created_at: TimeStamp,
+    /// Finalized block, the one that __cannot be reverted__ under normal network conditions.
+    ///
+    /// Might be not available if there are not enough metrics from peers.
+    pub finalized_block: Option<u32>,
+    /// Average commit time among all peers during a certain observation period.
+    ///
+    /// Might be not available if there are not enough metrics from peers.
+    pub avg_commit_time: Option<TimeDuration>,
+    /// Average time between created blocks during a certain observation period
+    pub avg_block_time: TimeDuration,
+    // /// Pipeline time calculated from Sumeragi parameters
+    // pub pipeline_time: TimeDuration,
+    // TODO: pipeline time? txs per block?
 }
 
-impl From<iroha_telemetry::metrics::Status> for Status {
-    fn from(value: iroha_telemetry::metrics::Status) -> Self {
+// On frontend, create two maps: Map<url, peer info> | Map<pub key, peer status>
+// In the main table, display based on the info map (url, connected, lookup metrics)
+// Also collect "unknown" peers and display them in a separate space
+// When info
+
+/// Metrics of a single peer
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct PeerStatus {
+    /// Peer URL
+    pub url: ToriiUrl,
+    /// Block height
+    pub block: u32,
+    /// Commit time of the last block
+    pub commit_time: TimeDuration,
+    /// Average commit time on this peer during a certain observation period
+    pub avg_commit_time: TimeDuration,
+    /// Current queue size
+    pub queue_size: u32,
+    /// Uptime since genesis block commit
+    pub uptime: TimeDuration,
+}
+
+impl PartialEq for PeerStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.url.eq(&other.url)
+    }
+}
+
+impl PartialOrd for PeerStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PeerStatus {}
+
+impl Ord for PeerStatus {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.url.cmp(&other.url)
+    }
+}
+
+/// Static information about peer
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct PeerInfo {
+    /// Peer URL
+    pub url: ToriiUrl,
+    /// Connection status to the peer
+    pub connected: bool,
+    /// Peer does not support telemetry.
+    ///
+    /// Therefore, its status is not available.
+    pub telemetry_unsupported: bool,
+    /// Peer configuration, including its public key and some other parameters.
+    ///
+    /// Always present when connected, but could be null if peer was never connected.
+    pub config: Option<PeerConfig>,
+    /// Location of the peer, if known
+    pub location: Option<GeoLocation>,
+    /// Set of connected peers
+    pub connected_peers: Option<BTreeSet<PublicKey>>,
+}
+
+impl PartialEq for PeerInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.url.eq(&other.url)
+    }
+}
+
+impl PartialOrd for PeerInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PeerInfo {}
+
+impl Ord for PeerInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.url.cmp(&other.url)
+    }
+}
+
+/// Peer configuration
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct PeerConfig {
+    /// Public key of the peer
+    pub public_key: PublicKey,
+    /// Queue capacity
+    pub queue_capacity: u32,
+    /// Block gossip batch size
+    pub network_block_gossip_size: u32,
+    /// Block gossip period
+    pub network_block_gossip_period: TimeDuration,
+    /// Transactions gossip batch size
+    pub network_tx_gossip_size: u32,
+    /// Transactions gossip period
+    pub network_tx_gossip_period: TimeDuration,
+}
+
+impl From<iroha::ConfigGetDTO> for PeerConfig {
+    fn from(value: iroha::ConfigGetDTO) -> Self {
         Self {
-            peers: value.peers as u32,
-            blocks: value.blocks as u32,
-            txs_accepted: value.txs_approved as u32,
-            txs_rejected: value.txs_rejected as u32,
-            view_changes: value.view_changes,
-            queue_size: value.queue_size as u32,
-            uptime: Duration::from(value.uptime.0),
+            public_key: PublicKey(value.public_key),
+            queue_capacity: value.queue.capacity.get() as u32,
+            network_block_gossip_size: value.network.block_gossip_size.get(),
+            network_block_gossip_period: TimeDuration::from_millis(
+                value.network.block_gossip_period_ms,
+            ),
+            network_tx_gossip_size: value.network.transaction_gossip_size.get(),
+            network_tx_gossip_period: TimeDuration::from_millis(
+                value.network.transaction_gossip_period_ms,
+            ),
         }
     }
 }
 
+/// Container for possible messages returned from the telemetry live updates stream.
+///
+/// Variants are distinguished by the `kind` tag.
+#[derive(Clone, Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TelemetryStreamMessage {
+    /// First message, reflecting system metrics at the beginning of the connection.
+    ///
+    /// Sent immediately upon connection.
+    First(TelemetryStreamFirstMessage),
+    /// Network status update
+    NetworkStatus(NetworkStatus),
+    /// Peer status (i.e. dynamic metrics) update
+    PeerStatus(PeerStatus),
+    /// Peer info (i.e. more static data) update
+    PeerInfo(PeerInfo),
+}
+
+#[derive(Serialize, ToSchema, Clone)]
+pub struct TelemetryStreamFirstMessage {
+    /// Available peers info
+    pub peers_info: BTreeSet<PeerInfo>,
+    /// Available peers status
+    pub peers_status: BTreeSet<PeerStatus>,
+    /// Available network status
+    pub network_status: Option<NetworkStatus>,
+}
+
+/// Public key multihash
+#[derive(Serialize, ToSchema, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[schema(value_type = String)]
+pub struct PublicKey(pub iroha::PublicKey);
+
+/// Geographical location
+#[derive(Serialize, Deserialize, ToSchema, Clone, Debug, PartialEq)]
+pub struct GeoLocation {
+    /// Latitude
+    pub lat: f64,
+    /// Longitude
+    pub lon: f64,
+    /// Country name
+    pub country: String,
+    /// City name
+    pub city: String,
+}
+
+/// Torii URL
+#[derive(
+    Ord,
+    PartialOrd,
+    Eq,
+    PartialEq,
+    Hash,
+    Clone,
+    Debug,
+    derive_more::Display,
+    derive_more::FromStr,
+    ToSchema,
+    Serialize,
+)]
+#[schema(value_type = String)]
+pub struct ToriiUrl(pub Url);
+
 #[cfg(test)]
-mod test {
+mod tests {
     use super::iroha::KeyPair;
+    use insta::assert_json_snapshot;
     use serde_json::json;
 
     use super::*;
@@ -657,7 +1051,7 @@ mod test {
         else {
             panic!("should be height")
         };
-        assert_eq!(value, nonzero!(412u64));
+        assert_eq!(value.0, nonzero!(412u64));
 
         let BlockHeightOrHash::Hash(_) = serde_json::from_value(json!(
             "3E75E5A0277C34756C2FF702963C4B9024A5E00C327CC682D9CA222EB5589DB1"
@@ -697,5 +1091,26 @@ mod test {
 
         expect_test::expect![[r#""A19E05FFE0939F8B7952819E64B9637A500D767519274F21763E8B4283A77E01223D35FE6DFEC6D513D17E1D902791B6D637AD447E9548767948F5A36B652906""#]]
             .assert_eq(&serde_json::to_string(&Signature(value)).unwrap());
+    }
+
+    #[test]
+    fn serialize_unified_repr_int() {
+        let value = ReprScaleJson(5);
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_str() {
+        let value = ReprScaleJson("test string");
+        assert_json_snapshot!(value);
+    }
+
+    #[test]
+    fn serialize_unified_repr_iroha() {
+        let value = ReprScaleJson(Some(iroha::Log::new(
+            "INFO".parse().unwrap(),
+            "wuf".to_owned(),
+        )));
+        assert_json_snapshot!(value);
     }
 }

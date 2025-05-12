@@ -24,12 +24,49 @@ pub enum Error {
     Pagination(#[from] ReversePaginationError),
 }
 
-type Result<T> = core::result::Result<T, Error>;
+type Result<T, E = Error> = core::result::Result<T, E>;
 
 #[derive(Debug, Clone)]
 pub struct Repo {
     conn: Arc<Mutex<Option<SqliteConnection>>>,
     available: Arc<Notify>,
+}
+
+enum ParsePagination<P, T> {
+    NonEmpty(P),
+    Empty(Page<T>),
+}
+
+use ParsePagination::*;
+
+impl<T> ParsePagination<DirectPagination, T> {
+    fn direct(total: u64, query: PaginationQueryParams) -> Self {
+        match NonZero::new(total) {
+            Some(total) => NonEmpty(DirectPagination::new(
+                query
+                    .page
+                    .unwrap_or(crate::schema::PositiveInteger(nonzero!(1u64)))
+                    .into(),
+                query.per_page.into(),
+                total,
+            )),
+            None => Empty(Page::empty(query.per_page)),
+        }
+    }
+}
+
+impl<T> ParsePagination<ReversePagination, T> {
+    fn reverse(total: u64, query: PaginationQueryParams) -> Result<Self, ReversePaginationError> {
+        let res = match NonZero::new(total) {
+            Some(total) => NonEmpty(ReversePagination::new(
+                total,
+                query.per_page.into(),
+                query.page.map(From::from),
+            )?),
+            None => Empty(Page::empty(query.per_page)),
+        };
+        Ok(res)
+    }
 }
 
 impl Repo {
@@ -56,10 +93,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = ReversePagination::new(total, pagination.per_page, pagination.page)?;
         let blocks = QueryBuilder::new("")
             .push_custom(SelectBlocks {
                 with_where: PushDisplay("true"),
@@ -108,11 +145,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, params.pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination =
-            ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
         let txs = QueryBuilder::new("with main as (")
             .push_custom(SelectTransactions {
@@ -158,11 +194,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::reverse(total, params.pagination)? {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination =
-            ReversePagination::new(total, params.pagination.per_page, params.pagination.page)?;
 
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectInstructions { params: &params })
@@ -186,14 +221,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(page) => return Ok(page),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
 
         let res = QueryBuilder::new("with grouped as (")
             .push_custom(SelectDomains {
@@ -233,14 +264,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
 
         let res = QueryBuilder::new("with grouped as (")
             .push_custom(SelectAccounts {
@@ -287,14 +314,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectAssetsDefinitions {
                 with_where: &params,
@@ -336,14 +359,10 @@ impl Repo {
             .build_query_as()
             .fetch_one(&mut *conn)
             .await?;
-        let Some(total) = NonZero::new(total) else {
-            return Ok(Page::empty(params.pagination.per_page));
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
         };
-        let pagination = DirectPagination::new(
-            params.pagination.page.unwrap_or(nonzero!(1u64)),
-            params.pagination.per_page,
-            total,
-        );
         let items = QueryBuilder::new("with main as (")
             .push_custom(SelectAssets {
                 with_where: &params,
@@ -377,7 +396,49 @@ impl Repo {
             .await?)
     }
 
-    async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
+    pub async fn list_nfts(&self, params: ListNftsParams) -> Result<Page<Nft>> {
+        let mut conn = self.acquire_conn().await;
+        let (total,): (u64,) = QueryBuilder::new("with main as (")
+            .push_custom(SelectNfts {
+                with_where: &params,
+            })
+            .push(") select count(*) from main")
+            .build_query_as()
+            .fetch_one(&mut *conn)
+            .await?;
+        let pagination = match ParsePagination::direct(total, params.pagination) {
+            NonEmpty(x) => x,
+            Empty(x) => return Ok(x),
+        };
+        let items = QueryBuilder::new("with main as (")
+            .push_custom(SelectNfts {
+                with_where: &params,
+            })
+            .push(") select * from main ")
+            .push_custom(LimitOffset::from(pagination.range()))
+            .build_query_as()
+            .fetch_all(&mut *conn)
+            .await?;
+        Ok(Page::new(items, pagination.into()))
+    }
+
+    pub async fn find_nft(&self, id: data_model::NftId) -> Result<Nft> {
+        Ok(QueryBuilder::new("")
+            .push_custom(SelectNfts {
+                with_where: push_fn(|builder| {
+                    let mut sep = builder.separated(" and ");
+                    sep.push("v_nfts.name = ")
+                        .push_bind_unseparated(AsText(id.name()))
+                        .push("v_nfts.domain = ")
+                        .push_bind_unseparated(AsText(id.domain()));
+                }),
+            })
+            .build_query_as()
+            .fetch_one(&mut *(self.acquire_conn().await))
+            .await?)
+    }
+
+    pub async fn acquire_conn(&self) -> MappedMutexGuard<'_, SqliteConnection> {
         loop {
             let guard = self.conn.lock().await;
             match MutexGuard::try_map(guard, Option::as_mut) {
@@ -405,10 +466,13 @@ where
 select format('%s@%s', accounts.signatory, accounts.domain) as id,
        accounts.metadata,
        count(distinct assets.definition_name)               as owned_assets,
+       count(distinct v_nfts.id)                            as owned_nfts,
        count(distinct domain_owners.domain)                 as owned_domains
 from accounts
      left join assets on assets.owned_by_signatory like  accounts.signatory
-and assets.owned_by_domain = accounts.domain
+                         and assets.owned_by_domain = accounts.domain
+     left join v_nfts on v_nfts.owned_by_signatory like  accounts.signatory
+                         and v_nfts.owned_by_domain = accounts.domain
      left join domain_owners on domain_owners.account_domain = accounts.domain
 and domain_owners.account_signatory like  accounts.signatory
 where ",
@@ -554,12 +618,14 @@ select
     domains.logo,
     domains.metadata,
     format('%s@%s', account_signatory, account_domain) as owned_by,
-    count(distinct accounts.signatory) as accounts,
-    count(distinct asset_definitions.name) as assets
+    count(distinct accounts.signatory)                 as accounts,
+    count(distinct asset_definitions.name)             as assets,
+    count(distinct nfts.name)                          as nfts
 from domains
          join domain_owners on domain_owners.domain = domains.name
 left join accounts on accounts.domain = domains.name
 left join asset_definitions on asset_definitions.domain = domains.name
+left join nfts on nfts.domain = domains.name
 where ",
             )
             .push_custom(self.with_where)
@@ -605,7 +671,6 @@ select format('%s#%s', name, domain)                                            
        logo,
        metadata,
        mintable,
-       type,
        count(assets.definition_name)                                                            as assets
 from asset_definitions
          left join assets on asset_definitions.name = assets.definition_name and
@@ -645,14 +710,13 @@ pub struct SelectAssets<W> {
 
 impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectAssets<W> {
     fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
-        builder.push("\
-select case assets.definition_domain = assets.owned_by_domain
-           when true then format('%s##%s@%s', assets.definition_name, assets.owned_by_signatory, assets.owned_by_domain)
-           else format('%s#%s#%s@%s', assets.definition_name, assets.definition_domain, assets.owned_by_signatory,
-                       assets.owned_by_domain) end as id,
-       value
-from assets
-where ")
+        builder
+            .push(
+                "\
+select *
+from v_assets
+where ",
+            )
             .push_custom(self.with_where);
     }
 }
@@ -677,6 +741,47 @@ impl<'a> PushCustom<'a> for &'a ListAssetsParams {
             sep.push("definition_name = ")
                 .push_bind_unseparated(id.name().as_ref())
                 .push("definition_domain = ")
+                .push_bind_unseparated(id.domain().name().as_ref());
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct SelectNfts<W> {
+    pub with_where: W,
+}
+
+impl<'a, W: PushCustom<'a>> PushCustom<'a> for SelectNfts<W> {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        builder
+            .push(
+                "\
+select *
+from v_nfts
+where ",
+            )
+            .push_custom(self.with_where);
+    }
+}
+
+pub struct ListNftsParams {
+    pub pagination: PaginationQueryParams,
+    pub domain: Option<data_model::DomainId>,
+    pub owned_by: Option<data_model::AccountId>,
+}
+
+impl<'a> PushCustom<'a> for &'a ListNftsParams {
+    fn push_custom(self, builder: &mut QueryBuilder<'a, Sqlite>) {
+        let mut sep = builder.separated(" and ");
+        sep.push("true");
+        if let Some(id) = &self.domain {
+            sep.push("v_nfts.domain = ")
+                .push_bind_unseparated(id.name().as_ref());
+        }
+        if let Some(id) = &self.owned_by {
+            sep.push("v_nfts.owned_by_signatory like ")
+                .push_bind_unseparated(AsText(id.signatory()))
+                .push("v_nfts.owned_by_domain = ")
                 .push_bind_unseparated(id.domain().name().as_ref());
         }
     }
@@ -731,19 +836,16 @@ impl<'a> PushCustom<'a> for SelectInstructions<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
+    use insta::{assert_csv_snapshot, assert_debug_snapshot, assert_json_snapshot};
     use serde_json::json;
     use sqlx::types::JsonValue;
     use sqlx::{query, query_as, Connection};
 
-    async fn test_repo() -> Repo {
+    pub async fn test_repo() -> Repo {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await.unwrap();
-        query(include_str!("./repo/create_tables.sql"))
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        query(include_str!("./repo/test-dump.sql"))
+        query(include_str!("./repo/test_dump.sql"))
             .execute(&mut conn)
             .await
             .unwrap();
@@ -754,7 +856,7 @@ mod tests {
     fn default_pagination() -> PaginationQueryParams {
         PaginationQueryParams {
             page: None,
-            per_page: nonzero!(10u64),
+            per_page: nonzero!(10u64).into(),
         }
     }
 
@@ -766,7 +868,7 @@ mod tests {
             .list_transactions(ListTransactionsParams {
                 pagination: PaginationQueryParams {
                     page: None,
-                    per_page: nonzero!(5u64),
+                    per_page: nonzero!(5u64).into(),
                 },
                 block: None,
                 authority: None,
@@ -775,11 +877,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(txs.pagination.page.0, 18);
-        assert_eq!(txs.pagination.per_page.0, 5);
-        assert_eq!(txs.pagination.total_pages.0, 18);
-        assert_eq!(txs.pagination.total_items.0, 90);
-        assert_eq!(txs.items.len(), 5);
+        assert_debug_snapshot!(txs.pagination);
+        assert_eq!(
+            txs.items.len(),
+            txs.pagination.per_page.0.get() as usize + txs.pagination.total_items as usize % 5
+        );
     }
 
     #[tokio::test]
@@ -796,10 +898,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(txs.pagination.page.0, 1);
-        assert_eq!(txs.pagination.total_pages.0, 1);
-        assert_eq!(txs.pagination.total_items.0, 3);
-        assert_eq!(txs.items.len(), 3);
+        assert_eq!(txs.pagination.page.get(), 1);
+        assert_eq!(txs.pagination.total_pages, 1);
+        assert_eq!(txs.pagination.total_items, 4);
+        assert_eq!(txs.items.len(), 4);
     }
 
     #[tokio::test]
@@ -816,7 +918,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 60);
+        assert_eq!(data.pagination.total_items, 4);
         assert!(data
             .items
             .iter()
@@ -832,7 +934,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.total_items.0, 30);
+        assert_eq!(data.pagination.total_items, 14);
         assert!(data
             .items
             .iter()
@@ -855,10 +957,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.pagination.page.0, 2);
-        assert_eq!(data.pagination.total_pages.0, 2);
-        assert_eq!(data.pagination.total_items.0, 15);
-        assert_eq!(data.items.len(), 15);
+        assert_eq!(data.pagination.page.get(), 1);
+        assert_eq!(data.pagination.total_pages, 1);
+        assert_eq!(data.pagination.total_items, 3);
+        assert_eq!(data.items.len(), 3);
         assert!(data
             .items
             .iter()
@@ -885,8 +987,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.items.len(), 3);
-        assert_eq!(data.pagination.total_pages.0, 1);
+        assert_eq!(data.items.len(), 11);
+        assert_eq!(data.pagination.total_pages, 2);
         assert!(data
             .items
             .iter()
@@ -928,7 +1030,7 @@ mod tests {
             .await
             .unwrap();
 
-        dbg!(data);
+        assert_debug_snapshot!(data.pagination);
     }
 
     #[tokio::test]
@@ -937,8 +1039,13 @@ mod tests {
 
         let data = repo.list_blocks(default_pagination()).await.unwrap();
 
-        assert_eq!(data.pagination.total_pages.0, 3);
-        assert_eq!(data.pagination.total_items.0, 21);
+        assert_debug_snapshot!(data.pagination);
+        let meta: Vec<_> = data
+            .items
+            .iter()
+            .map(|x| (x.height, x.transactions_total, x.transactions_rejected))
+            .collect();
+        assert_csv_snapshot!(meta);
     }
 
     #[tokio::test]
@@ -954,10 +1061,89 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(data.items.len(), 1);
+        let mapped = data.map(crate::schema::Asset::from);
+        assert_json_snapshot!(mapped);
     }
 
     #[tokio::test]
+    async fn find_an_asset() {
+        let repo = test_repo().await;
+
+        let data = repo.find_asset("rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland".parse().unwrap()).await.unwrap();
+
+        let mapped = crate::schema::Asset::from(data);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_assets_definitions() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_assets_definitions(ListAssetDefinitionParams {
+                pagination: default_pagination(),
+                owned_by: None,
+                domain: Some("wonderland".parse().unwrap()),
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::AssetDefinition::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_nfts() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_nfts(ListNftsParams {
+                pagination: default_pagination(),
+                owned_by: None,
+                domain: None,
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::Nft::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_domains() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_domains(ListDomainParams {
+                pagination: default_pagination(),
+                owned_by: None,
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::Domain::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    async fn list_accounts() {
+        let repo = test_repo().await;
+
+        let data = repo
+            .list_accounts(ListAccountsParams {
+                pagination: default_pagination(),
+                with_asset: None,
+                domain: None,
+            })
+            .await
+            .unwrap();
+
+        let mapped = data.map(crate::schema::Account::from);
+        assert_json_snapshot!(mapped);
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn json_payloads_in_v_instructions() -> eyre::Result<()> {
         let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
         query(include_str!("./repo/create_tables.sql"))

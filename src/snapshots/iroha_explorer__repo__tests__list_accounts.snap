@@ -1,0 +1,65 @@
+---
+source: src/repo.rs
+expression: mapped
+---
+{
+  "pagination": {
+    "page": 1,
+    "per_page": 10,
+    "total_pages": 1,
+    "total_items": 6
+  },
+  "items": [
+    {
+      "id": "ed012004FF5B81046DDCCF19E2E451C45DFB6F53759D4EB30FA2EFA807284D1CC33016@wonderland",
+      "metadata": {
+        "key": "value"
+      },
+      "owned_domains": 0,
+      "owned_assets": 0,
+      "owned_nfts": 0
+    },
+    {
+      "id": "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
+      "metadata": {},
+      "owned_domains": 2,
+      "owned_assets": 0,
+      "owned_nfts": 0
+    },
+    {
+      "id": "ed0120CA92F6B66EB49188C40CE3B4A916687B260518F57C467C2961516F46DE3B537D@looking_glass",
+      "metadata": {
+        "alias": "mad_hatter"
+      },
+      "owned_domains": 0,
+      "owned_assets": 0,
+      "owned_nfts": 1
+    },
+    {
+      "id": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+      "metadata": {
+        "alias": "alice",
+        "key": "value"
+      },
+      "owned_domains": 2,
+      "owned_assets": 2,
+      "owned_nfts": 0
+    },
+    {
+      "id": "ed0120DC3C3FE8DAD83DE7D3C61E21EBC3B25500B0880B894EF75FC385B1DA7203F71C@wonderland",
+      "metadata": {
+        "alias": "bob"
+      },
+      "owned_domains": 0,
+      "owned_assets": 1,
+      "owned_nfts": 0
+    },
+    {
+      "id": "ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers",
+      "metadata": {},
+      "owned_domains": 0,
+      "owned_assets": 0,
+      "owned_nfts": 0
+    }
+  ]
+}

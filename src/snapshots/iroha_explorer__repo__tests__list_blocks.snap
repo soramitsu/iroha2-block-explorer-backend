@@ -1,0 +1,14 @@
+---
+source: src/repo.rs
+expression: data.pagination
+---
+Pagination {
+    page: PositiveInteger(
+        2,
+    ),
+    per_page: PositiveInteger(
+        10,
+    ),
+    total_pages: 2,
+    total_items: 15,
+}

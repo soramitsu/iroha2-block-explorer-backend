@@ -1,0 +1,14 @@
+---
+source: src/repo.rs
+expression: txs.pagination
+---
+Pagination {
+    page: PositiveInteger(
+        4,
+    ),
+    per_page: PositiveInteger(
+        5,
+    ),
+    total_pages: 4,
+    total_items: 18,
+}
