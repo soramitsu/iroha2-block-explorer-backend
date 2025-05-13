@@ -1,11 +1,11 @@
 [package]
 name = "iroha_explorer"
 description = "Backend API of Iroha 2 Explorer"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-iroha = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186" }
+iroha = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "v2.0.0-rc.2.0" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
@@ -33,11 +33,14 @@ derive_more = { version = "2.0.1", features = ["display", "from_str"] }
 circular-buffer = "1.1.0"
 reqwest = { version = "0.12.15", features = ["json"] }
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
+const-str = { version = "0.6", features = ["proc"] }
 
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
-iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "3f039a3f51fdb16207a481dd2bedb8d17df86186", features = ["rand"] }
+iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "v2.0.0-rc.2.0", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
 
+[build-dependencies]
+vergen = { version = "8.3.1", default-features = false, features = ["cargo"] }
 

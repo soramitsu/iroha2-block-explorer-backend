@@ -36,8 +36,16 @@ use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
 
+const COMPATIBLE_IROHA_VERSION: &str = "v2.0.0-rc.2";
+const VERSION: &str = const_str::format!(
+    "version={} git_commit_sha={} iroha_compat={}",
+    env!("CARGO_PKG_VERSION"),
+    env!("VERGEN_GIT_SHA"),
+    COMPATIBLE_IROHA_VERSION,
+);
+
 #[derive(Debug, Parser)]
-#[clap(about = "Iroha 2 Explorer Backend", version, long_about = None)]
+#[clap(about = "Iroha 2 Explorer Backend", version = VERSION, long_about = None)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Subcommand,
