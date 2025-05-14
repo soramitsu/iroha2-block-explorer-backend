@@ -1,22 +1,15 @@
-FROM  nwtgck/rust-musl-builder:1.84.0 AS builder
+FROM rust:alpine3.21 AS builder
 
-COPY  src src
-COPY  Cargo.toml Cargo.toml
-COPY  Cargo.lock Cargo.lock
+WORKDIR /app
 
-RUN   cargo build --release
+RUN apk add musl-dev pkgconfig openssl-dev openssl-libs-static
 
-FROM  alpine:3.21
+# NOTE: this disregards `./rust-toolchain.toml`, but it's fine
+COPY Cargo.lock Cargo.toml build.rs ./
+COPY src src
+RUN cargo fetch
+RUN cargo build --release
 
-ENV   LOAD_DIR=/usr/local/bin/
-
-RUN   apk --no-cache add ca-certificates && \
-      adduser --disabled-password --gecos "" iroha
-
-COPY  --from=builder \
-      /home/rust/src/target/x86_64-unknown-linux-musl/release/iroha_explorer \
-      ${LOAD_DIR}
-
-CMD   ${LOAD_DIR}iroha_explorer serve
-
-USER  iroha
+FROM alpine:3.21
+COPY --from=builder /app/target/release/iroha_explorer /usr/local/bin/
+CMD iroha_explorer serve
