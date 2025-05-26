@@ -2740,7 +2740,6 @@ dependencies = [
  "url",
  "utoipa",
  "utoipa-scalar",
- "vergen",
 ]
 
 [[package]]
