@@ -41,6 +41,3 @@ expect-test = "1.5.0"
 iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "v2.0.0-rc.2.0", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
 
-[build-dependencies]
-vergen = { version = "8.3.1", default-features = false, features = ["cargo"] }
-
