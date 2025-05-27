@@ -2707,7 +2707,7 @@ dependencies = [
 
 [[package]]
 name = "iroha_explorer"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "async-stream",
  "axum",
