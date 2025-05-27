@@ -1,7 +1,7 @@
 [package]
 name = "iroha_explorer"
 description = "Backend API of Iroha 2 Explorer"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]

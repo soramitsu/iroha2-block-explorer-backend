@@ -95,15 +95,13 @@ cargo run -- serve-test
 
 Iroha Explorer aims to support only the latest version of Iroha. Currently it is `v2.0.0-rc.2.x`.
 
-Iroha Explorer itself doesn't have any strict versioning _yet_, and it is not yet published on https://crates.io.
-
 <!-- TODO: include a tip to run `iroha_explorer --version` to see the compatible Iroha version -->
 
 For reference:
 
-| Iroha               | Iroha Explorer                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------ |
-| `v2.0.0-rc.2.x`     | [`iroha-2.0.0-rc.2`](https://github.com/soramitsu/iroha2-block-explorer-backend/tree/iroha-2.0.0-rc.2) |
-| `v2.0.0-rc.1.x`[^1] | [`iroha-2.0.0-rc.1`](https://github.com/soramitsu/iroha2-block-explorer-backend/tree/iroha-2.0.0-rc.1) |
+| Iroha               | Iroha Explorer Backend ([tags](https://github.com/soramitsu/iroha2-block-explorer-backend/tags)) | Iroha Explorer Web ([tags](https://github.com/soramitsu/iroha2-block-explorer-web/tags))                      |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `v2.0.0-rc.2.x`     | `v0.2.x`                                                                                         | _WiP, partial support: [`develop`](https://github.com/soramitsu/iroha2-block-explorer-web/tree/74c2e43cd6c8)_ |
+| `v2.0.0-rc.1.x`[^1] | `v0.1.0`                                                                                         | `v0.1.0`                                                                                                      |
 
-[^1]: Iroha versions `rc.1.3` and `rc.1.4` are not compatible with Explorer because of accidental breaking changes introduced in Iroha itself. Use version `rc.1.5` or newer.
+[^1]: Iroha versions `rc.1.3` and `rc.1.4` are not compatible with Explorer because of accidental breaking changes introduced in Iroha itself. Use version `rc.1.5`.
