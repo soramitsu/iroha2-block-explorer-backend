@@ -402,7 +402,7 @@ mod tests {
     }
 
     async fn wait_addr_bind(addr: SocketAddr) {
-        while let Err(_) = tokio::net::TcpStream::connect(addr).await {
+        while tokio::net::TcpStream::connect(addr).await.is_err() {
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
     }
