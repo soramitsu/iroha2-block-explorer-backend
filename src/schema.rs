@@ -1,7 +1,10 @@
+use crate::core::query;
 use crate::repo;
-use crate::util::{DirectPagination, ReversePagination};
+use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use iroha_core::state::WorldReadOnly;
+use iroha_data_model::{HasMetadata, Identifiable};
 use nonzero_ext::nonzero;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
@@ -9,8 +12,9 @@ use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
 use std::borrow::Cow;
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -44,23 +48,23 @@ pub struct Domain {
     /// Domain's owner
     owned_by: AccountId,
     /// Total number of accounts in this domain
-    accounts: u32,
+    accounts: usize,
     /// Total number of assets _definitions_ in this domain
-    assets: u32,
+    assets: usize,
     /// Total number of NFTs in this domain
-    nfts: u32,
+    nfts: usize,
 }
 
-impl From<repo::Domain> for Domain {
-    fn from(value: repo::Domain) -> Self {
+impl<W: WorldReadOnly> From<query::DomainWorldRef<'_, W>> for Domain {
+    fn from(value: query::DomainWorldRef<'_, W>) -> Self {
         Self {
-            id: DomainId(value.id.0 .0),
-            logo: value.logo.map(|x| IpfsPath(x.0)),
-            metadata: Metadata(value.metadata.into()),
-            owned_by: AccountId(value.owned_by.0 .0),
-            accounts: value.accounts,
-            assets: value.assets,
-            nfts: value.nfts,
+            id: DomainId(value.id().clone()),
+            logo: value.logo().as_ref().map(|x| IpfsPath(x.to_string())),
+            metadata: Metadata(value.metadata().clone()),
+            owned_by: AccountId(value.owned_by().clone()),
+            accounts: value.accounts(),
+            assets: value.assets(),
+            nfts: value.nfts(),
         }
     }
 }
@@ -100,9 +104,15 @@ impl From<repo::Account> for Account {
 )]
 pub struct AccountId(pub iroha::AccountId);
 
-impl From<repo::AccountId> for AccountId {
-    fn from(value: repo::AccountId) -> Self {
-        Self(value.0 .0)
+// impl From<repo::AccountId> for AccountId {V
+//     fn from(value: repo::AccountId) -> Self {
+//         Self(value.0 .0)
+//     }
+// }
+
+impl From<&iroha::AccountId> for AccountId {
+    fn from(value: &iroha::AccountId) -> Self {
+        Self(value.clone())
     }
 }
 
@@ -118,6 +128,23 @@ pub struct AssetDefinition {
 
 impl From<repo::AssetDefinition> for AssetDefinition {
     fn from(value: repo::AssetDefinition) -> Self {
+        Self {
+            id: AssetDefinitionId(value.id.0 .0),
+            mintable: match value.mintable {
+                repo::Mintable::Infinitely => Mintable::Infinitely,
+                repo::Mintable::Once => Mintable::Once,
+                repo::Mintable::Not => Mintable::Not,
+            },
+            logo: value.logo.map(|x| IpfsPath(x.0)),
+            metadata: Metadata(value.metadata.into()),
+            owned_by: AccountId(value.owned_by.0 .0),
+            assets: value.assets,
+        }
+    }
+}
+
+impl From<&iroha::AssetDefinition> for AssetDefinition {
+    fn from(value: &iroha::AssetDefinition) -> Self {
         Self {
             id: AssetDefinitionId(value.id.0 .0),
             mintable: match value.mintable {
@@ -226,8 +253,6 @@ impl From<repo::Metadata> for Metadata {
 #[schema(value_type = String)]
 pub struct IpfsPath(String);
 
-// #[derive(ToSchema)]
-// #[schema(bound = "T: parity_scale_codec::Encode")]
 pub struct ScaleBinary<T>(T);
 
 impl<T> PartialSchema for ScaleBinary<T> {
@@ -263,24 +288,6 @@ where
         serializer.serialize_str(&as_str)
     }
 }
-
-// /// Generic container of some value, representing it in both JSON and SCALE
-// #[derive(ToSchema, Serialize)]
-// #[schema(
-//     example = json!({"scale": "AQIMd3Vm","json": {"level": "INFO","msg": "wuf"}})
-// )]
-// pub struct ReprScaleJson2 {
-//     /// JSON representation of the value
-//     #[schema(value_type = Object)]
-//     json: Box<dyn Serialize>,
-//     /// SCALE representation of the value, `base64`-encoded
-//     #[schema(value_type = String, content_encoding = "base64")]
-//     scale: Box<dyn ScaleEncode>,
-// }
-
-// impl ReprScaleJson2 {
-//     fn
-// }
 
 pub struct ReprScaleJson<T>(T);
 
@@ -398,17 +405,17 @@ pub struct Pagination {
     /// Items per page, starts from 1
     pub per_page: PositiveInteger,
     /// Total number of pages. Not always available.
-    pub total_pages: u64,
+    pub total_pages: usize,
     /// Total number of items. Not always available.
-    pub total_items: u64,
+    pub total_items: usize,
 }
 
 impl Pagination {
     pub fn new(
         page: PositiveInteger,
         per_page: PositiveInteger,
-        total_items: u64,
-        total_pages: u64,
+        total_items: usize,
+        total_pages: usize,
     ) -> Self {
         Self {
             page,
@@ -421,7 +428,7 @@ impl Pagination {
     pub fn for_empty_data(per_page: PositiveInteger) -> Self {
         Self {
             // "there is one page, it's just empty"
-            page: PositiveInteger(nonzero!(1u64)),
+            page: PositiveInteger(nonzero!(1usize)),
             per_page,
             // "but there are zero pages of data"
             total_pages: 0,
@@ -480,11 +487,11 @@ impl<T> Page<T> {
 
 /// Integer greater than zero
 #[derive(ToSchema, Copy, Clone, Debug, Serialize, Deserialize)]
-#[schema(value_type = u64)]
-pub struct PositiveInteger(pub NonZero<u64>);
+#[schema(value_type = usize)]
+pub struct PositiveInteger(pub NonZero<usize>);
 
 impl Deref for PositiveInteger {
-    type Target = NonZero<u64>;
+    type Target = NonZero<usize>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -492,7 +499,7 @@ impl Deref for PositiveInteger {
 }
 
 impl FromStr for PositiveInteger {
-    type Err = <NonZero<u64> as FromStr>::Err;
+    type Err = <NonZero<usize> as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let value = NonZero::from_str(s)?;
@@ -500,14 +507,14 @@ impl FromStr for PositiveInteger {
     }
 }
 
-impl From<PositiveInteger> for NonZero<u64> {
+impl From<PositiveInteger> for NonZero<usize> {
     fn from(value: PositiveInteger) -> Self {
         value.0
     }
 }
 
-impl From<NonZero<u64>> for PositiveInteger {
-    fn from(value: NonZero<u64>) -> Self {
+impl From<NonZero<usize>> for PositiveInteger {
+    fn from(value: NonZero<usize>) -> Self {
         Self(value)
     }
 }
@@ -525,9 +532,45 @@ pub struct PaginationQueryParams {
     pub per_page: PositiveInteger,
 }
 
+/// Encapsulates a repetitive pattern
+pub enum PaginationOrEmpty<P, T> {
+    Some(P),
+    Empty(Page<T>),
+}
+
+impl PaginationQueryParams {
+    pub fn parse_into_direct<T>(&self, total: usize) -> PaginationOrEmpty<DirectPagination, T> {
+        match NonZero::new(total) {
+            Some(total) => PaginationOrEmpty::Some(DirectPagination::new(
+                self.page
+                    .unwrap_or(crate::schema::PositiveInteger(nonzero!(1usize)))
+                    .into(),
+                self.per_page.into(),
+                total,
+            )),
+            None => PaginationOrEmpty::Empty(Page::empty(self.per_page)),
+        }
+    }
+
+    pub fn parse_into_reverse<T>(
+        &self,
+        total: usize,
+    ) -> Result<PaginationOrEmpty<ReversePagination, T>, ReversePaginationError> {
+        let res = match NonZero::new(total) {
+            Some(total) => PaginationOrEmpty::Some(ReversePagination::new(
+                total,
+                self.per_page.into(),
+                self.page.map(From::from),
+            )?),
+            None => PaginationOrEmpty::Empty(Page::empty(self.per_page)),
+        };
+        Ok(res)
+    }
+}
+
 const fn default_per_page() -> PositiveInteger {
     // FIXME: does it work as `const VAR = ...; VAR`?
-    PositiveInteger(const { nonzero!(10u64) })
+    PositiveInteger(const { nonzero!(10usize) })
 }
 
 /// Timestamp
@@ -538,6 +581,12 @@ pub struct TimeStamp(chrono::DateTime<Utc>);
 impl From<DateTime<Utc>> for TimeStamp {
     fn from(value: DateTime<Utc>) -> Self {
         Self(value)
+    }
+}
+
+impl TimeStamp {
+    fn from_duration_timestamp(value: std::time::Duration) -> Self {
+        todo!()
     }
 }
 
@@ -552,6 +601,16 @@ pub enum TransactionStatus {
     Rejected,
 }
 
+// TODO: autogenerate?
+impl Display for TransactionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Committed => "committed",
+            Self::Rejected => "rejected",
+        })
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct TransactionBase {
     hash: Hash,
@@ -562,18 +621,37 @@ pub struct TransactionBase {
     status: TransactionStatus,
 }
 
-impl From<repo::TransactionBase> for TransactionBase {
-    fn from(value: repo::TransactionBase) -> Self {
+impl From<&query::BlockTransactionRef> for TransactionBase {
+    fn from(value: &query::BlockTransactionRef) -> Self {
         Self {
-            hash: value.hash.into(),
-            block: BigInt(value.block as u128),
-            created_at: TimeStamp(value.created_at),
-            authority: value.authority.into(),
-            executable: value.executable.into(),
-            status: value.status,
+            hash: value.transaction().hash().into(),
+            block: BigInt(value.block().header().height().get() as u128),
+            created_at: TimeStamp::from_duration_timestamp(value.transaction().creation_time()),
+            authority: value.transaction().authority().into(),
+            executable: value.transaction().instructions().into(),
+            status: value.status(),
         }
     }
 }
+
+impl From<query::BlockTransactionRef> for TransactionBase {
+    fn from(value: query::BlockTransactionRef) -> Self {
+        Self::from(&value)
+    }
+}
+
+// impl From<repo::TransactionBase> for TransactionBase {
+//     fn from(value: repo::TransactionBase) -> Self {
+//         Self {
+//             hash: value.hash.into(),
+//             block: BigInt(value.block as u128),
+//             created_at: TimeStamp(value.created_at),
+//             authority: value.authority.into(),
+//             executable: value.executable.into(),
+//             status: value.status,
+//         }
+//     }
+// }
 
 #[derive(Serialize, ToSchema)]
 pub struct TransactionDetailed {
@@ -582,10 +660,10 @@ pub struct TransactionDetailed {
     signature: Signature,
     nonce: Option<PositiveInteger>,
     metadata: Metadata,
-    time_to_live: TimeDuration,
+    time_to_live: Option<TimeDuration>,
     // FIXME: make it nullable
     #[schema(schema_with = rejection_reason_schema)]
-    rejection_reason: Option<ReprScaleJson<iroha::TransactionRejectionReason>>,
+    rejection_reason: Option<ReprScaleJson<Cow<'a, iroha::TransactionRejectionReason>>>,
 }
 
 fn rejection_reason_schema() -> impl Into<RefOr<Schema>> {
@@ -596,20 +674,22 @@ fn rejection_reason_schema() -> impl Into<RefOr<Schema>> {
     object
 }
 
-impl From<repo::TransactionDetailed> for TransactionDetailed {
-    fn from(value: repo::TransactionDetailed) -> Self {
+impl From<&query::BlockTransactionRef> for TransactionDetailed {
+    fn from(value: &query::BlockTransactionRef) -> Self {
         Self {
-            base: value.base.into(),
-            signature: value.signature.into(),
-            nonce: value.nonce.map(|int| {
-                PositiveInteger(NonZero::new(int.get() as u64).expect("it is non-zero"))
-            }),
-            metadata: value.metadata.into(),
-            time_to_live: TimeDuration {
-                ms: BigInt(value.time_to_live_ms as u128),
-            },
-            rejection_reason: value.rejection_reason.map(|reason| ReprScaleJson(reason.0)),
+            base: value.into(),
+            signature: value.signature().into(),
+            nonce: value.nonce().map(|int| PositiveInteger(int)),
+            metadata: value.metadata().into(),
+            time_to_live: value.time_to_live().map(TimeDuration::from),
+            rejection_reason: value.error().map(|reason| ReprScaleJson(reason)),
         }
+    }
+}
+
+impl From<query::BlockTransactionRef> for TransactionDetailed {
+    fn from(value: query::BlockTransactionRef) -> Self {
+        Self::from(&value)
     }
 }
 
@@ -637,6 +717,15 @@ impl From<repo::Executable> for Executable {
         match value {
             repo::Executable::Instructions => Self::Instructions,
             repo::Executable::WASM => Self::Wasm,
+        }
+    }
+}
+
+impl From<&iroha::Executable> for Executable {
+    fn from(value: &iroha::Executable) -> Self {
+        match value {
+            iroha::Executable::Instructions(_) => Self::Instructions,
+            iroha::Executable::Wasm(_) => Self::Wasm,
         }
     }
 }
@@ -697,6 +786,28 @@ pub enum InstructionKind {
     Custom,
 }
 
+impl InstructionKind {
+    pub fn matches_original(&self, other: &iroha::InstructionBox) -> bool {
+        match (self, other) {
+            (Self::Register, iroha::InstructionBox::Register(_)) => true,
+            (Self::Unregister, iroha::InstructionBox::Unregister(_)) => true,
+            (Self::Mint, iroha::InstructionBox::Mint(_)) => true,
+            (Self::Burn, iroha::InstructionBox::Burn(_)) => true,
+            (Self::Transfer, iroha::InstructionBox::Transfer(_)) => true,
+            (Self::SetKeyValue, iroha::InstructionBox::SetKeyValue(_)) => true,
+            (Self::RemoveKeyValue, iroha::InstructionBox::RemoveKeyValue(_)) => true,
+            (Self::Grant, iroha::InstructionBox::Grant(_)) => true,
+            (Self::Revoke, iroha::InstructionBox::Revoke(_)) => true,
+            (Self::ExecuteTrigger, iroha::InstructionBox::ExecuteTrigger(_)) => true,
+            (Self::SetParameter, iroha::InstructionBox::SetParameter(_)) => true,
+            (Self::Upgrade, iroha::InstructionBox::Upgrade(_)) => true,
+            (Self::Log, iroha::InstructionBox::Log(_)) => true,
+            (Self::Custom, iroha::InstructionBox::Custom(_)) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Block
 #[derive(Serialize, ToSchema)]
 pub struct Block {
@@ -726,6 +837,25 @@ impl From<repo::Block> for Block {
             created_at: TimeStamp(value.created_at),
             transactions_total: value.transactions_total,
             transactions_rejected: value.transactions_rejected,
+        }
+    }
+}
+
+impl From<&iroha_data_model::block::SignedBlock> for Block {
+    fn from(value: &iroha_data_model::block::SignedBlock) -> Self {
+        let transactions_total = value.payload().transactions.len() as u32;
+        let transactions_rejected = value.errors().len() as u32;
+
+        Self {
+            hash: Hash(value.hash().into()),
+            height: BigInt(value.header().height().get() as u128),
+            prev_block_hash: value.header().prev_block_hash().map(|x| Hash(x.into())),
+            transactions_hash: value.header().transactions_hash().map(|x| Hash(x.into())),
+            transactions_total,
+            transactions_rejected,
+            created_at: TimeStamp(
+                DateTime::from_timestamp_millis(value.header().creation_time_ms as i64).unwrap(),
+            ),
         }
     }
 }
@@ -1018,6 +1148,46 @@ pub struct GeoLocation {
 )]
 #[schema(value_type = String)]
 pub struct ToriiUrl(pub Url);
+
+#[derive(IntoParams, Deserialize)]
+pub struct AccountsIndexFilter {
+    /// Select accounts owning specified asset
+    pub with_asset: Option<AssetDefinitionId>,
+    /// Select accounts from specified domain
+    pub domain: Option<DomainId>,
+}
+
+#[derive(IntoParams, Deserialize)]
+pub struct AssetDefinitionsIndexFilter {
+    /// Filter by domain
+    pub domain: Option<DomainId>,
+    /// Filter by owner
+    pub owned_by: Option<AccountId>,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct TransactionsIndexFilter {
+    /// Select by authority
+    pub authority: Option<AccountId>,
+    /// Select by block
+    // FIX: this must be non-zero
+    pub block: Option<u64>,
+    /// Filter by transaction status
+    pub status: Option<TransactionStatus>,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct InstructionsIndexFilter {
+    pub transaction_hash: Option<Hash>,
+    /// Select by transaction status
+    pub transaction_status: Option<TransactionStatus>,
+    /// Select by block
+    pub block: Option<PositiveInteger>,
+    /// Filter by a kind of instruction
+    pub kind: Option<InstructionKind>,
+    /// Filter by the creator of the parent transaction
+    pub authority: Option<AccountId>,
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,12 @@
-use std::{num::NonZero, ops::Range};
+use std::{
+    iter::{Skip, Take},
+    num::NonZero,
+    ops::Range,
+};
 
 use nonzero_ext::nonzero;
 
-type Int = u64;
+type Int = usize;
 
 /// Translate pagination into a range on a list, where first page is 0..n, second is n..2n and so on.
 #[derive(Debug, Clone, Copy)]
@@ -48,11 +52,13 @@ impl DirectPagination {
         })
         .expect("full is always greater than 0")
     }
-}
 
-impl From<DirectPagination> for iroha::data_model::query::parameters::Pagination {
-    fn from(value: DirectPagination) -> Self {
-        range_into_iroha_pagination(value.range())
+    pub(crate) fn to_limit_offset(&self) -> OffsetLimit {
+        let range = self.range();
+        OffsetLimit {
+            offset: range.start,
+            limit: NonZero::new(range.end - range.start).expect("per page is non-zero"),
+        }
     }
 }
 
@@ -87,7 +93,7 @@ impl ReversePagination {
         let total_pages = if total_items.get() % per_page.get() > 0 {
             NonZero::new(full_pages + 1).expect("is at least 1")
         } else {
-            NonZero::new(full_pages).unwrap_or(nonzero!(1u64))
+            NonZero::new(full_pages).unwrap_or(nonzero!(1usize))
         };
 
         if let Some(page) = &page {
@@ -143,11 +149,14 @@ impl ReversePagination {
     pub fn per_page(&self) -> NonZero<Int> {
         self.per_page
     }
-}
 
-impl From<ReversePagination> for iroha::data_model::query::parameters::Pagination {
-    fn from(value: ReversePagination) -> Self {
-        range_into_iroha_pagination(value.range())
+    /// Translate to [`OffsetLimit`] applicable for a reverse iteration
+    pub fn to_offset_limit_for_rev_iter(&self) -> OffsetLimit {
+        let range = self.range();
+        OffsetLimit {
+            offset: range.start,
+            limit: NonZero::new(range.end - range.start).expect("per_page is non-zero"),
+        }
     }
 }
 
@@ -157,14 +166,23 @@ pub enum ReversePaginationError {
     PageOutOfBounds { page: Int, max: Int },
 }
 
-fn range_into_iroha_pagination(
-    range: Range<Int>,
-) -> iroha::data_model::query::parameters::Pagination {
-    iroha::data_model::query::parameters::Pagination::new(
-        NonZero::new(range.end - range.start),
-        range.start,
-    )
+/// Specification of offset + limit. Translates [`DirectPagination`] and [`ReversePagination`] into [`Iterator::skip`] and [`Iterator::take`].
+pub struct OffsetLimit {
+    pub offset: usize,
+    pub limit: NonZero<usize>,
 }
+
+pub trait OffsetLimitIteratorExt: Iterator {
+    /// Apply offset and limit to the iterator
+    fn offset_limit(self, value: OffsetLimit) -> Take<Skip<Self>>
+    where
+        Self: Sized,
+    {
+        self.skip(value.offset).take(value.limit.get())
+    }
+}
+
+impl<I> OffsetLimitIteratorExt for I where I: Iterator {}
 
 #[cfg(test)]
 mod test {
@@ -211,33 +229,42 @@ mod test {
 
         #[test]
         fn page_out_of_bounds() {
-            let ReversePaginationError::PageOutOfBounds { page, max } =
-                ReversePagination::new(nonzero!(23u64), nonzero!(10u64), Some(nonzero!(4u64)))
-                    .expect_err("should be out of bounds");
+            let ReversePaginationError::PageOutOfBounds { page, max } = ReversePagination::new(
+                nonzero!(23usize),
+                nonzero!(10usize),
+                Some(nonzero!(4usize)),
+            )
+            .expect_err("should be out of bounds");
             assert_eq!(page, 4);
             assert_eq!(max, 3);
         }
 
         #[test]
         fn computed_page() {
-            let value = ReversePagination::new(nonzero!(15u64), nonzero!(10u64), None).unwrap();
-            assert_eq!(value.page(), nonzero!(2u64));
+            let value = ReversePagination::new(nonzero!(15usize), nonzero!(10usize), None).unwrap();
+            assert_eq!(value.page(), nonzero!(2usize));
 
-            let value =
-                ReversePagination::new(nonzero!(15u64), nonzero!(10u64), Some(nonzero!(2u64)))
-                    .unwrap();
-            assert_eq!(value.page(), nonzero!(2u64));
+            let value = ReversePagination::new(
+                nonzero!(15usize),
+                nonzero!(10usize),
+                Some(nonzero!(2usize)),
+            )
+            .unwrap();
+            assert_eq!(value.page(), nonzero!(2usize));
 
-            let value =
-                ReversePagination::new(nonzero!(15u64), nonzero!(10u64), Some(nonzero!(1u64)))
-                    .unwrap();
-            assert_eq!(value.page(), nonzero!(1u64));
+            let value = ReversePagination::new(
+                nonzero!(15usize),
+                nonzero!(10usize),
+                Some(nonzero!(1usize)),
+            )
+            .unwrap();
+            assert_eq!(value.page(), nonzero!(1usize));
         }
     }
 
     #[test]
     fn create_direct_pagination() {
-        let value = DirectPagination::new(nonzero!(4u64), nonzero!(10u64), nonzero!(95u64));
+        let value = DirectPagination::new(nonzero!(4usize), nonzero!(10usize), nonzero!(95usize));
         assert_eq!(value.range(), 30..40);
     }
 }

@@ -2,16 +2,15 @@
 // FIXME: there are many truncations which we don't care about _for now_
 #![allow(clippy::cast_possible_truncation)]
 
+mod core;
 mod database_update;
 mod endpoint;
 mod iroha_client_wrap;
-mod repo;
 mod schema;
 mod telemetry;
 mod util;
 
 use crate::iroha_client_wrap::ClientWrap;
-use crate::repo::{scan_iroha, Repo};
 use crate::telemetry::{Telemetry, TelemetryConfig};
 use axum::routing::get;
 use axum::{

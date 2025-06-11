@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -12,21 +14,18 @@ use utoipa::{IntoParams, OpenApi};
 
 use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
 use crate::telemetry::Telemetry;
-use crate::{
-    repo::{self, Repo},
-    schema,
-};
+use crate::{core::query, schema};
 
 #[derive(Clone)]
 pub struct AppState {
     telemetry: Telemetry,
-    repo: Repo,
+    state: Arc<crate::core::State>,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
-    #[error("database-related error: {0}")]
-    Repo(#[from] repo::Error),
+    #[error("query-related error: {0}")]
+    Query(#[from] query::Error),
     #[error("Network status is not yet available")]
     NetworkStatusNotAvailable,
     #[error("{0}")]
@@ -36,15 +35,11 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            AppError::Repo(repo::Error::Pagination(x)) => {
-                (StatusCode::BAD_REQUEST, format!("{x}")).into_response()
+            AppError::Query(err @ query::Error::NotFound(_)) => {
+                (StatusCode::NOT_FOUND, format!("{err}")).into_response()
             }
-            AppError::Repo(repo::Error::Sqlx(sqlx::Error::RowNotFound)) => {
-                (StatusCode::NOT_FOUND, "Not Found").into_response()
-            }
-            AppError::Repo(repo::Error::Sqlx(err)) => {
-                tracing::error!(%err, "sqlx error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
+            AppError::Query(err @ query::Error::BadReversePagination(_)) => {
+                (StatusCode::BAD_REQUEST, format!("{err}")).into_response()
             }
             AppError::NetworkStatusNotAvailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -53,7 +48,6 @@ impl IntoResponse for AppError {
                 .into_response(),
             AppError::Other(report) => {
                 tracing::error!(%report, "other error");
-
                 (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response()
             }
         }
@@ -81,13 +75,9 @@ async fn domains_index(
     Query(filter): Query<DomainsIndexFilter>,
 ) -> Result<Json<schema::Page<schema::Domain>>, AppError> {
     let domains = state
-        .repo
-        .list_domains(repo::ListDomainParams {
-            pagination,
-            owned_by: filter.owned_by.map(|x| x.0),
-        })
-        .await?
-        .map(schema::Domain::from);
+        .state
+        .query()
+        .domains_index(filter.owned_by.as_ref(), &pagination);
 
     Ok(Json(domains))
 }
@@ -103,7 +93,7 @@ async fn domains_show(
     State(state): State<AppState>,
     Path(id): Path<schema::DomainId>,
 ) -> Result<Json<schema::Domain>, AppError> {
-    let domain = state.repo.find_domain(id.0).await?;
+    let domain = state.state.query().domains_show(&id)?;
     Ok(Json(schema::Domain::from(domain)))
 }
 
@@ -122,11 +112,7 @@ async fn blocks_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
 ) -> Result<Json<Page<schema::Block>>, AppError> {
-    let blocks = state
-        .repo
-        .list_blocks(pagination)
-        .await?
-        .map(schema::Block::from);
+    let blocks = state.state.query().blocks_index(&pagination)?;
     Ok(Json(blocks))
 }
 
@@ -147,25 +133,8 @@ async fn blocks_show(
     State(state): State<AppState>,
     Path(height_or_hash): Path<schema::BlockHeightOrHash>,
 ) -> Result<Json<schema::Block>, AppError> {
-    let params = match height_or_hash {
-        schema::BlockHeightOrHash::Height(height) => {
-            repo::FindBlockParams::Height(height.get() as u32)
-        }
-        schema::BlockHeightOrHash::Hash(hash) => repo::FindBlockParams::Hash(hash),
-    };
-
-    let block = state.repo.find_block(params).await?;
-    Ok(Json(block.into()))
-}
-
-#[derive(Deserialize, IntoParams)]
-struct TransactionsIndexFilter {
-    /// Select by authority
-    authority: Option<schema::AccountId>,
-    /// Select by block
-    block: Option<u64>,
-    /// Filter by transaction status
-    status: Option<schema::TransactionStatus>,
+    let block = state.state.query().blocks_show(&height_or_hash)?;
+    Ok(Json(block))
 }
 
 /// List transactions
@@ -173,7 +142,7 @@ struct TransactionsIndexFilter {
     get,
     path = "/transactions",
     tags = ["Blockchain entities"],
-    params(schema::PaginationQueryParams, TransactionsIndexFilter),
+    params(schema::PaginationQueryParams, schema::TransactionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = Page<schema::TransactionBase>)
     )
@@ -181,18 +150,12 @@ struct TransactionsIndexFilter {
 async fn transactions_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<TransactionsIndexFilter>,
+    Query(filter): Query<schema::TransactionsIndexFilter>,
 ) -> Result<Json<Page<schema::TransactionBase>>, AppError> {
     let page = state
-        .repo
-        .list_transactions(repo::ListTransactionsParams {
-            pagination,
-            block: filter.block,
-            authority: filter.authority.map(|x| x.0),
-            status: filter.status,
-        })
-        .await?
-        .map(schema::TransactionBase::from);
+        .state
+        .query()
+        .transactions_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -209,16 +172,8 @@ async fn transactions_show(
     State(state): State<AppState>,
     Path(hash): Path<schema::Hash>,
 ) -> Result<Json<schema::TransactionDetailed>, AppError> {
-    let tx = state.repo.find_transaction_by_hash(hash.0).await?;
+    let tx = state.state.query().transactions_show(&hash.0)?;
     Ok(Json(tx.into()))
-}
-
-#[derive(IntoParams, Deserialize)]
-struct AccountsIndexFilter {
-    /// Select accounts owning specified asset
-    with_asset: Option<schema::AssetDefinitionId>,
-    /// Select accounts from specified domain
-    domain: Option<schema::DomainId>,
 }
 
 /// List accounts
@@ -226,7 +181,7 @@ struct AccountsIndexFilter {
     get,
     path = "/accounts",
     tags = ["Blockchain entities"],
-    params(schema::PaginationQueryParams, AccountsIndexFilter),
+    params(schema::PaginationQueryParams, schema::AccountsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Account])
     )
@@ -234,17 +189,9 @@ struct AccountsIndexFilter {
 async fn accounts_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<AccountsIndexFilter>,
+    Query(filter): Query<schema::AccountsIndexFilter>,
 ) -> Result<Json<Page<schema::Account>>, AppError> {
-    let page = state
-        .repo
-        .list_accounts(repo::ListAccountsParams {
-            pagination,
-            with_asset: filter.with_asset.map(|x| x.0),
-            domain: filter.domain.map(|x| x.0),
-        })
-        .await?
-        .map(schema::Account::from);
+    let page = state.state.query().accounts_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -259,15 +206,7 @@ async fn accounts_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AccountId>,
 ) -> Result<Json<schema::Account>, AppError> {
-    Ok(Json(state.repo.find_account(id.0).await?.into()))
-}
-
-#[derive(IntoParams, Deserialize)]
-struct AssetDefinitionsIndexFilter {
-    /// Filter by domain
-    domain: Option<schema::DomainId>,
-    /// Filter by owner
-    owned_by: Option<schema::AccountId>,
+    Ok(Json(state.state.query().accounts_show(&id)?))
 }
 
 /// List asset definitions
@@ -275,7 +214,7 @@ struct AssetDefinitionsIndexFilter {
     get,
     path = "/assets-definitions",
     tags = ["Blockchain entities"],
-    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+    params(schema::PaginationQueryParams, schema::AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::AssetDefinition])
     )
@@ -283,17 +222,9 @@ struct AssetDefinitionsIndexFilter {
 async fn assets_definitions_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<AssetDefinitionsIndexFilter>,
+    Query(filter): Query<schema::AssetDefinitionsIndexFilter>,
 ) -> Result<Json<Page<schema::AssetDefinition>>, AppError> {
-    let page = state
-        .repo
-        .list_assets_definitions(repo::ListAssetDefinitionParams {
-            pagination,
-            domain: filter.domain.map(|x| x.0),
-            owned_by: filter.owned_by.map(|x| x.0),
-        })
-        .await?
-        .map(schema::AssetDefinition::from);
+    let page = state.state.query().asset_defs_index(&filter, &pagination);
     Ok(Json(page))
 }
 
@@ -308,7 +239,7 @@ async fn assets_definitions_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AssetDefinitionId>,
 ) -> Result<Json<schema::AssetDefinition>, AppError> {
-    let item = state.repo.find_asset_definition(id.0).await?.into();
+    let item = state.state.query().asset_defs_show(&id)?;
     Ok(Json(item))
 }
 
@@ -404,25 +335,12 @@ async fn nfts_show(
     Ok(Json(item))
 }
 
-#[derive(Deserialize, IntoParams)]
-struct InstructionsIndexFilter {
-    transaction_hash: Option<schema::Hash>,
-    /// Select by transaction status
-    transaction_status: Option<TransactionStatus>,
-    /// Select by block
-    block: Option<u64>,
-    /// Filter by a kind of instruction
-    kind: Option<schema::InstructionKind>,
-    /// Filter by the creator of the parent transaction
-    authority: Option<schema::AccountId>,
-}
-
 /// List instructions
 #[utoipa::path(
     get,
     path = "/instructions",
     tags = ["Blockchain entities"],
-    params(PaginationQueryParams, InstructionsIndexFilter),
+    params(PaginationQueryParams, schema::InstructionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Instruction])
     )
@@ -430,7 +348,7 @@ struct InstructionsIndexFilter {
 async fn instructions_index(
     State(state): State<AppState>,
     Query(pagination): Query<PaginationQueryParams>,
-    Query(filter): Query<InstructionsIndexFilter>,
+    Query(filter): Query<schema::InstructionsIndexFilter>,
 ) -> Result<Json<Page<schema::Instruction>>, AppError> {
     let items = state
         .repo
@@ -525,7 +443,7 @@ pub async fn telemetry_peers_info(
     Ok(Json(data))
 }
 
-pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
+pub fn router(state: Arc<crate::core::State>, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/{:id}", get(domains_show))
@@ -546,7 +464,7 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
         .route("/telemetry/peers", get(telemetry_peers))
         .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))
-        .with_state(AppState { repo, telemetry })
+        .with_state(AppState { state, telemetry })
 }
 
 // TODO: add new paths

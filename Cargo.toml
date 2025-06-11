@@ -5,7 +5,11 @@ version = "0.2.1"
 edition = "2021"
 
 [dependencies]
-iroha = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "v2.0.0-rc.2.0" }
+iroha = { path = "../iroha-explorer-patched/crates/iroha" }
+iroha_core = { path = "../iroha-explorer-patched/crates/iroha_core/" }
+iroha_data_model = { path = "../iroha-explorer-patched/crates/iroha_data_model/" }
+iroha_futures = { path = "../iroha-explorer-patched/crates/iroha_futures/" }
+iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/" }
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
@@ -35,10 +39,15 @@ reqwest = { version = "0.12.15", features = ["json"] }
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 const-str = { version = "0.6", features = ["proc"] }
 
+# HACK: `0.5.5` breaks `mv`
+concread = "=0.5.3"
+itertools = "0.14.0"
+genawaiter = "0.99.1"
+
 [dev-dependencies]
 insta = { version = "1.42.2", features = ["json", "csv"] }
 expect-test = "1.5.0"
-iroha_crypto = { git = "https://github.com/hyperledger-iroha/iroha.git", rev = "v2.0.0-rc.2.0", features = ["rand"] }
+iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/", features = ["rand"] }
 tokio = { version = "1", features = ["process"] }
 
 [build-dependencies]
