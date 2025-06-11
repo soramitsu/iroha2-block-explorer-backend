@@ -1,5 +1,4 @@
 use crate::core::query;
-use crate::repo;
 use crate::util::{DirectPagination, ReversePagination, ReversePaginationError};
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -12,7 +11,7 @@ use serde_json::json;
 use serde_with::DeserializeFromStr;
 use sqlx::prelude::FromRow;
 use std::borrow::Cow;
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::num::NonZero;
@@ -1187,6 +1186,14 @@ pub struct InstructionsIndexFilter {
     pub kind: Option<InstructionKind>,
     /// Filter by the creator of the parent transaction
     pub authority: Option<AccountId>,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct AssetsIndexFilter {
+    /// Filter by an owning account
+    pub owned_by: Option<AccountId>,
+    /// Filter by asset definition
+    pub definition: Option<AssetDefinitionId>,
 }
 
 #[cfg(test)]

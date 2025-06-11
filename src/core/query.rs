@@ -371,6 +371,30 @@ impl<'a> QueryExecutor<'a> {
     pub fn accounts_show(&self, id: &schema::AccountId) -> Result<schema::Account> {
         todo!()
     }
+
+    pub fn assets_index(
+        &self,
+        filter: &schema::AssetsIndexFilter,
+        pagination: &schema::PaginationQueryParams,
+    ) -> Result<schema::Page<schema::Asset>> {
+        todo!()
+    }
+
+    pub fn assets_show(&self, id: &schema::AssetId) -> Result<schema::Asset> {
+        todo!()
+    }
+
+    pub fn nfts_index(
+        &self,
+        filter: &schema::AssetDefinitionsIndexFilter,
+        pagination: &schema::PaginationQueryParams,
+    ) -> Result<schema::Page<schema::Nft>> {
+        todo!()
+    }
+
+    pub fn nfts_show(&self, id: &schema::NftId) -> Result<schema::Nft> {
+        todo!()
+    }
 }
 
 pub struct DomainWorldRef<'a, W> {

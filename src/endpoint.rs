@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use utoipa::{IntoParams, OpenApi};
 
-use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
+use crate::schema::{Page, PaginationQueryParams};
 use crate::telemetry::Telemetry;
 use crate::{core::query, schema};
 
@@ -35,10 +35,13 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         match self {
-            AppError::Query(err @ query::Error::NotFound(_)) => {
+            AppError::Query(err @ query::Error::NotFound { .. }) => {
                 (StatusCode::NOT_FOUND, format!("{err}")).into_response()
             }
             AppError::Query(err @ query::Error::BadReversePagination(_)) => {
+                (StatusCode::BAD_REQUEST, format!("{err}")).into_response()
+            }
+            AppError::Query(err @ query::Error::BadParams { .. }) => {
                 (StatusCode::BAD_REQUEST, format!("{err}")).into_response()
             }
             AppError::NetworkStatusNotAvailable => (
@@ -243,20 +246,12 @@ async fn assets_definitions_show(
     Ok(Json(item))
 }
 
-#[derive(Deserialize, IntoParams)]
-struct AssetsIndexFilter {
-    /// Filter by an owning account
-    owned_by: Option<schema::AccountId>,
-    /// Filter by asset definition
-    definition: Option<schema::AssetDefinitionId>,
-}
-
 /// List assets
 #[utoipa::path(
     get,
     path = "/assets",
     tags = ["Blockchain entities"],
-    params(schema::PaginationQueryParams, AssetsIndexFilter),
+    params(schema::PaginationQueryParams, schema::AssetsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Asset])
     )
@@ -264,17 +259,9 @@ struct AssetsIndexFilter {
 async fn assets_index(
     State(state): State<AppState>,
     Query(pagination): Query<PaginationQueryParams>,
-    Query(filter): Query<AssetsIndexFilter>,
+    Query(filter): Query<schema::AssetsIndexFilter>,
 ) -> Result<Json<Page<schema::Asset>>, AppError> {
-    let page = state
-        .repo
-        .list_assets(repo::ListAssetsParams {
-            pagination,
-            owned_by: filter.owned_by.map(|x| x.0),
-            definition: filter.definition.map(|x| x.0),
-        })
-        .await?
-        .map(schema::Asset::from);
+    let page = state.state.query().assets_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -289,8 +276,7 @@ async fn assets_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AssetId>,
 ) -> Result<Json<schema::Asset>, AppError> {
-    let item = state.repo.find_asset(id.0).await?;
-    Ok(Json(item.into()))
+    Ok(Json(state.state.query().assets_show(&id)?))
 }
 
 /// List NFTs
@@ -298,7 +284,7 @@ async fn assets_show(
     get,
     path = "/nfts",
     tags = ["Blockchain entities"],
-    params(schema::PaginationQueryParams, AssetDefinitionsIndexFilter),
+    params(schema::PaginationQueryParams, schema::AssetDefinitionsIndexFilter),
     responses(
         (status = 200, description = "OK", body = [schema::Nft])
     )
@@ -306,17 +292,9 @@ async fn assets_show(
 async fn nfts_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
-    Query(filter): Query<AssetDefinitionsIndexFilter>,
+    Query(filter): Query<schema::AssetDefinitionsIndexFilter>,
 ) -> Result<Json<Page<schema::Nft>>, AppError> {
-    let page = state
-        .repo
-        .list_nfts(repo::ListNftsParams {
-            pagination,
-            domain: filter.domain.map(|x| x.0),
-            owned_by: filter.owned_by.map(|x| x.0),
-        })
-        .await?
-        .map(schema::Nft::from);
+    let page = state.state.query().nfts_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -331,7 +309,7 @@ async fn nfts_show(
     State(state): State<AppState>,
     Path(id): Path<schema::NftId>,
 ) -> Result<Json<schema::Nft>, AppError> {
-    let item = state.repo.find_nft(id.0).await?.into();
+    let item = state.state.query().nfts_show(&id)?;
     Ok(Json(item))
 }
 
@@ -351,17 +329,9 @@ async fn instructions_index(
     Query(filter): Query<schema::InstructionsIndexFilter>,
 ) -> Result<Json<Page<schema::Instruction>>, AppError> {
     let items = state
-        .repo
-        .list_instructions(repo::ListInstructionParams {
-            pagination,
-            transaction_hash: filter.transaction_hash.map(|x| x.0),
-            transaction_status: filter.transaction_status,
-            block: filter.block,
-            kind: filter.kind,
-            authority: filter.authority.map(|x| x.0),
-        })
-        .await?
-        .map(schema::Instruction::from);
+        .state
+        .query()
+        .instructions_index(&filter, &pagination)?;
     Ok(Json(items))
 }
 
