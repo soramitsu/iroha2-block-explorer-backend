@@ -2,8 +2,9 @@ use std::{num::NonZero, ops::Deref, sync::Arc};
 
 use eyre::eyre;
 use iroha_core::{
+    kura::KuraReadOnly,
     state::{
-        StateReadOnly, StateReadOnlyWithTransactions, StateView, StorageReadOnly as _,
+        State, StateReadOnly, StateReadOnlyWithTransactions, StateView, StorageReadOnly as _,
         TransactionsReadOnly as _, WorldReadOnly,
     },
     tx::{
@@ -17,9 +18,12 @@ use iroha_data_model::Identifiable;
 use nonzero_ext::nonzero;
 
 use crate::{
+    core::storage,
     schema::{self, PaginationOrEmpty},
     util::{OffsetLimitIteratorExt as _, ReversePaginationError},
 };
+
+use super::state::StateReader;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -33,28 +37,31 @@ pub(crate) enum Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub struct QueryExecutor<'a> {
-    view: StateView<'a>,
-}
+pub struct QueryExecutor(StateReader);
 
-impl<'a> QueryExecutor<'a> {
-    pub fn new(view: StateView<'a>) -> Self {
-        Self { view }
+impl QueryExecutor {
+    pub fn new(view: StateReader) -> Self {
+        Self(view)
+    }
+
+    fn view(&self) -> StateView<'_> {
+        self.0.view()
     }
 
     pub fn blocks_index(
         &self,
         pagination: &schema::PaginationQueryParams,
     ) -> Result<schema::Page<schema::Block>> {
-        let total = self.view.height();
+        let view = self.view();
+
+        let total = view.height();
         let pagination = match pagination.parse_into_reverse(total)? {
             PaginationOrEmpty::Empty(x) => return Ok(x),
             PaginationOrEmpty::Some(p) => p,
         };
 
-        let items = self
-            .view
-            .all_blocks(nonzero!(1_usize))
+        let items = view
+            .all_blocks(&self.storage, nonzero!(1_usize))
             .rev()
             .offset_limit(pagination.to_offset_limit_for_rev_iter())
             .map(|x| schema::Block::from(x.as_ref()))
@@ -64,18 +71,17 @@ impl<'a> QueryExecutor<'a> {
     }
 
     pub fn blocks_show(&self, id: &schema::BlockHeightOrHash) -> Result<schema::Block> {
+        let view = self.view();
         match id {
-            schema::BlockHeightOrHash::Height(schema::PositiveInteger(height)) => self
-                .view
-                .all_blocks(*height)
+            schema::BlockHeightOrHash::Height(schema::PositiveInteger(height)) => view
+                .all_blocks(&self.storage, *height)
                 .next()
                 .map(|x| schema::Block::from(x.as_ref()))
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("block with height \"{}\"", height.get()),
                 }),
-            schema::BlockHeightOrHash::Hash(hash) => self
-                .view
-                .all_blocks(nonzero!(1_usize))
+            schema::BlockHeightOrHash::Hash(hash) => view
+                .all_blocks(&self.storage, nonzero!(1_usize))
                 .filter(|block| *block.hash() == *hash)
                 .next()
                 .map(|x| schema::Block::from(x.as_ref()))
@@ -90,6 +96,7 @@ impl<'a> QueryExecutor<'a> {
         filter: &schema::TransactionsIndexFilter,
         pagination: &schema::PaginationQueryParams,
     ) -> eyre::Result<schema::Page<schema::TransactionBase>> {
+        let view = self.view();
         let by_height = filter
             .block
             .map(|x| NonZero::new(x as usize).ok_or_else(|| eyre!("zero height is not ok")))
@@ -97,9 +104,9 @@ impl<'a> QueryExecutor<'a> {
 
         let produce_iter = || {
             let iter: Box<dyn Iterator<Item = Arc<SignedBlock>>> = if let Some(height) = by_height {
-                Box::new(self.view.all_blocks(height).take(1))
+                Box::new(view.all_blocks(&self.storage, height).take(1))
             } else {
-                Box::new(self.view.all_blocks(nonzero!(1_usize)))
+                Box::new(view.all_blocks(&self.storage, nonzero!(1_usize)))
             };
 
             iter.flat_map(BlockTransactionIter::new).filter(|tx_ref| {
@@ -134,29 +141,15 @@ impl<'a> QueryExecutor<'a> {
     }
 
     pub fn transactions_show(&self, hash: &Hash) -> Result<schema::TransactionDetailed> {
+        let view = self.view();
         let hash = HashOf::from_untyped_unchecked(*hash);
-        let tx_ref = self
-            .try_retrieve_transaction_ref(&hash)
-            .ok_or_else(|| Error::NotFound {
-                entity: format!("transaction with hash \"{}\"", hash),
+        let tx_ref =
+            try_retrieve_transaction_ref(&view, &self.storage, &hash).ok_or_else(|| {
+                Error::NotFound {
+                    entity: format!("transaction with hash \"{}\"", hash),
+                }
             })?;
         Ok(schema::TransactionDetailed::from(tx_ref))
-    }
-
-    fn try_retrieve_transaction_ref(
-        &self,
-        hash: &HashOf<SignedTransaction>,
-    ) -> Option<BlockTransactionRef> {
-        let height = self.view.transactions().get(&hash)?;
-        let block = self
-            .view
-            .all_blocks(height)
-            .next()
-            .expect("Bug: block must exist since it is in the transactions storage");
-        let tx_ref = BlockTransactionIter::new(block)
-            .find(|tx_ref| tx_ref.transaction().hash() == *hash)
-            .expect("Bug: transaction must be in the block");
-        Some(tx_ref)
     }
 
     pub fn instructions_index(
@@ -164,15 +157,17 @@ impl<'a> QueryExecutor<'a> {
         filter: &schema::InstructionsIndexFilter,
         pagination: &schema::PaginationQueryParams,
     ) -> Result<schema::Page<schema::Instruction>> {
+        let view = self.view();
         let produce_isi_iter: Box<
             dyn Fn() -> Box<dyn Iterator<Item = BlockTransactionInstructionRef>>,
         > = if let Some(hash) = &filter.transaction_hash {
             let hash = HashOf::from_untyped_unchecked(hash.0);
             let tx_ref =
-                self.try_retrieve_transaction_ref(&hash)
-                    .ok_or_else(|| Error::NotFound {
+                try_retrieve_transaction_ref(&view, &self.storage, &hash).ok_or_else(|| {
+                    Error::NotFound {
                         entity: format!("transaction with hash \"{hash}\""),
-                    })?;
+                    }
+                })?;
 
             // These filters have no effect in case when tx hash is specified.
             // However, if provided, we validate that they make sense.
@@ -204,9 +199,9 @@ impl<'a> QueryExecutor<'a> {
             Box::new(|| {
                 let iter_blocks: Box<dyn Iterator<Item = Arc<SignedBlock>>> =
                     if let Some(height) = filter.block {
-                        Box::new(self.view.all_blocks(*height).take(1))
+                        Box::new(view.all_blocks(&self.storage, *height).take(1))
                     } else {
-                        Box::new(self.view.all_blocks(nonzero!(1usize)))
+                        Box::new(view.all_blocks(&self.storage, nonzero!(1usize)))
                     };
 
                 let iter = iter_blocks
@@ -261,8 +256,9 @@ impl<'a> QueryExecutor<'a> {
         owned_by: Option<&schema::AccountId>,
         pagination: &schema::PaginationQueryParams,
     ) -> schema::Page<schema::Domain> {
+        let view = self.view();
         let produce_iter = || {
-            self.view.world().domains_iter().filter(|domain| {
+            view.world().domains_iter().filter(|domain| {
                 if let Some(owner) = &owned_by {
                     if domain.owned_by() != &owner.0 {
                         return false;
@@ -282,7 +278,7 @@ impl<'a> QueryExecutor<'a> {
             .offset_limit(pagination.to_limit_offset())
             .map(|domain| DomainWorldRef {
                 domain,
-                world: self.view.world(),
+                world: view.world(),
             })
             .map(schema::Domain::from)
             .collect();
@@ -290,13 +286,13 @@ impl<'a> QueryExecutor<'a> {
     }
 
     pub fn domains_show(&self, id: &schema::DomainId) -> Result<schema::Domain> {
-        self.view
-            .world()
+        let view = self.view();
+        view.world()
             .domains()
             .get(&id.0)
             .map(|domain| DomainWorldRef {
                 domain,
-                world: self.view.world(),
+                world: view.world(),
             })
             .map(schema::Domain::from)
             .ok_or_else(|| Error::NotFound {
@@ -309,16 +305,13 @@ impl<'a> QueryExecutor<'a> {
         filter: &schema::AssetDefinitionsIndexFilter,
         pagination: &schema::PaginationQueryParams,
     ) -> schema::Page<schema::AssetDefinition> {
+        let view = self.view();
         let produce_iter = || {
             let iter: Box<dyn Iterator<Item = &'_ AssetDefinition>> =
                 if let Some(domain) = &filter.domain {
-                    Box::new(
-                        self.view
-                            .world()
-                            .asset_definitions_in_domain_iter(&domain.0),
-                    )
+                    Box::new(view.world().asset_definitions_in_domain_iter(&domain.0))
                 } else {
-                    Box::new(self.view.world().asset_definitions_iter())
+                    Box::new(view.world().asset_definitions_iter())
                 };
 
             iter.filter(|item| {
@@ -349,8 +342,8 @@ impl<'a> QueryExecutor<'a> {
         &self,
         id: &schema::AssetDefinitionId,
     ) -> Result<schema::AssetDefinition> {
-        self.view
-            .world()
+        let view = self.view();
+        view.world()
             .asset_definitions_in_domain_iter(id.0.domain())
             .filter(|x| x.id().name() == id.0.name())
             .next()
@@ -395,6 +388,22 @@ impl<'a> QueryExecutor<'a> {
     pub fn nfts_show(&self, id: &schema::NftId) -> Result<schema::Nft> {
         todo!()
     }
+}
+
+fn try_retrieve_transaction_ref(
+    view: &StateView<'_>,
+    kura: &impl KuraReadOnly,
+    hash: &HashOf<SignedTransaction>,
+) -> Option<BlockTransactionRef> {
+    let height = view.transactions().get(&hash)?;
+    let block = view
+        .all_blocks(kura, height)
+        .next()
+        .expect("Bug: block must exist since it is in the transactions storage");
+    let tx_ref = BlockTransactionIter::new(block)
+        .find(|tx_ref| tx_ref.transaction().hash() == *hash)
+        .expect("Bug: transaction must be in the block");
+    Some(tx_ref)
 }
 
 pub struct DomainWorldRef<'a, W> {
@@ -530,3 +539,6 @@ impl Deref for BlockTransactionInstructionRef {
         todo!()
     }
 }
+
+// TODO: test condition: state is re-initialising (kura is shut down and started again) while query
+// is holding state view.

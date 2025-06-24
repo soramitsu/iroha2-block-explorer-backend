@@ -1,7 +1,11 @@
-use crate::repo::Repo;
+use crate::core::state::StateReader;
+// use crate::repo::Repo;
 use crate::telemetry::AVG_COMMIT_BLOCK_TIME_WINDOW;
+use iroha_core::kura::KuraReadOnly;
+use iroha_core::state::{StateReadOnly, WorldReadOnly};
 use sqlx::FromRow;
 use std::convert::Infallible;
+use std::num::NonZero;
 use std::time::Duration;
 
 const QUERY: &str = "\
@@ -19,8 +23,8 @@ select (select count() from blocks)                                            a
               order by created_at desc
               limit ?))                                                       as avg_block_time_ms";
 
-#[derive(Clone, Debug, FromRow)]
-pub struct State {
+#[derive(Clone, Debug)]
+pub struct Metrics {
     pub block: u32,
     pub block_created_at: chrono::DateTime<chrono::Utc>,
     pub domains: u32,
@@ -28,12 +32,51 @@ pub struct State {
     pub assets: u32,
     pub txs_accepted: u32,
     pub txs_rejected: u32,
+    // TODO: could be enabled now!
     // pub parameter_max_block_time: Duration,
     // pub parameter_max_commit_time: Duration,
     // pub parameter_max_txs_per_block: u32,
-    #[sqlx(rename = "avg_block_time_ms", try_from = "u64")]
     pub avg_block_time: DurationMillis,
 }
+
+// TODO: create with state view and readonly kura
+// update incrementally with new blocks (re-use AvgCommitTime helper)
+impl Metrics {
+    //     /// Initiate with the current state view
+    // pub fn new(reader: &StateReader) -> Self {
+    //
+    //     }
+    //
+    //     pub fn update(&mut self,
+}
+
+// // PERF: loads all blocks on every new block; not optimal
+// // FIXME: have a running State which is updated with every new block
+// impl From<&StateReader> for State {
+//     fn from(reader: &StateReader) -> Self {
+//         let view = reader.view();
+//         let storage = reader.storage();
+//
+//         let Some(height) = NonZero::new(view.height()) else {
+//             todo!()
+//         };
+//
+//         let (txs_accepted, txs_rejected, avg_block_time) = view.all_blocks(&storage, nonzero!(1usize))
+//
+//         Self {
+//             block: height.get() as u32,
+//             block_created_at: storage
+//                 .get_block(height)
+//                 .unwrap()
+//                 .header()
+//                 .creation_time()
+//                 .into(),
+//             domains: view.world().domains().len(),
+//             accounts: view.world().accounts().len(),
+//             assets: view.world().assets().len() + view.world().nfts().len(),
+//         }
+//     }
+// }
 
 #[derive(Copy, Clone, Debug)]
 pub struct DurationMillis(pub Duration);
@@ -43,17 +86,6 @@ impl TryFrom<u64> for DurationMillis {
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Ok(Self(Duration::from_millis(value)))
-    }
-}
-
-impl State {
-    pub async fn scan(repo: &Repo) -> Result<Self, crate::repo::Error> {
-        let mut conn = repo.acquire_conn().await;
-        let state: State = sqlx::query_as(QUERY)
-            .bind(AVG_COMMIT_BLOCK_TIME_WINDOW as u32)
-            .fetch_one(&mut *conn)
-            .await?;
-        Ok(state)
     }
 }
 
@@ -67,7 +99,7 @@ mod tests {
     async fn scan_test_repo() {
         let repo = test_repo().await;
 
-        let state = State::scan(&repo).await.unwrap();
+        let state = Metrics::scan(&repo).await.unwrap();
         assert_debug_snapshot!(state);
     }
 }

@@ -27,7 +27,7 @@ pub struct Telemetry {
 }
 
 impl Telemetry {
-    pub fn start(config: TelemetryConfig) -> (Self, impl Future<Output = ()> + Sized) {
+    pub fn new(config: TelemetryConfig) -> (Self, impl Future<Output = ()> + Sized) {
         let (actor, handle) = mpsc::channel(512);
 
         #[cfg(debug_assertions)]
@@ -149,7 +149,7 @@ impl Telemetry {
         Ok(reply)
     }
 
-    pub async fn update_blockchain_state(&self, state: blockchain::State) -> eyre::Result<()> {
+    pub async fn update_blockchain_state(&self, state: blockchain::Metrics) -> eyre::Result<()> {
         self.actor
             .send(ActorMessage::UpdateBlockchainState(state))
             .await?;
@@ -159,7 +159,7 @@ impl Telemetry {
 
 enum ActorMessage {
     HandlePeerMonitorUpdate(ToriiUrl, peer_monitor::Update),
-    UpdateBlockchainState(blockchain::State),
+    UpdateBlockchainState(blockchain::Metrics),
     GetNetworkStatus {
         reply: oneshot::Sender<Option<NetworkStatus>>,
     },
@@ -256,7 +256,7 @@ impl TelemetryActor {
 }
 
 struct State {
-    blockchain: Option<blockchain::State>,
+    blockchain: Option<blockchain::Metrics>,
     peers: BTreeMap<ToriiUrl, PeerState>,
 }
 
@@ -361,7 +361,7 @@ impl State {
         Ok(ret)
     }
 
-    fn update_blockchain(&mut self, state: blockchain::State) {
+    fn update_blockchain(&mut self, state: blockchain::Metrics) {
         self.blockchain = Some(state);
     }
 
@@ -575,8 +575,8 @@ mod state_tests {
         ToriiUrl(format!("http://iroha.tech/{}", id).parse().unwrap())
     }
 
-    pub fn factory_block_state() -> blockchain::State {
-        blockchain::State {
+    pub fn factory_block_state() -> blockchain::Metrics {
+        blockchain::Metrics {
             block: 0,
             block_created_at: <_>::default(),
             domains: 0,
@@ -923,7 +923,7 @@ mod actor_tests {
         assert_eq!(first.peers_status.len(), 0);
 
         // update blockchain data
-        tx.send(ActorMessage::UpdateBlockchainState(blockchain::State {
+        tx.send(ActorMessage::UpdateBlockchainState(blockchain::Metrics {
             block: 3,
             avg_block_time: DurationMillis(Duration::from_millis(120)),
             ..factory_block_state()

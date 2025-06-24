@@ -3,14 +3,13 @@
 #![allow(clippy::cast_possible_truncation)]
 
 mod core;
-mod database_update;
 mod endpoint;
-mod iroha_client_wrap;
+mod iroha_client;
 mod schema;
 mod telemetry;
 mod util;
 
-use crate::iroha_client_wrap::ClientWrap;
+use crate::iroha_client::Client;
 use crate::telemetry::{Telemetry, TelemetryConfig};
 use axum::routing::get;
 use axum::{
@@ -18,10 +17,10 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use database_update::DatabaseUpdateLoop;
 use eyre::{eyre, Context};
 use iroha::crypto::{KeyPair, PrivateKey};
 use iroha::data_model::account::AccountId;
+use iroha_futures::supervisor::{Child, OnShutdown, ShutdownSignal, Supervisor};
 use schema::ToriiUrl;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -29,6 +28,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
@@ -46,6 +46,10 @@ const VERSION: &str = const_str::format!(
 #[derive(Debug, Parser)]
 #[clap(about = "Iroha 2 Explorer Backend", version = VERSION, long_about = None)]
 pub struct Args {
+    /// Path to store blocks in
+    #[clap(long, short, env = "IROHA_EXPLORER_STORE_DIR")]
+    pub store_dir: PathBuf,
+
     #[command(subcommand)]
     pub command: Subcommand,
 }
@@ -54,11 +58,9 @@ pub struct Args {
 pub enum Subcommand {
     /// Run the server
     Serve(ServeArgs),
-    #[cfg(debug_assertions)]
-    /// DEBUG-ONLY: run server with test data
-    ServeTest(ServeBaseArgs),
-    /// Scan Iroha into an `SQLite` database and save it to file
-    Scan(ScanArgs),
+    // #[cfg(debug_assertions)]
+    // /// DEBUG-ONLY: run server with test data
+    // ServeTest(ServeBaseArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -77,8 +79,8 @@ pub struct IrohaArgs {
 }
 
 impl IrohaArgs {
-    fn client(&self) -> ClientWrap {
-        ClientWrap::new(
+    fn client(&self) -> Client {
+        Client::new(
             self.account.clone(),
             KeyPair::from(self.account_private_key.clone()),
             self.torii_urls.some(),
@@ -120,14 +122,6 @@ impl ArgToriiUrls {
 }
 
 #[derive(Parser, Debug)]
-pub struct ScanArgs {
-    #[command(flatten)]
-    iroha: IrohaArgs,
-    /// Path to `SQLite` database to scan Iroha to
-    out_file: PathBuf,
-}
-
-#[derive(Parser, Debug)]
 pub struct ServeBaseArgs {
     /// Port to run the server on
     #[clap(short, long, default_value = "4000", env = "IROHA_EXPLORER_PORT")]
@@ -152,6 +146,7 @@ pub struct ServeArgs {
 )]
 struct Api;
 
+// TODO: enable iroha core?
 #[cfg(debug_assertions)]
 const DEFAULT_LOG: &str = "iroha_explorer=trace,tower_http=debug,sqlx=debug";
 #[cfg(not(debug_assertions))]
@@ -174,58 +169,72 @@ async fn main() {
         .init();
 
     match args.command {
-        Subcommand::Serve(args) => serve(args).await,
-        #[cfg(debug_assertions)]
-        Subcommand::ServeTest(args) => serve_test(args).await,
-        Subcommand::Scan(args) => scan(args).await.unwrap(),
+        Subcommand::Serve(serve_args) => serve(serve_args, args.store_dir).await,
+        // #[cfg(debug_assertions)]
+        // Subcommand::ServeTest(args) => serve_test(args).await,
     }
 }
 
-async fn serve(args: ServeArgs) {
-    let repo = Repo::new(None);
+async fn serve(args: ServeArgs, store_dir: PathBuf) {
     let client = args.iroha.client();
 
-    let mut set = JoinSet::<()>::new();
-    let (telemetry, telemetry_fut) = Telemetry::start(TelemetryConfig {
-        urls: args.iroha.torii_urls.all().clone(),
-    });
-    set.spawn(telemetry_fut);
-    set.spawn({
-        let repo = repo.clone();
-        let tel = telemetry.clone();
-        async move {
-            do_serve(repo, tel, args.base).await;
-        }
-    });
-    set.spawn(async move {
-        DatabaseUpdateLoop::new(repo, client, telemetry).run().await;
-    });
-    set.join_all().await;
+    let mut sup = Supervisor::new();
+
+    let telemetry = {
+        let (tel, fut) = Telemetry::new(TelemetryConfig {
+            urls: args.iroha.torii_urls.all().clone(),
+        });
+        sup.monitor(Child::new(tokio::spawn(fut), OnShutdown::Abort));
+        tel
+    };
+
+    let state = {
+        let (state, fut) = core::start(
+            store_dir,
+            telemetry.clone(),
+            client.clone(),
+            sup.shutdown_signal(),
+        );
+        sup.monitor(Child::new(
+            tokio::spawn(async move {
+                if let Err(error) = fut.await {
+                    tracing::error!(%error, "Core supervisor exited with error");
+                    // FIXME: communicate error to top-level properly
+                    panic!("not okay")
+                }
+            }),
+            OnShutdown::Wait(Duration::from_secs(10)),
+        ));
+        state
+    };
+
+    sup.monitor(Child::new(
+        tokio::spawn({
+            let state = state.clone();
+            let tel = telemetry.clone();
+            let signal = sup.shutdown_signal();
+            async move {
+                do_serve(state, tel, signal, args.base).await;
+            }
+        }),
+        OnShutdown::Wait(Duration::from_secs(5)),
+    ));
+
+    sup.setup_shutdown_on_os_signals().unwrap();
+    sup.start().await.unwrap()
 }
 
-#[cfg(debug_assertions)]
-async fn serve_test(args: ServeBaseArgs) {
-    let repo = Repo::new(None);
-    fill_repo_with_test_data(&repo).await.unwrap();
-    tracing::info!("test data is ready");
-
-    let mut set = JoinSet::<()>::new();
-    let (telemetry, telemetry_fut) = Telemetry::start(TelemetryConfig {
-        urls: <_>::default(),
-    });
-    set.spawn(telemetry_fut);
-    set.spawn(async move {
-        do_serve(repo.clone(), telemetry, args).await;
-    });
-    set.join_all().await;
-}
-
-async fn do_serve(repo: Repo, telemetry: Telemetry, args: ServeBaseArgs) {
+async fn do_serve(
+    state: core::state::State,
+    telemetry: Telemetry,
+    shutdown_signal: ShutdownSignal,
+    args: ServeBaseArgs,
+) {
     // TODO: handle endpoint panics
     let app = Router::new()
         .merge(Scalar::with_url("/api/docs", Api::openapi()))
         .route("/api/health", get(health_check))
-        .nest("/api/v1", endpoint::router(repo, telemetry))
+        .nest("/api/v1", endpoint::router(state, telemetry))
         .layer(
             TraceLayer::new_for_http()
                 // Create our own span for the request and include the matched path. The matched
@@ -251,7 +260,10 @@ async fn do_serve(repo: Repo, telemetry: Telemetry, args: ServeBaseArgs) {
         .unwrap();
     tracing::info!("listening on http://{}", listener.local_addr().unwrap());
 
-    axum::serve(listener, app).await.unwrap()
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move { shutdown_signal.receive().await })
+        .await
+        .unwrap()
 }
 
 /// Health check
@@ -260,31 +272,6 @@ async fn do_serve(repo: Repo, telemetry: Telemetry, args: ServeBaseArgs) {
 ))]
 async fn health_check() -> &'static str {
     "healthy"
-}
-
-#[cfg(debug_assertions)]
-async fn fill_repo_with_test_data(repo: &Repo) -> eyre::Result<()> {
-    let mut conn = SqliteConnectOptions::new()
-        .in_memory(true)
-        .connect()
-        .await?;
-    sqlx::query(include_str!("./repo/test_dump.sql"))
-        .execute(&mut conn)
-        .await?;
-    repo.swap(conn).await;
-    Ok(())
-}
-
-async fn scan(args: ScanArgs) -> eyre::Result<()> {
-    let mut conn = SqliteConnectOptions::new()
-        .filename(&args.out_file)
-        .create_if_missing(true)
-        .connect()
-        .await?;
-    scan_iroha(&args.iroha.client(), &mut conn).await?;
-    conn.close().await?;
-    tracing::info!(?args.out_file, "written");
-    Ok(())
 }
 
 #[cfg(test)]

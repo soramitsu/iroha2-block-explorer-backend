@@ -6,7 +6,9 @@ edition = "2021"
 
 [dependencies]
 iroha = { path = "../iroha-explorer-patched/crates/iroha" }
+iroha_config = { path = "../iroha-explorer-patched/crates/iroha_config/" }
 iroha_core = { path = "../iroha-explorer-patched/crates/iroha_core/" }
+iroha_genesis = { path = "../iroha-explorer-patched/crates/iroha_genesis/" }
 iroha_data_model = { path = "../iroha-explorer-patched/crates/iroha_data_model/" }
 iroha_futures = { path = "../iroha-explorer-patched/crates/iroha_futures/" }
 iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/" }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -14,12 +12,21 @@ use utoipa::{IntoParams, OpenApi};
 
 use crate::schema::{Page, PaginationQueryParams};
 use crate::telemetry::Telemetry;
-use crate::{core::query, schema};
+use crate::{
+    core::{query, state},
+    schema,
+};
 
 #[derive(Clone)]
 pub struct AppState {
     telemetry: Telemetry,
-    state: Arc<crate::core::State>,
+    core_state: state::Handle,
+}
+
+impl AppState {
+    async fn query(&self) -> Result<query::QueryExecutor, AppError> {
+        todo!()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -78,8 +85,8 @@ async fn domains_index(
     Query(filter): Query<DomainsIndexFilter>,
 ) -> Result<Json<schema::Page<schema::Domain>>, AppError> {
     let domains = state
-        .state
         .query()
+        .await?
         .domains_index(filter.owned_by.as_ref(), &pagination);
 
     Ok(Json(domains))
@@ -96,7 +103,7 @@ async fn domains_show(
     State(state): State<AppState>,
     Path(id): Path<schema::DomainId>,
 ) -> Result<Json<schema::Domain>, AppError> {
-    let domain = state.state.query().domains_show(&id)?;
+    let domain = state.query().await?.domains_show(&id)?;
     Ok(Json(schema::Domain::from(domain)))
 }
 
@@ -115,7 +122,7 @@ async fn blocks_index(
     State(state): State<AppState>,
     Query(pagination): Query<schema::PaginationQueryParams>,
 ) -> Result<Json<Page<schema::Block>>, AppError> {
-    let blocks = state.state.query().blocks_index(&pagination)?;
+    let blocks = state.query().await?.blocks_index(&pagination)?;
     Ok(Json(blocks))
 }
 
@@ -136,7 +143,7 @@ async fn blocks_show(
     State(state): State<AppState>,
     Path(height_or_hash): Path<schema::BlockHeightOrHash>,
 ) -> Result<Json<schema::Block>, AppError> {
-    let block = state.state.query().blocks_show(&height_or_hash)?;
+    let block = state.query().await?.blocks_show(&height_or_hash)?;
     Ok(Json(block))
 }
 
@@ -156,8 +163,8 @@ async fn transactions_index(
     Query(filter): Query<schema::TransactionsIndexFilter>,
 ) -> Result<Json<Page<schema::TransactionBase>>, AppError> {
     let page = state
-        .state
         .query()
+        .await?
         .transactions_index(&filter, &pagination)?;
     Ok(Json(page))
 }
@@ -175,7 +182,7 @@ async fn transactions_show(
     State(state): State<AppState>,
     Path(hash): Path<schema::Hash>,
 ) -> Result<Json<schema::TransactionDetailed>, AppError> {
-    let tx = state.state.query().transactions_show(&hash.0)?;
+    let tx = state.query().await?.transactions_show(&hash.0)?;
     Ok(Json(tx.into()))
 }
 
@@ -194,7 +201,7 @@ async fn accounts_index(
     Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<schema::AccountsIndexFilter>,
 ) -> Result<Json<Page<schema::Account>>, AppError> {
-    let page = state.state.query().accounts_index(&filter, &pagination)?;
+    let page = state.query().await?.accounts_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -209,7 +216,7 @@ async fn accounts_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AccountId>,
 ) -> Result<Json<schema::Account>, AppError> {
-    Ok(Json(state.state.query().accounts_show(&id)?))
+    Ok(Json(state.query().await?.accounts_show(&id)?))
 }
 
 /// List asset definitions
@@ -227,7 +234,7 @@ async fn assets_definitions_index(
     Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<schema::AssetDefinitionsIndexFilter>,
 ) -> Result<Json<Page<schema::AssetDefinition>>, AppError> {
-    let page = state.state.query().asset_defs_index(&filter, &pagination);
+    let page = state.query().await?.asset_defs_index(&filter, &pagination);
     Ok(Json(page))
 }
 
@@ -242,7 +249,7 @@ async fn assets_definitions_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AssetDefinitionId>,
 ) -> Result<Json<schema::AssetDefinition>, AppError> {
-    let item = state.state.query().asset_defs_show(&id)?;
+    let item = state.query().await?.asset_defs_show(&id)?;
     Ok(Json(item))
 }
 
@@ -261,7 +268,7 @@ async fn assets_index(
     Query(pagination): Query<PaginationQueryParams>,
     Query(filter): Query<schema::AssetsIndexFilter>,
 ) -> Result<Json<Page<schema::Asset>>, AppError> {
-    let page = state.state.query().assets_index(&filter, &pagination)?;
+    let page = state.query().await?.assets_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -276,7 +283,7 @@ async fn assets_show(
     State(state): State<AppState>,
     Path(id): Path<schema::AssetId>,
 ) -> Result<Json<schema::Asset>, AppError> {
-    Ok(Json(state.state.query().assets_show(&id)?))
+    Ok(Json(state.query().await?.assets_show(&id)?))
 }
 
 /// List NFTs
@@ -294,7 +301,7 @@ async fn nfts_index(
     Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<schema::AssetDefinitionsIndexFilter>,
 ) -> Result<Json<Page<schema::Nft>>, AppError> {
-    let page = state.state.query().nfts_index(&filter, &pagination)?;
+    let page = state.query().await?.nfts_index(&filter, &pagination)?;
     Ok(Json(page))
 }
 
@@ -309,7 +316,7 @@ async fn nfts_show(
     State(state): State<AppState>,
     Path(id): Path<schema::NftId>,
 ) -> Result<Json<schema::Nft>, AppError> {
-    let item = state.state.query().nfts_show(&id)?;
+    let item = state.query().await?.nfts_show(&id)?;
     Ok(Json(item))
 }
 
@@ -329,8 +336,8 @@ async fn instructions_index(
     Query(filter): Query<schema::InstructionsIndexFilter>,
 ) -> Result<Json<Page<schema::Instruction>>, AppError> {
     let items = state
-        .state
         .query()
+        .await?
         .instructions_index(&filter, &pagination)?;
     Ok(Json(items))
 }
@@ -413,7 +420,7 @@ pub async fn telemetry_peers_info(
     Ok(Json(data))
 }
 
-pub fn router(state: Arc<crate::core::State>, telemetry: Telemetry) -> Router {
+pub fn router(state: state::Handle, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/{:id}", get(domains_show))
@@ -434,7 +441,10 @@ pub fn router(state: Arc<crate::core::State>, telemetry: Telemetry) -> Router {
         .route("/telemetry/peers", get(telemetry_peers))
         .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))
-        .with_state(AppState { state, telemetry })
+        .with_state(AppState {
+            core_state: state,
+            telemetry,
+        })
 }
 
 // TODO: add new paths
