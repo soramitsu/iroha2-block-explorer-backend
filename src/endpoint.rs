@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use utoipa::{IntoParams, OpenApi};
 
-use crate::schema::{Page, PaginationQueryParams, TransactionStatus};
+use crate::schema::{Page, PaginationQueryParams, TelemetryStreamMessage, TransactionStatus};
 use crate::telemetry::Telemetry;
 use crate::{
     repo::{self, Repo},
@@ -509,6 +509,32 @@ pub async fn telemetry_live(
     Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
 }
 
+/// Receive live updates of network status
+#[utoipa::path(
+    get,
+    path = "/network/live",
+    tags = ["Telemetry"],
+    responses(
+        (
+            status = 200,
+            description = "OK, stream is ready",
+            content_type = "text/event-stream",
+            body = schema::NetworkStatus
+        )
+    )
+)]
+pub async fn telemetry_network_status_live(
+    State(state): State<AppState>,
+) -> Result<sse::Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>, AppError> {
+    let stream = state.telemetry.live().await?.filter_map(async |data| {
+        if let TelemetryStreamMessage::NetworkStatus(status) = data {
+            return Some(sse::Event::default().json_data(status));
+        }
+        None
+    });
+    Ok(sse::Sse::new(stream).keep_alive(sse::KeepAlive::default()))
+}
+
 /// Get static telemetry information about peers
 #[utoipa::path(
     get,
@@ -543,6 +569,10 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
         .route("/transactions/{:hash}", get(transactions_show))
         .route("/instructions", get(instructions_index))
         .route("/telemetry/network", get(telemetry_network))
+        .route(
+            "/telemetry/network/live",
+            get(telemetry_network_status_live),
+        )
         .route("/telemetry/peers", get(telemetry_peers))
         .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))

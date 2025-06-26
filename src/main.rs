@@ -389,6 +389,12 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
         )
         .await;
+        ensure_status(
+            &client,
+            path("/api/v1/telemetry/network/live"),
+            StatusCode::OK,
+        )
+        .await;
         ensure_status(&client, path("/api/v1/telemetry/peers"), StatusCode::OK).await;
         ensure_status(
             &client,
