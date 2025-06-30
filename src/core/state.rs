@@ -1,273 +1,427 @@
+use iroha_config::{base::WithOrigin, parameters::actual::Kura as Config};
+use iroha_core::query::store::LiveQueryStore;
+use nonzero_ext::nonzero;
+use std::ops::Deref;
+use std::time::Duration;
 use std::{future::Future, num::NonZero, path::PathBuf, sync::Arc};
 
 use crate::core::StateViewExt;
+use crate::telemetry::blockchain::Metrics;
+use crate::telemetry::{AverageBlockTime, Telemetry};
 
-use super::storage::{self, ReadGuard, Storage};
-use super::{Error, Result};
+use super::{Error, Result, KURA_BLOCKS_IN_MEMORY};
 use iroha_core::block::{CommittedBlock, ValidBlock};
 use iroha_core::kura::{self, Kura};
-use iroha_core::state::{State as CoreState, StateBlock, StateView};
+use iroha_core::state::{State as CoreState, StateBlock, StateReadOnly, StateView, World};
 use iroha_data_model::prelude::*;
-use iroha_futures::supervisor::ShutdownSignal;
-use tokio::sync::{mpsc, oneshot, watch};
+use iroha_futures::supervisor::{
+    spawn_os_thread_as_future, Child, OnShutdown, ShutdownSignal, Supervisor,
+};
+use tokio::sync::{mpsc, oneshot, watch, OwnedRwLockReadGuard, RwLock, RwLockReadGuard};
 
 type BlockHash = HashOf<BlockHeader>;
 
 #[derive(Clone)]
 pub struct State {
     actor: mpsc::Sender<Message>,
+    lock: Arc<RwLock<StateInner>>,
 }
 
 struct Actor {
     handle: mpsc::Receiver<Message>,
-    storage: Storage,
-    state: Option<Arc<CoreState>>,
+    telemetry: Telemetry,
+    lock: Arc<RwLock<StateInner>>,
+    state_extras: StateExtras,
+    store_dir: PathBuf,
+    shutdown_external: ShutdownSignal,
+    shutdown_internal: ShutdownSignal,
+    shutdown_kura_complete: Option<oneshot::Receiver<()>>,
+    shutdown_state_complete: Option<oneshot::Receiver<()>>,
 }
 
+#[derive(Debug)]
 enum Message {
-    Height {
-        reply: oneshot::Sender<usize>,
+    ConfirmHeight {
+        height: usize,
     },
-    State {
-        reply: oneshot::Sender<Option<StateReader>>,
-    },
-    Insert {
+    InsertBlock {
         block: Arc<SignedBlock>,
         reply: oneshot::Sender<Result<()>>,
     },
 }
 
-/// A reader of the state, whose purpose is to ensure
-/// that storage won't be terminated while it exists.
-#[derive(Clone)]
-pub struct StateReader {
-    core: Arc<CoreState>,
-    read_guard: ReadGuard,
+pub struct StateGuard {
+    guard: OwnedRwLockReadGuard<StateInner>,
 }
 
-impl StateReader {
-    /// Get a persistent state view.
-    ///
-    /// For consistency, it is important to use a single [`StateView`].
-    /// Subsequent calls may result in different views.
+struct StateInner {
+    state: Arc<CoreState>,
+    kura: Arc<Kura>,
+}
+
+struct StateExtras {
+    metrics: IncrementalMetrics,
+}
+
+struct IncrementalMetrics {
+    base: Metrics,
+    block_time: AverageBlockTime,
+}
+
+impl StateGuard {
     pub fn view(&self) -> StateView<'_> {
-        self.core.view()
+        self.guard.state.view()
     }
 
-    pub fn storage(&self) -> &ReadGuard {
-        &self.read_guard
+    pub fn kura(&self) -> &Kura {
+        &*self.guard.kura
     }
 }
 
 impl State {
-    pub fn new(storage: Storage) -> (Self, impl Future<Output = ()> + Sized) {
-        todo!()
+    pub fn new(
+        store_dir: impl Into<PathBuf>,
+        telemetry: Telemetry,
+        signal: ShutdownSignal,
+    ) -> (
+        Self,
+        impl Future<Output = Result<(), iroha_futures::supervisor::Error>> + Sized,
+    ) {
+        let store_dir = store_dir.into();
+        let (tx, rx) = mpsc::channel(128);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut main_sup = Supervisor::new();
+        main_sup.shutdown_on_external_signal(signal.clone());
+
+        let shutdown_internal = ShutdownSignal::new();
+        let mut kura_sup = Supervisor::new();
+        kura_sup.shutdown_on_external_signal(shutdown_internal);
+        let (kura, child) = init_kura(
+            store_dir.clone(),
+            StartMode::Restore,
+            kura_sup.shutdown_signal(),
+        );
+        kura_sup.monitor(child);
+        let shutdown_kura_complete = oneshot::channel();
+        let lock = Arc::new(RwLock::new(StateInner {
+            state: Arc::new(init_dummy_state()),
+            kura,
+        }));
+        let lock2 = lock.clone();
+        let actor = Actor {
+            handle: rx,
+            telemetry,
+            lock,
+            store_dir,
+            state_extras: StateExtras {
+                metrics: IncrementalMetrics::default(),
+            },
+            shutdown_external: main_sup.shutdown_signal(),
+            shutdown_internal: kura_sup.shutdown_signal(),
+            shutdown_kura_complete: Some(shutdown_kura_complete.1),
+            shutdown_state_complete: None,
+        };
+
+        main_sup.monitor(Child::new(
+            tokio::spawn(spawn_os_thread_as_future(
+                std::thread::Builder::new().name("kura".to_owned()),
+                move || {
+                    rt.block_on(async move {
+                        tokio::spawn(run_sup_with_complete(kura_sup, shutdown_kura_complete.0));
+                        actor.recv_loop().await
+                    });
+                },
+            )),
+            OnShutdown::Wait(Duration::from_secs(6)),
+        ));
+
+        (
+            Self {
+                actor: tx,
+                lock: lock2,
+            },
+            main_sup.start(),
+        )
     }
 
-    // TODO: use some ActorCommunicationError
-    pub async fn height(&self) -> Result<usize> {
-        let (tx, rx) = oneshot::channel();
-        self.actor.send(Message::Height { reply: tx }).await?;
-        let reply = rx.await?;
-        Ok(reply)
+    pub async fn acquire_guard(&self) -> StateGuard {
+        let guard = self.lock.clone().read_owned().await;
+        StateGuard { guard }
     }
-
-    pub async fn height_watch(&self) -> Result<watch::Receiver<usize>> {
-        todo!()
-    }
-
-    // pub async fn block_hash(&self, height: NonZero<usize>) -> eyre::Result<Option<BlockHash>> {
-    //     todo!()
-    // }
-    //
 
     /// Tell which latest block height in the local storage is "confirmed" to match with
     /// remote block chain.
     ///
-    /// This may cause state and storage re-initialisation.
+    /// This _may_ cause state and storage re-initialisation.
     ///
-    /// TODO: blocks parallel acquire_read? resolves them?
-    ///
-    /// As a result, the state will reflect the given height.
+    /// Future returned by this function resolves once the actor receives the message and
+    /// does not wait for the entire process to finish.
     pub async fn confirm_local_height(&self, height: usize) -> Result<()> {
-        todo!()
+        self.actor.send(Message::ConfirmHeight { height }).await?;
+        Ok(())
     }
 
-    /// Acquire a state reader.
+    /// Insert a block into the local block chain.
     ///
-    /// [None] if the state is not ready yet.
-    pub async fn acquire_read(&self) -> Result<Option<StateReader>> {
-        let (tx, rx) = oneshot::channel();
-        self.actor.send(Message::State { reply: tx }).await?;
-        let reply = rx.await?;
-        Ok(reply)
-    }
-
-    /// Insert a block into the state.
+    /// The block must be chained to the latest local block.
+    /// If it is not, call [`Self::confirm_local_height`] first.
     ///
-    /// TODO: makes block validation in parallel? Allows parallel acquire_read (by not blocking the
-    /// actors loop?)
-    pub async fn insert_block(&self, block: Arc<SignedBlock>) -> Result<Result<()>> {
+    /// The future resolves once the block is fully applied in the local state.
+    pub async fn insert_block(&self, block: Arc<SignedBlock>) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.actor
-            .send(Message::Insert { block, reply: tx })
+            .send(Message::InsertBlock { block, reply: tx })
             .await?;
         rx.await?
     }
 }
 
 impl Actor {
-    async fn recv_loop(&mut self) {
-        while let Some(msg) = self.handle.recv().await {
-            match msg {
-                Message::State { reply } => {
-                    let guard = self.storage.acquire_read().await;
-                    let _ = reply.send(Some((self.state.clone(), guard)));
-                }
-                Message::Height { reply } => {
-                    todo!()
-                }
-                Message::Insert { block } => {
-                    todo!()
+    async fn recv_loop(mut self) {
+        loop {
+            tokio::select! {
+                Some(msg) = self.handle.recv() => {
+                    self.handle_message(msg).await
+                },
+                _ = self.shutdown_external.receive() => {
+                    self.terminate().await
                 }
             }
         }
     }
 
-    /// Try to insert a block received from Iroha (the source of truth) to the local block chain.
-    ///
-    /// Requirements:
-    ///
-    /// * The received block must _not_ already be in the local block chain.
-    /// * The received block height must _not_ be greater than the local height by more than 1.
-    /// * The received block's previous block hash must be in the local state.
-    ///
-    /// If the received block is not in the block chain, but its previous block _is_, then the received
-    /// block is inserted. If there are irrelevant blocks (i.e. with height greater or equal to the
-    /// received one), they are discarded.
-    ///
-    /// Success makes the received block be the latest block in the local block chain.
-    /// The world state is updated accordingly.
-    fn try_insert_block(&self, block: SignedBlock) -> Result<()> {
-        let view = self.state.view();
+    async fn handle_message(&mut self, message: Message) {
+        tracing::trace!(?message, "Handle message");
+        match message {
+            Message::ConfirmHeight { height } => self.confirm_height(height).await,
+            Message::InsertBlock { block, reply } => {
+                let result = self.insert_block((*block).clone()).await;
+                let _ = reply.send(result);
+            }
+        }
+    }
 
-        let state_height = view.height();
+    async fn terminate(&mut self) {
+        tracing::debug!("Terminating");
+        self.shutdown_internal.send();
+        let mut _guard = self.lock.write().await;
+        tokio::join!(
+            maybe_recv(self.shutdown_kura_complete.take()),
+            maybe_recv(self.shutdown_state_complete.take())
+        );
+    }
+
+    async fn confirm_height(&mut self, height: usize) {
+        let read_guard = self.lock.read().await;
+        let kura_height = read_guard.kura.blocks_count();
+
+        if height > kura_height {
+            tracing::error!(
+                height,
+                kura_height,
+                "Received confirmed height is higher than Kura's"
+            );
+            return;
+        }
+
+        let state_height = read_guard.state.view().height();
+        if kura_height == state_height && kura_height == height {
+            // up to date
+            return;
+        }
+
+        tracing::info!(height, "Restarting Kura...");
+
+        // tell Kura to shut down
+        self.shutdown_internal.send();
+
+        // wait for all readers to cease
+        drop(read_guard);
+        let mut write_guard = self.lock.write().await;
+
+        // wait Kura & State to complete their shutdown
+        tokio::join!(
+            maybe_recv(self.shutdown_kura_complete.take()),
+            maybe_recv(self.shutdown_state_complete.take())
+        );
+
+        // dropping the state - it must hold the last Kura reference
+        write_guard.state = Arc::new(init_dummy_state());
+
+        // ensure there are no more Kura references in Explorer and we can
+        // safely re-initialise it
+        debug_assert_eq!(Arc::strong_count(&write_guard.kura), 1);
+
+        // reset metrics
+        self.state_extras.metrics = IncrementalMetrics::default();
+        self.send_metrics().await;
+
+        // initialise Kura
+
+        let mut sup = Supervisor::new();
+        sup.shutdown_on_external_signal(self.shutdown_external.clone());
+
+        let (kura, child) = init_kura(
+            self.store_dir.clone(),
+            StartMode::RestoreOnly(height),
+            sup.shutdown_signal(),
+        );
+        sup.monitor(child);
+        write_guard.kura = kura.clone();
+        let kura_complete = oneshot::channel();
+        self.shutdown_kura_complete = Some(kura_complete.1);
+
+        tokio::spawn(run_sup_with_complete(sup, kura_complete.0));
+
+        if height > 0 {
+            // replay blocks from Kura
+
+            let genesis = write_guard
+                .kura
+                .get_block(nonzero!(1usize))
+                .expect("storage has at least genesis");
+            let (state, sup) = init_state(kura.clone(), infer_genesis_account(&*genesis).unwrap());
+            let state = Arc::new(state);
+            write_guard.state = state.clone();
+            let state_complete = oneshot::channel();
+            tokio::spawn(run_sup_with_complete(sup, state_complete.0));
+
+            debug_assert!(self.shutdown_state_complete.is_none());
+            self.shutdown_state_complete = Some(state_complete.1);
+
+            // at this point, concurrent reads are OK
+            core::mem::drop(write_guard);
+
+            play_all_blocks(&kura, &state, &mut self.state_extras);
+            self.send_metrics().await;
+        }
+    }
+
+    async fn send_metrics(&self) {
+        self.telemetry
+            .update_blockchain_state(self.state_extras.metrics.get_metrics())
+            .await;
+    }
+
+    async fn insert_block(&mut self, block: SignedBlock) -> Result<()> {
+        let read_guard = self.lock.read().await;
+        let kura = read_guard.kura.clone();
+
         let block_height: NonZero<usize> = block
             .header()
             .height()
             .try_into()
             .expect("must fit into usize");
 
-        if block_height.get() > state_height + 1 {
-            return Err(Error::ReceivedBlockHeightIsTooFar {
-                state_height,
-                block_height,
+        let kura_height = kura.blocks_count();
+        let state_height = read_guard.state.view().height();
+        if state_height != kura_height {
+            return Err(Error::NotConfirmed);
+        };
+
+        if state_height != block_height.get() - 1 {
+            return Err(Error::ReceivedBlockHeightMismatch {
+                expected: NonZero::new(state_height + 1).expect("at least 1"),
+                actual: block_height,
             });
         }
 
-        let block_hash = block.hash();
-        if let Some(local_same_height_block_hash) = view.block_hash(block_height) {
-            if block_hash == local_same_height_block_hash {
-                return Err(Error::ReceivedBlockIsAlreadyInBlockChain);
-            }
-        }
-
         if block_height.get() == 1 {
-            // Genesis - re-create the state
-            self.reinit(infer_genesis_account(&block)?)?;
-            self.do_insert_block(block);
-        } else {
-            let block_prev_block_hash = block
-                .header()
-                .prev_block_hash()
-                .expect("only None for genesis");
-            let prev_block_height =
-                NonZero::new(block_height.get().checked_sub(1).expect("non-zero"))
-                    .expect("not genesis");
-            let local_prev_block_hash = view.block_hash(prev_block_height)
-                .expect("must be: received block is not genesis and local height is at most one block behind");
+            // genesis - recreate State
 
-            if local_prev_block_hash != block_prev_block_hash {
-                return Err(Error::ReceivedBlockPreviousBlockHashNotFound {
-                    actual_prev_block_hash: local_prev_block_hash,
+            // store immediately
+            let block = Arc::new(block);
+            kura.store_block(block.clone());
+
+            drop(read_guard);
+            let mut write_guard = self.lock.write().await;
+
+            let (state, sup) = init_state(kura.clone(), infer_genesis_account(&*block).unwrap());
+            let state = Arc::new(state);
+            // NOTE: no need to wait for previous state "shutdown" - it is a dummy
+            write_guard.state = state.clone();
+            let state_complete = oneshot::channel();
+            tokio::spawn(run_sup_with_complete(sup, state_complete.0));
+
+            debug_assert!(self.shutdown_state_complete.is_none());
+            self.shutdown_state_complete = Some(state_complete.1);
+
+            // at this point, concurrent reads (i.e. queries) are OK
+            drop(write_guard);
+
+            play_all_blocks(&kura, &state, &mut self.state_extras);
+            self.send_metrics().await;
+        } else {
+            // add block to Kura & State
+
+            let state_height = NonZero::new(state_height).expect("block > 1, therefore state >= 1");
+
+            let local_last_block_hash = kura
+                .get_block_hash(state_height)
+                .expect("Kura & state are in sync");
+            let block_prev_block_hash = block.header().prev_block_hash().expect("block > 1");
+            if local_last_block_hash != block_prev_block_hash {
+                return Err(Error::ReceivedBlockPreviousBlockHashMismatch {
+                    actual_prev_block_hash: local_last_block_hash,
                     block_prev_block_hash,
                 });
             }
 
-            // If local height is behind by one, just apply
-            // If local height is the same, revert and apply
-            // If local height is ahead, then re-create the state by re-applying _all_ blocks
-            // behind first, then applying the received one
-
-            if block_height.get() == state_height + 1 {
-                self.do_insert_block(block);
-            } else if block_height.get() == state_height {
-                self.do_replace_top_block(block);
-            } else {
-                assert!(state_height > block_height.get());
-
-                // 1. Drop current state, delete from sup
-                // 2. Create new state with genesis from kura's genesis
-                // 3. Play blocks from kura until block_height - 1
-                // 4. Discard other blocks in Kura
-                // 5. Insert new block normally
-                //
-                // Requirements:
-                //
-                // 1. Add `Kura::discard_from(height: NonZero<usize>)`
-                // 2. Tell supervisor to shutdown a child normally (live query store?)
-                //
-                // Or:
-                //
-                // 1. Drop current state & kura, stop with supervisor
-                // 2. Create new state, StorageInit::Restore
-                // 2a. Tell storage to discard blocks from a certain height
-                // 3. Play all blocks from storage
-                // 4. Insert new block
-                //
-                // Pros: no need to tweak the supervisor
-                // Pros: can discard Kura blocks on init, easier to implement
-                //
-
-                todo!()
-            }
-            // self.h
+            // OK: block is valid, apply
+            let block = Arc::new(block);
+            kura.store_block(block.clone());
+            play_all_blocks(&kura, &read_guard.state, &mut self.state_extras);
+            self.send_metrics().await;
         }
-
-        todo!()
-    }
-
-    fn reinit(&mut self, genesis_account: &AccountId) -> Result<()> {
-        // TODO: abort previous supervisor & kura
-
-        let mut sup = Supervisor::new();
-        let storage = Storage::new(&self.store_dir, &mut sup, StorageInit::New)?;
-        let state = init_state(&mut sup, storage.kura().clone(), genesis_account)?;
-
-        let shutdown = sup.shutdown_signal();
-        let sup_fut = sup.start();
-
-        self.storage = storage;
-        self.state = Arc::new(state);
-        self.sup = Arc::new(sup);
 
         Ok(())
     }
+}
 
-    fn do_insert_block(&self, block: SignedBlock) {
-        let state_block = self.state.block(block.header());
-        let committed_block = play_block(block, state_block);
-        self.storage.kura().store_block(committed_block);
-    }
-
-    fn do_replace_top_block(&self, block: SignedBlock) {
-        let state_block = self.state.block_and_revert(block.header());
-        let committed_block = play_block(block, state_block);
-        self.storage.kura().replace_top_block(committed_block);
+impl Default for IncrementalMetrics {
+    fn default() -> Self {
+        todo!()
     }
 }
 
-// fn create_state(kura: &Kura) ->
+impl IncrementalMetrics {
+    fn get_metrics(&self) -> Metrics {
+        todo!()
+    }
+
+    fn insert_block_delta(&mut self, delta: Duration) {}
+
+    fn reflect_state(&mut self, view: &impl StateReadOnly) {}
+}
+
+fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras) {
+    let state_height = state.view().height();
+    let kura_height = kura.blocks_count();
+    let mut prev_creation_time = NonZero::new(kura_height)
+        .and_then(|h| kura.get_block(h))
+        .map(|b| b.header().creation_time());
+
+    for block in ((state_height + 1)..=kura_height).map(|height| {
+        kura.get_block(NonZero::new(height).expect("at least 1"))
+            .expect("Kura has this block")
+    }) {
+        let state_block = state.block(block.header());
+        // FIXME: avoid ownership in play?
+        let _committed = play_block((*block).clone(), state_block);
+
+        let creation_time = block.header().creation_time();
+        let delta = block.header().creation_time()
+            - prev_creation_time.expect("must exist if we are in this for loop");
+        extras.metrics.insert_block_delta(delta);
+    }
+
+    extras.metrics.reflect_state(&state.view());
+}
 
 fn play_block(block: SignedBlock, mut state_block: StateBlock<'_>) -> CommittedBlock {
     let valid_block = ValidBlock::validate_unchecked(block, &mut state_block).unpack(|_| {});
@@ -287,7 +441,9 @@ fn infer_genesis_account(genesis: &SignedBlock) -> Result<&AccountId> {
     Ok(account)
 }
 
-fn init_state(sup: &mut Supervisor, kura: Arc<Kura>, genesis_account: &AccountId) -> Result<State> {
+fn init_state(kura: Arc<Kura>, genesis_account: &AccountId) -> (CoreState, Supervisor) {
+    let mut sup = Supervisor::new();
+
     let world = {
         let account = Account::new(genesis_account.clone()).build(genesis_account);
         let domain = Domain::new(genesis_account.domain().clone()).build(&genesis_account);
@@ -302,7 +458,53 @@ fn init_state(sup: &mut Supervisor, kura: Arc<Kura>, genesis_account: &AccountId
         handle
     };
 
-    let state = State::new(world, kura, query_handle);
+    let state = CoreState::new(world, kura, query_handle);
 
-    Ok(state)
+    (state, sup)
+}
+
+fn init_dummy_state() -> CoreState {
+    let world = World::with([], [], []);
+    let query_handle = LiveQueryStore::dummy();
+    let kura = Kura::blank_kura_for_testing();
+    CoreState::new(world, kura, query_handle)
+}
+
+fn kura_config(store_dir: PathBuf) -> Config {
+    Config {
+        init_mode: iroha_config::kura::InitMode::Fast,
+        store_dir: WithOrigin::inline(store_dir),
+        blocks_in_memory: KURA_BLOCKS_IN_MEMORY,
+        debug_output_new_blocks: false,
+    }
+}
+
+fn init_kura(store_dir: PathBuf, mode: StartMode, signal: ShutdownSignal) -> (Arc<Kura>, Child) {
+    // TODO: start mode; start thread
+
+    let (kura, _block_count) =
+        Kura::new(&kura_config(store_dir.clone())).expect("fatal: cannot initialize Kura");
+
+    let child = Kura::start(kura.clone(), signal);
+
+    (kura, child)
+}
+
+pub enum StartMode {
+    Restore,
+    /// Restore existing storage, but wipe blocks after the given height
+    RestoreOnly(usize),
+}
+
+async fn maybe_recv(rx: Option<oneshot::Receiver<()>>) {
+    if let Some(rx) = rx {
+        rx.await;
+    }
+}
+
+async fn run_sup_with_complete(sup: Supervisor, tx: oneshot::Sender<()>) {
+    if let Err(err) = sup.start().await {
+        tracing::error!(%err, "TODO")
+    }
+    let _ = tx.send(());
 }

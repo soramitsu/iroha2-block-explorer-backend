@@ -2,10 +2,9 @@ use std::{num::NonZero, ops::Deref, sync::Arc};
 
 use eyre::eyre;
 use iroha_core::{
-    kura::KuraReadOnly,
     state::{
-        State, StateReadOnly, StateReadOnlyWithTransactions, StateView, StorageReadOnly as _,
-        TransactionsReadOnly as _, WorldReadOnly,
+        StateReadOnly, StateReadOnlyWithTransactions, StateView, TransactionsReadOnly as _,
+        WorldReadOnly,
     },
     tx::{
         AssetDefinition, Domain, Executable, InstructionBox, SignedTransaction,
@@ -15,15 +14,15 @@ use iroha_core::{
 use iroha_crypto::{Hash, HashOf};
 use iroha_data_model::block::SignedBlock;
 use iroha_data_model::Identifiable;
+use mv::storage::StorageReadOnly as _;
 use nonzero_ext::nonzero;
 
 use crate::{
-    core::storage,
     schema::{self, PaginationOrEmpty},
     util::{OffsetLimitIteratorExt as _, ReversePaginationError},
 };
 
-use super::state::StateReader;
+use super::state::StateGuard;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -37,11 +36,11 @@ pub(crate) enum Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub struct QueryExecutor(StateReader);
+pub struct QueryExecutor(StateGuard);
 
 impl QueryExecutor {
-    pub fn new(view: StateReader) -> Self {
-        Self(view)
+    pub fn new(guard: StateGuard) -> Self {
+        Self(guard)
     }
 
     fn view(&self) -> StateView<'_> {
@@ -61,7 +60,7 @@ impl QueryExecutor {
         };
 
         let items = view
-            .all_blocks(&self.storage, nonzero!(1_usize))
+            .all_blocks(nonzero!(1_usize))
             .rev()
             .offset_limit(pagination.to_offset_limit_for_rev_iter())
             .map(|x| schema::Block::from(x.as_ref()))
@@ -74,14 +73,14 @@ impl QueryExecutor {
         let view = self.view();
         match id {
             schema::BlockHeightOrHash::Height(schema::PositiveInteger(height)) => view
-                .all_blocks(&self.storage, *height)
+                .all_blocks(*height)
                 .next()
                 .map(|x| schema::Block::from(x.as_ref()))
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("block with height \"{}\"", height.get()),
                 }),
             schema::BlockHeightOrHash::Hash(hash) => view
-                .all_blocks(&self.storage, nonzero!(1_usize))
+                .all_blocks(nonzero!(1_usize))
                 .filter(|block| *block.hash() == *hash)
                 .next()
                 .map(|x| schema::Block::from(x.as_ref()))
@@ -104,9 +103,9 @@ impl QueryExecutor {
 
         let produce_iter = || {
             let iter: Box<dyn Iterator<Item = Arc<SignedBlock>>> = if let Some(height) = by_height {
-                Box::new(view.all_blocks(&self.storage, height).take(1))
+                Box::new(view.all_blocks(height).take(1))
             } else {
-                Box::new(view.all_blocks(&self.storage, nonzero!(1_usize)))
+                Box::new(view.all_blocks(nonzero!(1_usize)))
             };
 
             iter.flat_map(BlockTransactionIter::new).filter(|tx_ref| {
@@ -143,12 +142,9 @@ impl QueryExecutor {
     pub fn transactions_show(&self, hash: &Hash) -> Result<schema::TransactionDetailed> {
         let view = self.view();
         let hash = HashOf::from_untyped_unchecked(*hash);
-        let tx_ref =
-            try_retrieve_transaction_ref(&view, &self.storage, &hash).ok_or_else(|| {
-                Error::NotFound {
-                    entity: format!("transaction with hash \"{}\"", hash),
-                }
-            })?;
+        let tx_ref = try_retrieve_transaction_ref(&view, &hash).ok_or_else(|| Error::NotFound {
+            entity: format!("transaction with hash \"{}\"", hash),
+        })?;
         Ok(schema::TransactionDetailed::from(tx_ref))
     }
 
@@ -163,10 +159,8 @@ impl QueryExecutor {
         > = if let Some(hash) = &filter.transaction_hash {
             let hash = HashOf::from_untyped_unchecked(hash.0);
             let tx_ref =
-                try_retrieve_transaction_ref(&view, &self.storage, &hash).ok_or_else(|| {
-                    Error::NotFound {
-                        entity: format!("transaction with hash \"{hash}\""),
-                    }
+                try_retrieve_transaction_ref(&view, &hash).ok_or_else(|| Error::NotFound {
+                    entity: format!("transaction with hash \"{hash}\""),
                 })?;
 
             // These filters have no effect in case when tx hash is specified.
@@ -199,9 +193,9 @@ impl QueryExecutor {
             Box::new(|| {
                 let iter_blocks: Box<dyn Iterator<Item = Arc<SignedBlock>>> =
                     if let Some(height) = filter.block {
-                        Box::new(view.all_blocks(&self.storage, *height).take(1))
+                        Box::new(view.all_blocks(*height).take(1))
                     } else {
-                        Box::new(view.all_blocks(&self.storage, nonzero!(1usize)))
+                        Box::new(view.all_blocks(nonzero!(1usize)))
                     };
 
                 let iter = iter_blocks
@@ -392,12 +386,11 @@ impl QueryExecutor {
 
 fn try_retrieve_transaction_ref(
     view: &StateView<'_>,
-    kura: &impl KuraReadOnly,
     hash: &HashOf<SignedTransaction>,
 ) -> Option<BlockTransactionRef> {
     let height = view.transactions().get(&hash)?;
     let block = view
-        .all_blocks(kura, height)
+        .all_blocks(height)
         .next()
         .expect("Bug: block must exist since it is in the transactions storage");
     let tx_ref = BlockTransactionIter::new(block)

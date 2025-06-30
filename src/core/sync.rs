@@ -1,66 +1,25 @@
-use std::future::Future;
 use std::num::NonZero;
-use std::sync::Arc;
 use std::time::Duration;
 
-use eyre::{eyre, Context as _};
 use futures_util::StreamExt as _;
-use iroha_core::state::{StateReadOnly, StateView};
-use iroha_futures::supervisor::ShutdownSignal;
+use iroha_core::state::StateReadOnly;
 use nonzero_ext::nonzero;
-use tokio::sync::Mutex;
-use tokio::task::LocalSet;
 use tracing::{debug, error, info};
 
 use crate::core::state::State;
-use crate::core::storage::Storage;
 use crate::iroha_client::Client;
 
-use super::StateViewExt as _;
-
-pub async fn run(state: &State, storage: &Storage, client: &Client) -> ! {
-    sync_loop(state, storage, client).await
+pub async fn run(state: &State, client: &Client) -> ! {
+    sync_loop(state, client).await
 }
 
-// /// Sync loop runs in a [`LocalSet`] to allow `!Send` futures.
-// ///
-// /// It is required because [`StateView`] is not [`Send`], but is held across await
-// /// on [`Client`] calls while establishing the last matching block.
-// pub fn start(
-//     state: Arc<State>,
-//     storage: Arc<Storage>,
-//     client: &Client,
-//     signal: ShutdownSignal,
-// ) -> std::thread::JoinHandle<()> {
-//     let rt = tokio::runtime::Builder::new_current_thread()
-//         .enable_all()
-//         .build()
-//         .unwrap();
-//
-//     let handle = std::thread::spawn(move || {
-//         let local = LocalSet::new();
-//
-//         local.spawn_local(async move {
-//             tokio::select! {
-//               _ = sync_loop(state, client) => { unreachable!() },
-//               _ = signal => {}
-//             };
-//             debug!("Terminating sync loop");
-//         });
-//
-//         rt.block_on(local);
-//     });
-//
-//     handle
-// }
-
-async fn sync_loop(state: &State, storage: &Storage, client: &Client) -> ! {
+async fn sync_loop(state: &State, client: &Client) -> ! {
     const RETRY: Duration = Duration::from_secs(5);
 
     info!("Entering sync loop");
 
     loop {
-        let sync_from = match find_last_matching_block(storage, client).await {
+        let sync_from = match find_last_matching_block(state, client).await {
             Err(error) => {
                 error!(?error, retry=?RETRY, "Cannot determine last matching block, waiting before retrying");
                 tokio::time::sleep(RETRY).await;
@@ -96,16 +55,17 @@ async fn sync_loop(state: &State, storage: &Storage, client: &Client) -> ! {
 }
 
 async fn find_last_matching_block(
-    storage: &Storage,
+    state: &State,
     client: &Client,
 ) -> eyre::Result<Option<NonZero<usize>>> {
-    let storage = storage.acquire_read().await?;
+    let guard = state.acquire_guard().await;
+    let kura = guard.kura();
 
-    let Some(local_height) = NonZero::new(storage.height()) else {
+    let Some(local_height) = NonZero::new(kura.blocks_count()) else {
         return Ok(None);
     };
-    let local_genesis_hash = storage
-        .block_hash(nonzero!(1usize))
+    let local_genesis_hash = kura
+        .get_block_hash(nonzero!(1usize))
         .expect("height is non-zero");
 
     // Genesis check to cover a common corner case
@@ -119,8 +79,8 @@ async fn find_last_matching_block(
     let mut batches = client.blocks_info_from_end(local_height);
     while let Some(batch) = batches.next().await {
         for info in batch.iter_from_last() {
-            let local = storage
-                .block_hash(info.height)
+            let local = kura
+                .get_block_hash(info.height)
                 .expect("less than local height");
             if local == info.hash {
                 return Ok(Some(info.height));

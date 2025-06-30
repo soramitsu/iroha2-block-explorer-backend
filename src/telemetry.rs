@@ -149,11 +149,14 @@ impl Telemetry {
         Ok(reply)
     }
 
-    pub async fn update_blockchain_state(&self, state: blockchain::Metrics) -> eyre::Result<()> {
-        self.actor
+    pub async fn update_blockchain_state(&self, state: blockchain::Metrics) {
+        if let Err(error) = self
+            .actor
             .send(ActorMessage::UpdateBlockchainState(state))
-            .await?;
-        Ok(())
+            .await
+        {
+            tracing::error!(%error, "Failed to update blockchain state in Telemetry");
+        };
     }
 }
 
@@ -361,8 +364,8 @@ impl State {
         Ok(ret)
     }
 
-    fn update_blockchain(&mut self, state: blockchain::Metrics) {
-        self.blockchain = Some(state);
+    fn update_blockchain(&mut self, value: blockchain::Metrics) {
+        self.blockchain = Some(value);
     }
 
     fn network_status(&self) -> Option<NetworkStatus> {
@@ -375,7 +378,7 @@ impl State {
             transactions_rejected: state.txs_rejected,
             block: state.block,
             block_created_at: state.block_created_at.into(),
-            avg_block_time: state.avg_block_time.0.into(),
+            avg_block_time: state.avg_block_time.into(),
             avg_commit_time: self.avg_commit_time().map(From::from),
             finalized_block: self.finalized_block(),
         })
@@ -479,19 +482,19 @@ impl PeerState {
 }
 
 #[derive(Default)]
-struct AverageCommitTime<const N: usize> {
+pub struct AverageBlockTime<const N: usize = BLOCK_TIME_AVG_WINDOW> {
     buff: CircularBuffer<N, Duration>,
     last_height: Option<u64>,
 }
 
-const AVG_COMMIT_BLOCK_TIME_WINDOW: usize = 16;
+pub const BLOCK_TIME_AVG_WINDOW: usize = 16;
 
-impl<const N: usize> AverageCommitTime<N> {
-    fn new() -> Self {
+impl<const N: usize> AverageBlockTime<N> {
+    pub fn new() -> Self {
         Self::default()
     }
 
-    fn observe(&mut self, height: u64, block_time: Duration) {
+    pub fn observe(&mut self, height: u64, block_time: Duration) {
         if self.last_height.map(|x| x == height).unwrap_or(false) {
             return;
         }
@@ -499,7 +502,7 @@ impl<const N: usize> AverageCommitTime<N> {
         self.buff.push_back(block_time);
     }
 
-    fn calculate(&self) -> Option<Duration> {
+    pub fn calculate(&self) -> Option<Duration> {
         let sum = self
             .buff
             .iter()
@@ -512,12 +515,12 @@ impl<const N: usize> AverageCommitTime<N> {
 }
 
 #[cfg(test)]
-mod avg_commit_tests {
+mod avg_time_tests {
     use super::*;
 
     #[test]
     fn is_empty() {
-        let avg = AverageCommitTime::<5>::new();
+        let avg = AverageBlockTime::<5>::new();
         assert!(avg.calculate().is_none())
     }
 
@@ -534,7 +537,7 @@ mod avg_commit_tests {
             (350, 131),
         ];
 
-        let mut avg = AverageCommitTime::<4>::new();
+        let mut avg = AverageBlockTime::<4>::new();
 
         for (i, (ms, mean_ms)) in series.iter().enumerate() {
             avg.observe(i as u64 + 1, Duration::from_millis(*ms));
@@ -545,7 +548,7 @@ mod avg_commit_tests {
 
     #[test]
     fn deduplicates_by_height() {
-        let mut avg = AverageCommitTime::<10>::new();
+        let mut avg = AverageBlockTime::<10>::new();
 
         avg.observe(1, Duration::from_millis(100));
         avg.observe(2, Duration::from_millis(200));
@@ -559,7 +562,6 @@ mod avg_commit_tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
-    use crate::telemetry::blockchain::DurationMillis;
     use crate::telemetry::peer_monitor::{Metrics, Update};
     use insta::assert_json_snapshot;
     use iroha::client::ConfigGetDTO;
@@ -584,10 +586,10 @@ mod state_tests {
             assets: 0,
             txs_accepted: 0,
             txs_rejected: 0,
-            // parameter_max_block_time: Duration::ZERO,
-            // parameter_max_commit_time: Duration::ZERO,
-            // parameter_max_txs_per_block: 0,
-            avg_block_time: DurationMillis(Duration::ZERO),
+            parameter_max_block_time: Duration::ZERO,
+            parameter_max_commit_time: Duration::ZERO,
+            parameter_max_txs_per_block: 0,
+            avg_block_time: Duration::ZERO,
         }
     }
 
@@ -887,7 +889,6 @@ mod state_tests {
 #[cfg(test)]
 mod actor_tests {
     use super::*;
-    use crate::telemetry::blockchain::DurationMillis;
     use crate::telemetry::peer_monitor::Update;
     use crate::telemetry::state_tests::{
         factory_block_state, factory_config, factory_metrics, factory_url,
@@ -925,7 +926,7 @@ mod actor_tests {
         // update blockchain data
         tx.send(ActorMessage::UpdateBlockchainState(blockchain::Metrics {
             block: 3,
-            avg_block_time: DurationMillis(Duration::from_millis(120)),
+            avg_block_time: Duration::from_millis(120),
             ..factory_block_state()
         }))
         .await

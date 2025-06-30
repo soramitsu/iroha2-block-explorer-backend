@@ -3065,6 +3065,7 @@ dependencies = [
  "iroha_futures",
  "iroha_genesis",
  "itertools 0.14.0",
+ "mv",
  "nonzero_ext",
  "parity-scale-codec",
  "reqwest",

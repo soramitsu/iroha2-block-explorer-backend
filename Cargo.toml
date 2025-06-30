@@ -12,6 +12,7 @@ iroha_genesis = { path = "../iroha-explorer-patched/crates/iroha_genesis/" }
 iroha_data_model = { path = "../iroha-explorer-patched/crates/iroha_data_model/" }
 iroha_futures = { path = "../iroha-explorer-patched/crates/iroha_futures/" }
 iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/" }
+mv = "0.1.0"
 
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
