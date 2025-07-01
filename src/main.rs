@@ -1,16 +1,8 @@
-#![allow(clippy::module_name_repetitions)]
 // FIXME: there are many truncations which we don't care about _for now_
 #![allow(clippy::cast_possible_truncation)]
 
-mod core;
 mod endpoint;
-mod iroha_client;
-mod schema;
-mod telemetry;
-mod util;
 
-use crate::iroha_client::Client;
-use crate::telemetry::{Telemetry, TelemetryConfig};
 use axum::routing::get;
 use axum::{
     extract::{MatchedPath, Request},
@@ -20,10 +12,11 @@ use clap::Parser;
 use eyre::{eyre, Context};
 use iroha::crypto::{KeyPair, PrivateKey};
 use iroha::data_model::account::AccountId;
+use iroha_explorer_core::state::State;
+use iroha_explorer_iroha_client::Client;
+use iroha_explorer_schema::ToriiUrl;
+use iroha_explorer_telemetry::{Telemetry, TelemetryConfig};
 use iroha_futures::supervisor::{Child, OnShutdown, ShutdownSignal, Supervisor};
-use schema::ToriiUrl;
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection};
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -189,7 +182,7 @@ async fn serve(args: ServeArgs, store_dir: PathBuf) {
     };
 
     let state = {
-        let (state, fut) = core::start(
+        let (state, fut) = iroha_explorer_core::start(
             store_dir,
             telemetry.clone(),
             client.clone(),
@@ -225,7 +218,7 @@ async fn serve(args: ServeArgs, store_dir: PathBuf) {
 }
 
 async fn do_serve(
-    state: core::state::State,
+    state: State,
     telemetry: Telemetry,
     shutdown_signal: ShutdownSignal,
     args: ServeBaseArgs,
@@ -264,6 +257,11 @@ async fn do_serve(
         .with_graceful_shutdown(async move { shutdown_signal.receive().await })
         .await
         .unwrap()
+}
+
+#[cfg(test)]
+async fn serve_test(args: ServeBaseArgs) {
+    todo!()
 }
 
 /// Health check

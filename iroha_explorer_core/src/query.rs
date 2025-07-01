@@ -11,21 +11,19 @@ use iroha_core::{
         TransactionRejectionReason,
     },
 };
-use iroha_crypto::{Hash, HashOf};
-use iroha_data_model::block::SignedBlock;
-use iroha_data_model::Identifiable;
+use iroha_data_model::prelude::{Hash, HashOf, Identifiable as _, SignedBlock};
+use iroha_explorer_schema::{
+    self as schema,
+    pagination::{OffsetLimitIteratorExt as _, ReversePaginationError},
+    PaginationOrEmpty,
+};
 use mv::storage::StorageReadOnly as _;
 use nonzero_ext::nonzero;
-
-use crate::{
-    schema::{self, PaginationOrEmpty},
-    util::{OffsetLimitIteratorExt as _, ReversePaginationError},
-};
 
 use super::state::StateGuard;
 
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Bad pagination: {0}")]
     BadReversePagination(#[from] ReversePaginationError),
     #[error("Bad parameters: {message}")]
@@ -530,6 +528,71 @@ impl Deref for BlockTransactionInstructionRef {
 
     fn deref(&self) -> &Self::Target {
         todo!()
+    }
+}
+
+impl From<BlockTransactionInstructionRef> for schema::Instruction {
+    fn from(value: BlockTransactionInstructionRef) -> Self {
+        todo!()
+    }
+}
+
+impl From<&BlockTransactionRef> for schema::TransactionBase {
+    fn from(value: &BlockTransactionRef) -> Self {
+        Self {
+            hash: value.transaction().hash().into(),
+            block: schema::BigInt(value.block().header().height().get() as u128),
+            created_at: schema::TimeStamp::from_duration_timestamp(
+                value.transaction().creation_time(),
+            ),
+            authority: value.transaction().authority().into(),
+            executable: value.transaction().instructions().into(),
+            status: value.status(),
+        }
+    }
+}
+
+impl From<BlockTransactionRef> for schema::TransactionBase {
+    fn from(value: BlockTransactionRef) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl From<&BlockTransactionRef> for schema::TransactionDetailed {
+    fn from(value: &BlockTransactionRef) -> Self {
+        Self {
+            base: value.into(),
+            signature: schema::Signature(value.signature().0.to_owned().into()),
+            nonce: value.nonce().map(|int| {
+                schema::PositiveInteger(NonZero::new(int.get() as usize).expect("from non zero"))
+            }),
+            metadata: schema::Metadata(value.metadata().clone()),
+            time_to_live: value.time_to_live().map(schema::TimeDuration::from),
+            rejection_reason: value
+                .error()
+                .map(|reason| schema::ReprScaleJson(reason.to_owned())),
+        }
+    }
+}
+
+impl From<BlockTransactionRef> for schema::TransactionDetailed {
+    fn from(value: BlockTransactionRef) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl<W: WorldReadOnly> From<DomainWorldRef<'_, W>> for schema::Domain {
+    fn from(value: DomainWorldRef<'_, W>) -> Self {
+        todo!()
+        // Self {
+        //     id: DomainId(value.id().clone()),
+        //     logo: value.logo().as_ref().map(|x| IpfsPath(x.to_string())),
+        //     metadata: Metadata(value.metadata().clone()),
+        //     owned_by: AccountId(value.owned_by().clone()),
+        //     accounts: value.accounts(),
+        //     assets: value.assets(),
+        //     nfts: value.nfts(),
+        // }
     }
 }
 

@@ -1,15 +1,14 @@
 pub mod blockchain;
 mod peer_monitor;
 
-use crate::schema::{
-    GeoLocation, NetworkStatus, PeerInfo, PeerStatus, TelemetryStreamFirstMessage,
-    TelemetryStreamMessage, ToriiUrl,
-};
 use async_stream::stream;
 use circular_buffer::CircularBuffer;
 use futures_util::stream::Stream;
-use iroha::client::ConfigGetDTO;
-use iroha::crypto::PublicKey;
+use iroha::{client::ConfigGetDTO, data_model::prelude::PublicKey};
+use iroha_explorer_schema::{
+    GeoLocation, NetworkStatus, PeerInfo, PeerStatus, TelemetryStreamFirstMessage,
+    TelemetryStreamMessage, ToriiUrl,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::time::Duration;
@@ -463,7 +462,7 @@ impl PeerState {
             location: self.geo.clone(),
             connected_peers: self.connected_peers.as_ref().map(|x| {
                 x.iter()
-                    .map(|y| crate::schema::PublicKey(y.clone()))
+                    .map(|y| iroha_explorer_schema::PublicKey(y.clone()))
                     .collect()
             }),
         }
@@ -473,10 +472,10 @@ impl PeerState {
         self.metrics.as_ref().map(|metrics| PeerStatus {
             url: self.url.clone(),
             block: metrics.block,
-            commit_time: crate::schema::TimeDuration::from(metrics.block_commit_time),
-            avg_commit_time: crate::schema::TimeDuration::from(metrics.avg_commit_time),
+            commit_time: iroha_explorer_schema::TimeDuration::from(metrics.block_commit_time),
+            avg_commit_time: iroha_explorer_schema::TimeDuration::from(metrics.avg_commit_time),
             queue_size: metrics.queue_size,
-            uptime: crate::schema::TimeDuration::from(metrics.uptime),
+            uptime: iroha_explorer_schema::TimeDuration::from(metrics.uptime),
         })
     }
 }
@@ -562,13 +561,14 @@ mod avg_time_tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
-    use crate::telemetry::peer_monitor::{Metrics, Update};
-    use insta::assert_json_snapshot;
-    use iroha::client::ConfigGetDTO;
+    use expect_test::expect;
+    use iroha::{client::ConfigGetDTO, crypto::KeyPair};
+    use iroha_explorer_test_utils::ExpectExt as _;
+    use peer_monitor::{Metrics, Update};
     use serde_json::json;
 
     pub fn factory_key(seed: impl AsRef<[u8]>) -> PublicKey {
-        iroha_crypto::KeyPair::from_seed(seed.as_ref().into(), <_>::default())
+        KeyPair::from_seed(seed.as_ref().into(), <_>::default())
             .public_key()
             .clone()
     }
@@ -634,7 +634,7 @@ mod state_tests {
 
         assert!(state.network_status().is_none());
         let info: Vec<_> = state.peers_info().collect();
-        assert_json_snapshot!(info);
+        expect![].assert_json_eq(info);
         let peers: Vec<_> = state.peers_status().collect();
         assert!(peers.is_empty())
     }
@@ -798,8 +798,8 @@ mod state_tests {
 
         let info = state.peers_info().find(|x| x.url == url).unwrap();
         let status = state.single_peer_status(&url).expect("must be");
-        assert_json_snapshot!(info);
-        assert_json_snapshot!(status);
+        expect![].assert_json_eq(info);
+        expect![].assert_json_eq(status);
 
         let _ = state.update_peer(&url, Update::Disconnected);
 
@@ -889,11 +889,9 @@ mod state_tests {
 #[cfg(test)]
 mod actor_tests {
     use super::*;
-    use crate::telemetry::peer_monitor::Update;
-    use crate::telemetry::state_tests::{
-        factory_block_state, factory_config, factory_metrics, factory_url,
-    };
     use futures_util::{pin_mut, StreamExt};
+    use peer_monitor::Update;
+    use state_tests::{factory_block_state, factory_config, factory_metrics, factory_url};
     use tokio::time::timeout;
 
     const CHANNEL_TIMEOUT: Duration = Duration::from_millis(100);

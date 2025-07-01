@@ -53,7 +53,7 @@ impl DirectPagination {
         .expect("full is always greater than 0")
     }
 
-    pub(crate) fn to_limit_offset(&self) -> OffsetLimit {
+    pub fn to_limit_offset(&self) -> OffsetLimit {
         let range = self.range();
         OffsetLimit {
             offset: range.start,

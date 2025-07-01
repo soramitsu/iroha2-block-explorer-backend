@@ -1,8 +1,0 @@
----
-source: src/schema.rs
-expression: value
----
-{
-  "scale": "BQAAAA==",
-  "json": 5
-}

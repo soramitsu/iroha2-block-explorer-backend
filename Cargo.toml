@@ -1,58 +1,76 @@
 [package]
 name = "iroha_explorer"
-description = "Backend API of Iroha 2 Explorer"
 version = "0.2.1"
 edition = "2021"
+description = "Backend API of Iroha 2 Explorer"
 
-[dependencies]
+[workspace]
+members = [
+  "iroha_explorer_core",
+  "iroha_explorer_iroha_client",
+  "iroha_explorer_schema",
+  "iroha_explorer_telemetry",
+  "iroha_explorer_test_utils",
+]
+
+[workspace.dependencies]
 iroha = { path = "../iroha-explorer-patched/crates/iroha" }
 iroha_config = { path = "../iroha-explorer-patched/crates/iroha_config/" }
 iroha_core = { path = "../iroha-explorer-patched/crates/iroha_core/" }
-iroha_genesis = { path = "../iroha-explorer-patched/crates/iroha_genesis/" }
-iroha_data_model = { path = "../iroha-explorer-patched/crates/iroha_data_model/" }
-iroha_futures = { path = "../iroha-explorer-patched/crates/iroha_futures/" }
 iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/" }
-mv = "0.1.0"
+# TODO: link issue
+iroha_data_model = { path = "../iroha-explorer-patched/crates/iroha_data_model/", features = ["transparent_api"] }
+iroha_futures = { path = "../iroha-explorer-patched/crates/iroha_futures/" }
+iroha_genesis = { path = "../iroha-explorer-patched/crates/iroha_genesis/" }
 
-tracing = "0.1.32"
-tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
-serde = "1.0"
-serde_json = "1.0"
-clap = { version = "4", features = ["derive", "env"] }
-http = "1.3.1"
-chrono = { version = "0.4.19", features = ["serde"] }
-thiserror = "1.0"
-url = "2.4.0"
-axum = { version = "0.8.3", features = ["http2", "macros"] }
-tokio = { version = "1.40.0", features = ["macros", "rt"] }
-tower-http = { version = "0.6.2", features = ["trace"] }
-utoipa = { version = "5.3.1", features = ["axum_extras", "chrono", "preserve_order", "preserve_path_order"] }
-utoipa-scalar = { version = "0.3.0", features = ["axum"] }
-nonzero_ext = "0.3.0"
-serde_with = "3.9.0"
-sqlx = { version = "0.8.0", features = ["sqlite", "runtime-tokio", "chrono"] }
-eyre = "0.6.12"
-parity-scale-codec = "3.7.4"
-base64 = "0.22.1"
-futures-util = "0.3.30"
-async-stream = "0.3.6"
-derive_more = { version = "2.0.1", features = ["display", "from_str"] }
-circular-buffer = "1.1.0"
-reqwest = { version = "0.12.15", features = ["json"] }
-backoff = { version = "0.4.0", features = ["futures", "tokio"] }
-const-str = { version = "0.6", features = ["proc"] }
+mv = "0.1.0"
 
 # HACK: `0.5.5` breaks `mv`
 concread = "=0.5.3"
-itertools = "0.14.0"
 genawaiter = "0.99.1"
+itertools = "0.14.0"
 
-[dev-dependencies]
-insta = { version = "1.42.2", features = ["json", "csv"] }
+async-stream = "0.3.6"
+chrono = { version = "0.4.19", features = ["serde"] }
+derive_more = { version = "2.0.1", features = ["display", "from_str"] }
 expect-test = "1.5.0"
-iroha_crypto = { path = "../iroha-explorer-patched/crates/iroha_crypto/", features = ["rand"] }
-tokio = { version = "1", features = ["process"] }
+eyre = "0.6.12"
+futures-util = "0.3.30"
+http = "1.3.1"
+nonzero_ext = "0.3.0"
+parity-scale-codec = "3.7.4"
+reqwest = { version = "0.12.15", features = ["json"] }
+serde = "1.0"
+serde_json = "1.0"
+serde_with = "3.9.0"
+thiserror = "1.0"
+tokio = { version = "1.40.0", features = ["macros"] }
+tracing = "0.1.32"
+url = "2.4.0"
+utoipa = { version = "5.3.1", features = ["axum_extras", "chrono", "preserve_order", "preserve_path_order"] }
 
-[build-dependencies]
-vergen = { version = "8.3.1", default-features = false, features = ["cargo"] }
+[dependencies]
+iroha_explorer_core = { path = "./iroha_explorer_core/" }
+iroha_explorer_iroha_client = { path = "./iroha_explorer_iroha_client/" }
+iroha_explorer_schema = { path = "./iroha_explorer_schema/" }
+iroha_explorer_telemetry = { path = "./iroha_explorer_telemetry/" }
 
+iroha = { workspace = true }
+iroha_futures = { workspace = true }
+
+reqwest = { workspace = true }
+
+eyre = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
+utoipa = { workspace = true }
+utoipa-scalar = { version = "0.3.0", features = ["axum"] }
+
+axum = { version = "0.8.3", features = ["http2", "macros"] }
+clap = { version = "4", features = ["derive", "env"] }
+const-str = { version = "0.6", features = ["proc"] }
+tower-http = { version = "0.6.2", features = ["trace"] }

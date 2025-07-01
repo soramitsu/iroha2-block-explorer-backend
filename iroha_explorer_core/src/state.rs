@@ -1,22 +1,19 @@
+use super::{Error, Result, KURA_BLOCKS_IN_MEMORY};
+use crate::StateViewExt;
 use iroha_config::{base::WithOrigin, parameters::actual::Kura as Config};
+use iroha_core::block::{CommittedBlock, ValidBlock};
+use iroha_core::kura::{self, Kura};
 use iroha_core::query::store::LiveQueryStore;
+use iroha_core::state::{State as CoreState, StateBlock, StateReadOnly, StateView, World};
+use iroha_data_model::prelude::*;
+use iroha_explorer_telemetry::{blockchain::Metrics, AverageBlockTime, Telemetry};
+use iroha_futures::supervisor::{
+    spawn_os_thread_as_future, Child, OnShutdown, ShutdownSignal, Supervisor,
+};
 use nonzero_ext::nonzero;
 use std::ops::Deref;
 use std::time::Duration;
 use std::{future::Future, num::NonZero, path::PathBuf, sync::Arc};
-
-use crate::core::StateViewExt;
-use crate::telemetry::blockchain::Metrics;
-use crate::telemetry::{AverageBlockTime, Telemetry};
-
-use super::{Error, Result, KURA_BLOCKS_IN_MEMORY};
-use iroha_core::block::{CommittedBlock, ValidBlock};
-use iroha_core::kura::{self, Kura};
-use iroha_core::state::{State as CoreState, StateBlock, StateReadOnly, StateView, World};
-use iroha_data_model::prelude::*;
-use iroha_futures::supervisor::{
-    spawn_os_thread_as_future, Child, OnShutdown, ShutdownSignal, Supervisor,
-};
 use tokio::sync::{mpsc, oneshot, watch, OwnedRwLockReadGuard, RwLock, RwLockReadGuard};
 
 type BlockHash = HashOf<BlockHeader>;

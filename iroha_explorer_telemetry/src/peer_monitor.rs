@@ -1,12 +1,10 @@
-use crate::schema::GeoLocation;
-use crate::schema::ToriiUrl;
-use crate::telemetry::{AverageBlockTime, BLOCK_TIME_AVG_WINDOW};
+use crate::{AverageBlockTime, ConfigGetDTO, BLOCK_TIME_AVG_WINDOW};
+
 use eyre::eyre;
 use http::StatusCode;
-use iroha::client::{ConfigGetDTO, Status};
-use iroha::crypto::PublicKey;
-use iroha::data_model::peer::Peer;
-use iroha::data_model::Identifiable;
+use iroha::{client::Status, data_model::prelude::*};
+
+use iroha_explorer_schema::{GeoLocation, ToriiUrl};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -343,7 +341,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn debug_monitor() {
-        crate::init_test_logger();
+        // crate::init_test_logger();
         let (mut rx, fut) = run("http://localhost:8080".parse().unwrap());
         spawn(fut);
 

@@ -10,17 +10,14 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use utoipa::{IntoParams, OpenApi};
 
-use crate::schema::{Page, PaginationQueryParams};
-use crate::telemetry::Telemetry;
-use crate::{
-    core::{query, state},
-    schema,
-};
+use iroha_explorer_core::{query, state};
+use iroha_explorer_schema::{self as schema, Page, PaginationQueryParams};
+use iroha_explorer_telemetry::Telemetry;
 
 #[derive(Clone)]
 pub struct AppState {
     telemetry: Telemetry,
-    core_state: state::Handle,
+    core_state: state::State,
 }
 
 impl AppState {
@@ -420,7 +417,7 @@ pub async fn telemetry_peers_info(
     Ok(Json(data))
 }
 
-pub fn router(state: state::Handle, telemetry: Telemetry) -> Router {
+pub fn router(state: state::State, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
         .route("/domains/{:id}", get(domains_show))

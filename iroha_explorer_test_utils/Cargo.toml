@@ -1,0 +1,10 @@
+[package]
+name = "iroha_explorer_test_utils"
+version = "0.2.1"
+edition = "2021"
+description = "Common test utils"
+
+[dependencies]
+expect-test = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

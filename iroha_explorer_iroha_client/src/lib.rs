@@ -1,6 +1,9 @@
-use crate::schema::ToriiUrl;
+// FIXME: temp
+#![allow(unused)]
+
 use futures_util::Stream;
 use iroha_data_model::prelude::*;
+use iroha_explorer_schema::ToriiUrl;
 use std::num::NonZero;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -50,14 +53,16 @@ impl Client {
         &self,
         from_block: NonZero<usize>,
     ) -> impl Stream<Item = Arc<SignedBlock>> {
-        todo!()
+        todo!();
+        tokio_stream::iter(None)
     }
 
     pub fn blocks_info_from_end(
         &self,
         max_height: NonZero<usize>,
     ) -> impl Stream<Item = BlockInfoBatch> {
-        todo!()
+        todo!();
+        tokio_stream::iter(None)
     }
 }
 

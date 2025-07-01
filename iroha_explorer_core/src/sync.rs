@@ -2,12 +2,11 @@ use std::num::NonZero;
 use std::time::Duration;
 
 use futures_util::StreamExt as _;
-use iroha_core::state::StateReadOnly;
 use nonzero_ext::nonzero;
 use tracing::{debug, error, info};
 
-use crate::core::state::State;
-use crate::iroha_client::Client;
+use crate::state::State;
+use iroha_explorer_iroha_client::Client;
 
 pub async fn run(state: &State, client: &Client) -> ! {
     sync_loop(state, client).await

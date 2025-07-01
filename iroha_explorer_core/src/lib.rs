@@ -1,3 +1,6 @@
+// FIXME: tmp
+#![allow(unused)]
+
 pub mod query;
 pub mod state;
 mod sync;
@@ -12,8 +15,9 @@ use iroha_core::{
     query::store::{LiveQueryStore, LiveQueryStoreHandle},
     state::{State, StateBlock, StateReadOnly, StateView, World},
 };
-use iroha_crypto::{HashOf, PublicKey};
 use iroha_data_model::prelude::*;
+use iroha_explorer_iroha_client::Client;
+use iroha_explorer_telemetry::Telemetry;
 use iroha_futures::supervisor::{Child, OnShutdown, ShutdownSignal, Supervisor};
 use nonzero_ext::nonzero;
 pub use query::QueryExecutor;
@@ -84,14 +88,14 @@ impl StateViewExt for StateView<'_> {
 
 pub fn start(
     store_dir: impl Into<PathBuf>,
-    telemetry: crate::telemetry::Telemetry,
-    client: crate::iroha_client::Client,
+    telemetry: Telemetry,
+    client: Client,
     signal: ShutdownSignal,
 ) -> (
     state::State,
     impl Future<Output = Result<(), iroha_futures::supervisor::Error>> + Sized + Send + Sync,
 ) {
-    let (state, state_fut) = state::State::new(store_dir, telemetry, signal.clone());
+    let (state, state_fut) = state::State::new(store_dir.into(), telemetry, signal.clone());
     let state4sync = state.clone();
     let sync_fut = async move { sync::run(&state4sync, &client).await };
 

@@ -1,0 +1,14 @@
+[package]
+name = "iroha_explorer_iroha_client"
+version = "0.2.1"
+edition = "2021"
+description = "Explorer's own implementation of Iroha Client"
+
+[dependencies]
+iroha_data_model = { workspace = true }
+
+iroha_explorer_schema = { path = "../iroha_explorer_schema/" }
+
+eyre = { workspace = true }
+futures-util = { workspace = true }
+tokio-stream = "0.1"

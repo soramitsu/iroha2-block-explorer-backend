@@ -1,0 +1,26 @@
+[package]
+name = "iroha_explorer_core"
+version = "0.2.1"
+edition = "2021"
+description = "Explorer's wrap around Iroha Core"
+
+[dependencies]
+iroha_explorer_iroha_client = { path = "../iroha_explorer_iroha_client/" }
+iroha_explorer_schema = { path = "../iroha_explorer_schema/" }
+iroha_explorer_telemetry = { path = "../iroha_explorer_telemetry/" }
+
+iroha_config = { workspace = true }
+iroha_core = { workspace = true }
+iroha_data_model = { workspace = true }
+iroha_futures = { workspace = true }
+mv = { workspace = true }
+
+eyre = { workspace = true }
+futures-util = { workspace = true }
+nonzero_ext = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+expect-test = { workspace = true }
