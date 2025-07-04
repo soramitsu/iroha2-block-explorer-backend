@@ -1042,15 +1042,88 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn does_not_shutdown_while_guard_exists() -> eyre::Result<()> {
-        todo!()
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        let (tx, mut rx) = mpsc::channel(2);
+        let complete = tokio::spawn(async move {
+            sandbox.supervisor_task.await.unwrap();
+            tx.send(()).await.unwrap();
+        });
+
+        let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+        sandbox.signal.send();
+
+        let _ = timeout(Duration::from_millis(500), rx.recv())
+            .await
+            .expect_err("must time out");
+
+        drop(guard);
+
+        timeout(TICK, async move {
+            rx.recv().await.unwrap();
+            // must be no errors
+            complete.await.unwrap();
+        })
+        .await?;
+
+        Ok(())
     }
 
     #[tokio::test]
-    #[ignore]
     async fn does_not_reinit_while_guard_exists() -> eyre::Result<()> {
-        todo!()
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        let block = {
+            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
+                .with_instructions::<InstructionBox>([
+                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+                    Register::account(Account::new(ALICE.to_owned())).into(),
+                ])
+                .sign(GENESIS_KEY.private_key());
+            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
+        };
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
+        let block = {
+            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                .with_instructions([Register::domain(Domain::new(parse!("whichever")))])
+                .sign(ALICE_KEY.private_key());
+            sandbox.create_block([tx], Some(&block), ALICE_KEY.private_key())
+        };
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+
+        let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+
+        let (tx, mut rx) = mpsc::channel(1);
+        let confirm_complete = tokio::spawn({
+            let state = sandbox.state.clone();
+            async move {
+                tracing::info!("confirm 0");
+                state.confirm_local_height(0).await.unwrap();
+                tracing::info!("confirmed");
+                tx.send(()).await.unwrap();
+            }
+        });
+
+        let _ = timeout(Duration::from_millis(500), rx.recv())
+            .await
+            .expect_err("must time out");
+
+        drop(guard);
+
+        timeout(TICK, async move {
+            rx.recv().await.unwrap();
+            confirm_complete.await.unwrap();
+        })
+        .await?;
+
+        Ok(())
     }
 
     #[tokio::test]
