@@ -4,12 +4,15 @@ use iroha_config::{base::WithOrigin, parameters::actual::Kura as Config};
 use iroha_core::block::{CommittedBlock, ValidBlock};
 use iroha_core::kura::{self, BlockStore, Kura};
 use iroha_core::query::store::LiveQueryStore;
-use iroha_core::state::{State as CoreState, StateBlock, StateReadOnly, StateView, World};
+use iroha_core::state::{
+    State as CoreState, StateBlock, StateReadOnly, StateView, World, WorldReadOnly,
+};
 use iroha_data_model::prelude::*;
 use iroha_explorer_telemetry::{blockchain::Metrics, AverageBlockTime, Telemetry};
 use iroha_futures::supervisor::{
     spawn_os_thread_as_future, Child, OnShutdown, ShutdownSignal, Supervisor,
 };
+use mv::storage::StorageReadOnly as _;
 use nonzero_ext::nonzero;
 use std::ops::Deref;
 use std::time::Duration;
@@ -134,6 +137,7 @@ impl State {
                 move || {
                     rt.block_on(async move {
                         tokio::spawn(wrap_supervisor("kura", kura_sup, shutdown_kura_complete.0));
+                        actor.send_metrics().await;
                         actor.recv_loop().await
                     });
                 },
@@ -464,7 +468,14 @@ impl IncrementalMetrics {
 
     fn replace_block_delta(&mut self, delta: Duration) {}
 
-    fn reflect_state(&mut self, view: &impl StateReadOnly) {}
+    fn reflect_state(&mut self, view: &impl StateReadOnly) {
+        self.base.block = view.height();
+
+        // TODO: other fields
+        self.base.accounts = view.world().accounts().len();
+        self.base.domains = view.world().domains().len();
+        self.base.assets = view.world().assets().len() + view.world().nfts().len();
+    }
 }
 
 fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras) {
@@ -610,7 +621,10 @@ mod tests {
     };
     use mv::storage::StorageReadOnly;
     use tempfile::TempDir;
-    use tokio::{task::JoinHandle, time::timeout};
+    use tokio::{
+        task::JoinHandle,
+        time::{sleep, timeout},
+    };
     use tracing::debug;
 
     const TICK: Duration = Duration::from_millis(100);
@@ -624,7 +638,7 @@ mod tests {
 
     struct Sandbox {
         chain_id: ChainId,
-        telemetry: mpsc::Receiver<telemetry::ActorMessage>,
+        telemetry: Option<mpsc::Receiver<telemetry::ActorMessage>>,
         signal: ShutdownSignal,
         state: State,
         supervisor_task: JoinHandle<Result<(), supervisor::Error>>,
@@ -645,7 +659,7 @@ mod tests {
 
             Self {
                 chain_id: ChainId::from("test"),
-                telemetry: tel_rx,
+                telemetry: Some(tel_rx),
                 signal,
                 state,
                 supervisor_task: sup_join,
@@ -1090,9 +1104,41 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn sends_metrics() -> eyre::Result<()> {
-        todo!()
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let mut sandbox = Sandbox::new(store.path());
+
+        let mut rx = sandbox.telemetry.take().unwrap();
+        let mut recv = async || {
+            let Some(telemetry::ActorMessage::UpdateBlockchainState(data)) =
+                timeout(TICK, rx.recv())
+                    .await
+                    .expect("must receive metrics within timeout")
+            else {
+                unreachable!()
+            };
+            data
+        };
+
+        let metrics = recv().await;
+        assert_eq!(metrics.block, 0);
+
+        let block = sandbox.create_block::<InstructionBox>([
+            Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+            Register::account(Account::new(ALICE.to_owned())).into(),
+        ]);
+        timeout(TICK, sandbox.state.insert_block(block)).await??;
+
+        let metrics = recv().await;
+        assert_eq!(metrics.block, 1);
+        assert_eq!(metrics.accounts, 2);
+        assert_eq!(metrics.domains, 2);
+
+        // TODO: sends on reinit/rewind; reflects different entities properly
+
+        Ok(())
     }
 
     #[tokio::test]

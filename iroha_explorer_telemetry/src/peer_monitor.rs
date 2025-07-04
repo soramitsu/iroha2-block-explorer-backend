@@ -270,10 +270,10 @@ async fn get_metrics_periodic_timeout(torii_url: &ToriiUrl, tx: mpsc::Sender<Upd
                 avg_commit_time.observe(status.blocks, block_commit_time);
                 let metrics = Metrics {
                     // peers: status.peers as u32,
-                    block: status.blocks as u32,
+                    block: status.blocks as usize,
                     block_commit_time,
                     avg_commit_time: avg_commit_time.calculate().expect("BUG: just updated"),
-                    queue_size: status.queue_size as u32,
+                    queue_size: status.queue_size as usize,
                     uptime: status.uptime.0,
                 };
                 let _ = tx.send(Update::Metrics(metrics)).await;
@@ -300,10 +300,10 @@ async fn get_metrics_periodic_timeout(torii_url: &ToriiUrl, tx: mpsc::Sender<Upd
 #[derive(Clone, Copy, Debug)]
 pub struct Metrics {
     // pub peers: u32,
-    pub block: u32,
+    pub block: usize,
     pub block_commit_time: Duration,
     pub avg_commit_time: Duration,
-    pub queue_size: u32,
+    pub queue_size: usize,
     pub uptime: Duration,
 }
 

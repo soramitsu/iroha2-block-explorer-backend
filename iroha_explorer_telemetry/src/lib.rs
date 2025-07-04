@@ -283,7 +283,7 @@ impl State {
     /// (see
     /// [Fault Tolerance](https://hyperledger-iroha.github.io/iroha-2-docs/get-started/iroha-2.html#fault-tolerance)
     /// article).
-    fn finalized_block(&self) -> Option<u32> {
+    fn finalized_block(&self) -> Option<usize> {
         let mut blocks: Vec<_> = self
             .peers
             .values()
@@ -373,7 +373,7 @@ impl State {
 
     fn network_status(&self) -> Option<NetworkStatus> {
         self.blockchain.as_ref().map(|state| NetworkStatus {
-            peers: self.total_peers() as u32,
+            peers: self.total_peers(),
             domains: state.domains,
             accounts: state.accounts,
             assets: state.assets,
@@ -696,7 +696,7 @@ mod state_tests {
             Self { state }
         }
 
-        fn update_block(&mut self, url: &ToriiUrl, block: u32) {
+        fn update_block(&mut self, url: &ToriiUrl, block: usize) {
             self.state
                 .update_peer(
                     url,
@@ -708,7 +708,7 @@ mod state_tests {
                 .unwrap();
         }
 
-        fn assert(&self, expected: Option<u32>) {
+        fn assert(&self, expected: Option<usize>) {
             assert_eq!(self.state.finalized_block(), expected);
         }
     }

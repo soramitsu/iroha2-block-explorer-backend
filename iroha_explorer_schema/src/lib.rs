@@ -858,25 +858,25 @@ impl FromStr for BlockHeightOrHash {
 #[derive(Serialize, ToSchema, Clone)]
 pub struct NetworkStatus {
     /// Count of peers in the network
-    pub peers: u32,
+    pub peers: usize,
     /// Count of registered domains
-    pub domains: u32,
+    pub domains: usize,
     /// Count of registered accounts
-    pub accounts: u32,
+    pub accounts: usize,
     /// Count of assets and NFTs
-    pub assets: u32,
+    pub assets: usize,
     /// Accepted transactions
-    pub transactions_accepted: u32,
+    pub transactions_accepted: usize,
     /// Rejected transactions
-    pub transactions_rejected: u32,
+    pub transactions_rejected: usize,
     /// Height of the latest committed block
-    pub block: u32,
+    pub block: usize,
     /// Timestamp when the last block was created (not committed)
     pub block_created_at: Option<TimeStamp>,
     /// Finalized block, the one that __cannot be reverted__ under normal network conditions.
     ///
     /// Might be not available if there are not enough metrics from peers.
-    pub finalized_block: Option<u32>,
+    pub finalized_block: Option<usize>,
     /// Average commit time among all peers during a certain observation period.
     ///
     /// Might be not available if there are not enough metrics from peers.
@@ -899,13 +899,13 @@ pub struct PeerStatus {
     /// Peer URL
     pub url: ToriiUrl,
     /// Block height
-    pub block: u32,
+    pub block: usize,
     /// Commit time of the last block
     pub commit_time: TimeDuration,
     /// Average commit time on this peer during a certain observation period
     pub avg_commit_time: TimeDuration,
     /// Current queue size
-    pub queue_size: u32,
+    pub queue_size: usize,
     /// Uptime since genesis block commit
     pub uptime: TimeDuration,
 }
