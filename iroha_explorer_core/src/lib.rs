@@ -42,35 +42,41 @@ pub enum Error {
     // },
     // #[error("todo")]
     // ReceivedBlockIsAlreadyInBlockChain,
-    #[error("todo")]
+    #[error("State height must be confirmed first before receiving blocks")]
     NotConfirmed,
-    #[error("todo")]
+    #[error("Confirmed local height ({received}) is higher than Kura's height ({kura})")]
+    ConfirmedHeightExceedsKura { received: usize, kura: usize },
+    #[error("Received block height mismatch (expected {expected}, received {actual})")]
     ReceivedBlockHeightMismatch {
         expected: NonZero<usize>,
         actual: NonZero<usize>,
     },
-    #[error("todo")]
+    #[error("Received block hash mismatch (expected {actual_prev_block_hash}, received {block_prev_block_hash})")]
     ReceivedBlockPreviousBlockHashMismatch {
         actual_prev_block_hash: HashOf<BlockHeader>,
         block_prev_block_hash: HashOf<BlockHeader>,
     },
-    #[error("todo")]
+    #[error("Kura initialisation failure")]
     KuraInit(#[source] iroha_core::kura::Error),
-    #[error("todo")]
-    IrohaHasNoGenesis,
-    #[error("todo")]
+    #[error("Received genesis block has no transactions")]
     GenesisNoTransactions,
+    #[error("Actor communication failure: {details}")]
+    Communication { details: String },
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+        Self::Communication {
+            details: format!("{value}"),
+        }
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
     fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+        Self::Communication {
+            details: format!("{value}"),
+        }
     }
 }
 

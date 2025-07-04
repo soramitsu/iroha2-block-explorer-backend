@@ -13,6 +13,7 @@ iroha_config = { workspace = true }
 iroha_core = { workspace = true }
 iroha_data_model = { workspace = true }
 iroha_futures = { workspace = true }
+iroha_primitives = { workspace = true }
 mv = { workspace = true }
 
 eyre = { workspace = true }
@@ -24,3 +25,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 expect-test = { workspace = true }
+iroha_explorer_test_utils = { path = "../iroha_explorer_test_utils/" }
+iroha_test_samples = { workspace = true }
+tempfile = { workspace = true }

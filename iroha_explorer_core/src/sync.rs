@@ -37,6 +37,11 @@ async fn sync_loop(state: &State, client: &Client) -> ! {
             }
         };
 
+        if let Err(error) = state.confirm_local_height(sync_from.get() - 1).await {
+            error!(%error, "Local height confirmation failed, retrying the sync loop");
+            continue;
+        };
+
         debug!(height = sync_from, "Opening block stream");
         let mut stream = client.lazy_block_stream(sync_from).await;
         loop {
@@ -46,7 +51,7 @@ async fn sync_loop(state: &State, client: &Client) -> ! {
             };
             debug!(height=%block.header().height(), hash=%block.hash(), "Received block");
             if let Err(error) = state.insert_block(block).await {
-                error!(?error, "Local state failed to accept block");
+                error!(%error, "Local state failed to accept block");
                 break;
             }
         }
@@ -68,10 +73,14 @@ async fn find_last_matching_block(
         .expect("height is non-zero");
 
     // Genesis check to cover a common corner case
-    let iroha_genesis_hash = client.get_genesis_hash().await?;
-    if local_genesis_hash != iroha_genesis_hash {
+    let genesis_equal = client
+        .get_block_hash(nonzero!(1usize))
+        .await?
+        .map(|iroha_genesis_hash| local_genesis_hash == iroha_genesis_hash)
+        .unwrap_or(false);
+    if !genesis_equal {
         return Ok(None);
-    }
+    };
 
     // NOTE: naive implementation - naive checks of every block
     // PERF: could be optimised as some sort of binary search

@@ -78,6 +78,11 @@ impl Telemetry {
         (Self { actor }, fut)
     }
 
+    #[cfg(debug_assertions)]
+    pub fn new_dummy(actor: mpsc::Sender<ActorMessage>) -> Self {
+        Self { actor }
+    }
+
     pub async fn network(&self) -> eyre::Result<Option<NetworkStatus>> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.actor
@@ -148,18 +153,17 @@ impl Telemetry {
         Ok(reply)
     }
 
-    pub async fn update_blockchain_state(&self, state: blockchain::Metrics) {
+    pub async fn try_update_blockchain_state(&self, state: blockchain::Metrics) {
         if let Err(error) = self
             .actor
-            .send(ActorMessage::UpdateBlockchainState(state))
-            .await
+            .try_send(ActorMessage::UpdateBlockchainState(state))
         {
             tracing::error!(%error, "Failed to update blockchain state in Telemetry");
         };
     }
 }
 
-enum ActorMessage {
+pub enum ActorMessage {
     HandlePeerMonitorUpdate(ToriiUrl, peer_monitor::Update),
     UpdateBlockchainState(blockchain::Metrics),
     GetNetworkStatus {
@@ -376,7 +380,7 @@ impl State {
             transactions_accepted: state.txs_accepted,
             transactions_rejected: state.txs_rejected,
             block: state.block,
-            block_created_at: state.block_created_at.into(),
+            block_created_at: state.block_created_at.map(From::from),
             avg_block_time: state.avg_block_time.into(),
             avg_commit_time: self.avg_commit_time().map(From::from),
             finalized_block: self.finalized_block(),

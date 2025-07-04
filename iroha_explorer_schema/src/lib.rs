@@ -872,7 +872,7 @@ pub struct NetworkStatus {
     /// Height of the latest committed block
     pub block: u32,
     /// Timestamp when the last block was created (not committed)
-    pub block_created_at: TimeStamp,
+    pub block_created_at: Option<TimeStamp>,
     /// Finalized block, the one that __cannot be reverted__ under normal network conditions.
     ///
     /// Might be not available if there are not enough metrics from peers.

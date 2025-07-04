@@ -2,7 +2,7 @@ use super::{Error, Result, KURA_BLOCKS_IN_MEMORY};
 use crate::StateViewExt;
 use iroha_config::{base::WithOrigin, parameters::actual::Kura as Config};
 use iroha_core::block::{CommittedBlock, ValidBlock};
-use iroha_core::kura::{self, Kura};
+use iroha_core::kura::{self, BlockStore, Kura};
 use iroha_core::query::store::LiveQueryStore;
 use iroha_core::state::{State as CoreState, StateBlock, StateReadOnly, StateView, World};
 use iroha_data_model::prelude::*;
@@ -15,6 +15,7 @@ use std::ops::Deref;
 use std::time::Duration;
 use std::{future::Future, num::NonZero, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc, oneshot, watch, OwnedRwLockReadGuard, RwLock, RwLockReadGuard};
+use tracing::instrument;
 
 type BlockHash = HashOf<BlockHeader>;
 
@@ -29,6 +30,7 @@ struct Actor {
     telemetry: Telemetry,
     lock: Arc<RwLock<StateInner>>,
     state_extras: StateExtras,
+    expect_soft_fork: bool,
     store_dir: PathBuf,
     shutdown_external: ShutdownSignal,
     shutdown_internal: ShutdownSignal,
@@ -40,6 +42,7 @@ struct Actor {
 enum Message {
     ConfirmHeight {
         height: usize,
+        reply: oneshot::Sender<Result<()>>,
     },
     InsertBlock {
         block: Arc<SignedBlock>,
@@ -118,6 +121,7 @@ impl State {
             state_extras: StateExtras {
                 metrics: IncrementalMetrics::default(),
             },
+            expect_soft_fork: false,
             shutdown_external: main_sup.shutdown_signal(),
             shutdown_internal: kura_sup.shutdown_signal(),
             shutdown_kura_complete: Some(shutdown_kura_complete.1),
@@ -129,7 +133,7 @@ impl State {
                 std::thread::Builder::new().name("kura".to_owned()),
                 move || {
                     rt.block_on(async move {
-                        tokio::spawn(run_sup_with_complete(kura_sup, shutdown_kura_complete.0));
+                        tokio::spawn(wrap_supervisor("kura", kura_sup, shutdown_kura_complete.0));
                         actor.recv_loop().await
                     });
                 },
@@ -156,11 +160,13 @@ impl State {
     ///
     /// This _may_ cause state and storage re-initialisation.
     ///
-    /// Future returned by this function resolves once the actor receives the message and
-    /// does not wait for the entire process to finish.
+    /// The future resolves once the entire process completes
     pub async fn confirm_local_height(&self, height: usize) -> Result<()> {
-        self.actor.send(Message::ConfirmHeight { height }).await?;
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send(Message::ConfirmHeight { height, reply: tx })
+            .await?;
+        rx.await?
     }
 
     /// Insert a block into the local block chain.
@@ -186,16 +192,21 @@ impl Actor {
                     self.handle_message(msg).await
                 },
                 _ = self.shutdown_external.receive() => {
-                    self.terminate().await
+                    self.terminate().await;
+                    break
                 }
             }
         }
+        tracing::trace!("State loop exit");
     }
 
     async fn handle_message(&mut self, message: Message) {
         tracing::trace!(?message, "Handle message");
         match message {
-            Message::ConfirmHeight { height } => self.confirm_height(height).await,
+            Message::ConfirmHeight { height, reply } => {
+                let result = self.confirm_height(height).await;
+                let _ = reply.send(result);
+            }
             Message::InsertBlock { block, reply } => {
                 let result = self.insert_block((*block).clone()).await;
                 let _ = reply.send(result);
@@ -211,26 +222,38 @@ impl Actor {
             maybe_recv(self.shutdown_kura_complete.take()),
             maybe_recv(self.shutdown_state_complete.take())
         );
+        tracing::trace!("Kura & State terminated");
     }
 
-    async fn confirm_height(&mut self, height: usize) {
+    async fn confirm_height(&mut self, height: usize) -> Result<()> {
         let read_guard = self.lock.read().await;
         let kura_height = read_guard.kura.blocks_count();
 
+        if self.expect_soft_fork && height == kura_height {
+            tracing::debug!("Reset soft fork");
+            self.expect_soft_fork = false;
+            return Ok(());
+        }
+
         if height > kura_height {
-            tracing::error!(
-                height,
-                kura_height,
-                "Received confirmed height is higher than Kura's"
-            );
-            return;
+            return Err(Error::ConfirmedHeightExceedsKura {
+                received: height,
+                kura: kura_height,
+            });
         }
 
         let state_height = read_guard.state.view().height();
         if kura_height == state_height && kura_height == height {
             // up to date
-            return;
+            return Ok(());
         }
+
+        if kura_height == state_height && kura_height == height + 1 {
+            tracing::debug!("Set soft fork");
+            self.expect_soft_fork = true;
+            return Ok(());
+        }
+        self.expect_soft_fork = false;
 
         tracing::info!(height, "Restarting Kura...");
 
@@ -240,12 +263,14 @@ impl Actor {
         // wait for all readers to cease
         drop(read_guard);
         let mut write_guard = self.lock.write().await;
+        tracing::trace!("All readers are dropped");
 
         // wait Kura & State to complete their shutdown
         tokio::join!(
             maybe_recv(self.shutdown_kura_complete.take()),
             maybe_recv(self.shutdown_state_complete.take())
         );
+        tracing::trace!("Kura & State terminated");
 
         // dropping the state - it must hold the last Kura reference
         write_guard.state = Arc::new(init_dummy_state());
@@ -273,7 +298,7 @@ impl Actor {
         let kura_complete = oneshot::channel();
         self.shutdown_kura_complete = Some(kura_complete.1);
 
-        tokio::spawn(run_sup_with_complete(sup, kura_complete.0));
+        tokio::spawn(wrap_supervisor("kura", sup, kura_complete.0));
 
         if height > 0 {
             // replay blocks from Kura
@@ -286,7 +311,7 @@ impl Actor {
             let state = Arc::new(state);
             write_guard.state = state.clone();
             let state_complete = oneshot::channel();
-            tokio::spawn(run_sup_with_complete(sup, state_complete.0));
+            tokio::spawn(wrap_supervisor("state", sup, state_complete.0));
 
             debug_assert!(self.shutdown_state_complete.is_none());
             self.shutdown_state_complete = Some(state_complete.1);
@@ -297,11 +322,13 @@ impl Actor {
             play_all_blocks(&kura, &state, &mut self.state_extras);
             self.send_metrics().await;
         }
+
+        Ok(())
     }
 
     async fn send_metrics(&self) {
         self.telemetry
-            .update_blockchain_state(self.state_extras.metrics.get_metrics())
+            .try_update_blockchain_state(self.state_extras.metrics.get_metrics())
             .await;
     }
 
@@ -321,7 +348,44 @@ impl Actor {
             return Err(Error::NotConfirmed);
         };
 
-        if state_height != block_height.get() - 1 {
+        if self.expect_soft_fork {
+            debug_assert!(state_height > 0);
+            if state_height != block_height.get() {
+                return Err(Error::ReceivedBlockHeightMismatch {
+                    expected: NonZero::new(state_height)
+                        .expect("soft fork flag could only be set with non-empty local height"),
+                    actual: block_height,
+                });
+            }
+
+            // replace top block
+
+            kura.replace_top_block(block.clone());
+            let state_block = read_guard.state.block_and_revert(block.header());
+            let _committed = play_block(block.to_owned(), state_block);
+            if let Some(prev_block_time) = NonZero::new(block_height.get() - 1).map(|height| {
+                kura.get_block(height)
+                    .expect("block must be in Kura")
+                    .header()
+                    .creation_time()
+            }) {
+                // FIXME: duplication
+                let delta = block
+                    .header()
+                    .creation_time()
+                    .checked_sub(prev_block_time)
+                    .expect("prev block creation time must preceed");
+                self.state_extras.metrics.replace_block_delta(delta);
+            }
+            self.state_extras
+                .metrics
+                .reflect_state(&read_guard.state.view());
+
+            self.expect_soft_fork = false;
+            return Ok(());
+        }
+
+        if state_height + 1 != block_height.get() {
             return Err(Error::ReceivedBlockHeightMismatch {
                 expected: NonZero::new(state_height + 1).expect("at least 1"),
                 actual: block_height,
@@ -338,12 +402,14 @@ impl Actor {
             drop(read_guard);
             let mut write_guard = self.lock.write().await;
 
-            let (state, sup) = init_state(kura.clone(), infer_genesis_account(&*block).unwrap());
+            let (state, mut sup) =
+                init_state(kura.clone(), infer_genesis_account(&*block).unwrap());
+            sup.shutdown_on_external_signal(self.shutdown_internal.clone());
             let state = Arc::new(state);
             // NOTE: no need to wait for previous state "shutdown" - it is a dummy
             write_guard.state = state.clone();
             let state_complete = oneshot::channel();
-            tokio::spawn(run_sup_with_complete(sup, state_complete.0));
+            tokio::spawn(wrap_supervisor("state", sup, state_complete.0));
 
             debug_assert!(self.shutdown_state_complete.is_none());
             self.shutdown_state_complete = Some(state_complete.1);
@@ -382,16 +448,21 @@ impl Actor {
 
 impl Default for IncrementalMetrics {
     fn default() -> Self {
-        todo!()
+        Self {
+            base: <_>::default(),
+            block_time: <_>::default(),
+        }
     }
 }
 
 impl IncrementalMetrics {
     fn get_metrics(&self) -> Metrics {
-        todo!()
+        self.base.clone()
     }
 
     fn insert_block_delta(&mut self, delta: Duration) {}
+
+    fn replace_block_delta(&mut self, delta: Duration) {}
 
     fn reflect_state(&mut self, view: &impl StateReadOnly) {}
 }
@@ -399,7 +470,7 @@ impl IncrementalMetrics {
 fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras) {
     let state_height = state.view().height();
     let kura_height = kura.blocks_count();
-    let mut prev_creation_time = NonZero::new(kura_height)
+    let mut prev_creation_time = NonZero::new(state_height)
         .and_then(|h| kura.get_block(h))
         .map(|b| b.header().creation_time());
 
@@ -412,20 +483,28 @@ fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras
         let _committed = play_block((*block).clone(), state_block);
 
         let creation_time = block.header().creation_time();
-        let delta = block.header().creation_time()
-            - prev_creation_time.expect("must exist if we are in this for loop");
-        extras.metrics.insert_block_delta(delta);
+        if let Some(prev) = prev_creation_time {
+            let delta = creation_time
+                .checked_sub(prev)
+                .expect("prev block creation time must preceed");
+            extras.metrics.insert_block_delta(delta);
+        }
+        prev_creation_time = Some(creation_time);
     }
 
     extras.metrics.reflect_state(&state.view());
 }
 
+#[instrument(fields(block = %block.header().hash(), height = block.header().height()), skip(state_block, block))]
 fn play_block(block: SignedBlock, mut state_block: StateBlock<'_>) -> CommittedBlock {
+    tracing::trace!("Playing block");
     let valid_block = ValidBlock::validate_unchecked(block, &mut state_block).unpack(|_| {});
     let committed_block = valid_block.commit_unchecked().unpack(|_| {});
     // TODO: incorporate events
     let _events = state_block.apply_without_execution(&committed_block, vec![]);
+    tracing::trace!("Block applied");
     state_block.commit();
+    tracing::trace!("Block committed");
     committed_block
 }
 
@@ -477,7 +556,16 @@ fn kura_config(store_dir: PathBuf) -> Config {
 }
 
 fn init_kura(store_dir: PathBuf, mode: StartMode, signal: ShutdownSignal) -> (Arc<Kura>, Child) {
-    // TODO: start mode; start thread
+    match mode {
+        StartMode::Restore => {}
+        StartMode::RestoreOnly(height) => {
+            let store = BlockStore::new(&store_dir);
+            store
+                .prune(height as u64)
+                .expect("fatal: cannot prune blocks");
+            tracing::trace!(%height, "Pruned blocks");
+        }
+    }
 
     let (kura, _block_count) =
         Kura::new(&kura_config(store_dir.clone())).expect("fatal: cannot initialize Kura");
@@ -499,9 +587,499 @@ async fn maybe_recv(rx: Option<oneshot::Receiver<()>>) {
     }
 }
 
-async fn run_sup_with_complete(sup: Supervisor, tx: oneshot::Sender<()>) {
+#[instrument(skip(sup, tx))]
+async fn wrap_supervisor(name: &str, sup: Supervisor, tx: oneshot::Sender<()>) {
     if let Err(err) = sup.start().await {
-        tracing::error!(%err, "TODO")
+        tracing::error!(%err, "Supervisor exited with an error")
     }
     let _ = tx.send(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use expect_test::expect;
+    use iroha_core::{block::BlockBuilder, state::WorldReadOnly, tx::AcceptedTransaction};
+    use iroha_explorer_telemetry as telemetry;
+    use iroha_explorer_test_utils::init_test_logger;
+    use iroha_futures::supervisor;
+    use iroha_primitives::time::{MockTimeHandle, TimeSource};
+    use iroha_test_samples::{
+        gen_account_in, ALICE_ID as ALICE, ALICE_KEYPAIR as ALICE_KEY, PEER_KEYPAIR as PEER_KEY,
+        SAMPLE_GENESIS_ACCOUNT_ID as GENESIS, SAMPLE_GENESIS_ACCOUNT_KEYPAIR as GENESIS_KEY,
+    };
+    use mv::storage::StorageReadOnly;
+    use tempfile::TempDir;
+    use tokio::{task::JoinHandle, time::timeout};
+
+    const TICK: Duration = Duration::from_millis(100);
+    const BLOCK_TICK: Duration = Duration::from_millis(100);
+    const TELEMETRY_DEFAULT_CAPACITY: usize = 8;
+
+    fn telemetry_factory() -> (Telemetry, mpsc::Receiver<telemetry::ActorMessage>) {
+        let (tx, rx) = mpsc::channel(TELEMETRY_DEFAULT_CAPACITY);
+        (Telemetry::new_dummy(tx), rx)
+    }
+
+    struct Sandbox {
+        chain_id: ChainId,
+        telemetry: mpsc::Receiver<telemetry::ActorMessage>,
+        signal: ShutdownSignal,
+        state: State,
+        supervisor_task: JoinHandle<Result<(), supervisor::Error>>,
+        time_handle: MockTimeHandle,
+        time_source: TimeSource,
+    }
+
+    impl Sandbox {
+        fn new(store: impl Into<PathBuf>) -> Self {
+            let (tel, tel_rx) = telemetry_factory();
+            let signal = ShutdownSignal::new();
+
+            let (state, sup_fut) = State::new(store.into(), tel, signal.clone());
+            let sup_join = tokio::spawn(sup_fut);
+
+            let (handle, source) = TimeSource::new_mock(Duration::ZERO);
+
+            Self {
+                chain_id: ChainId::from("test"),
+                telemetry: tel_rx,
+                signal,
+                state,
+                supervisor_task: sup_join,
+                time_handle: handle,
+                time_source: source,
+            }
+        }
+
+        fn create_block(
+            &self,
+            transactions: impl IntoIterator<Item = SignedTransaction>,
+            chain: Option<&Arc<SignedBlock>>,
+            sign: &PrivateKey,
+        ) -> Arc<SignedBlock> {
+            let block: SignedBlock = BlockBuilder::new_with_time_source(
+                transactions
+                    .into_iter()
+                    .map(AcceptedTransaction::new_unchecked)
+                    .collect(),
+                self.time_source.to_owned(),
+            )
+            .chain(0, chain.as_ref().map(|x| x.as_ref()))
+            .sign(sign)
+            .unpack(|_| {})
+            .into();
+            Arc::new(block)
+        }
+    }
+
+    macro_rules! parse {
+        ($raw:expr) => {
+            $raw.parse().unwrap()
+        };
+    }
+
+    #[tokio::test]
+    async fn start_and_shutdown() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        sandbox.signal.send();
+
+        timeout(TICK, sandbox.supervisor_task).await??;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn read_from_empty_state() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+        assert_eq!(guard.view().world().domains().len(), 0);
+        assert_eq!(guard.kura().blocks_count(), 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn insert_blocks_normally() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
+            .with_instructions::<InstructionBox>([
+                Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+                Register::account(Account::new(ALICE.to_owned())).into(),
+            ])
+            .sign(GENESIS_KEY.private_key());
+        let block = sandbox.create_block([tx], None, GENESIS_KEY.private_key());
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
+
+        let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+        let view = guard.view();
+        let domains: Vec<_> = view
+            .world()
+            .domains_iter()
+            .map(|x| x.id().to_string())
+            .collect();
+        assert_eq!(domains, ["genesis", "wonderland"]);
+
+        let rose = AssetDefinitionId::new(ALICE.domain().to_owned(), parse!("rose"));
+        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+            .with_instructions::<InstructionBox>([Register::asset_definition(
+                AssetDefinition::numeric(rose),
+            )
+            .into()])
+            .sign(ALICE_KEY.private_key());
+        let block2 = sandbox.create_block([tx], Some(&block), PEER_KEY.private_key());
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block2.clone())).await??;
+
+        let guard2 = timeout(TICK, sandbox.state.acquire_guard()).await?;
+        let view2 = guard.view();
+
+        let assets2: Vec<_> = view2
+            .world()
+            .asset_definitions_iter()
+            .map(|x| x.id().name().to_string())
+            .collect();
+        assert_eq!(assets2, ["rose"]);
+
+        // previous data must persist
+        let assets1: Vec<_> = view
+            .world()
+            .asset_definitions_iter()
+            .map(|x| x.id().name().to_string())
+            .collect();
+        assert!(assets1.is_empty());
+
+        Ok(())
+    }
+
+    async fn reinit_prep(sandbox: &Sandbox) -> eyre::Result<AssetId> {
+        let asset_def = AssetDefinitionId::new(ALICE.domain().to_owned(), parse!("coin"));
+        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
+            .with_instructions::<InstructionBox>([
+                Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+                Register::account(Account::new(ALICE.to_owned())).into(),
+                Register::asset_definition(AssetDefinition::numeric(asset_def.to_owned())).into(),
+            ])
+            .sign(GENESIS_KEY.private_key());
+        let block = sandbox.create_block([tx], None, GENESIS_KEY.private_key());
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
+
+        // some more blocks
+        let mut prev = block;
+        let asset = AssetId::new(asset_def.to_owned(), ALICE.to_owned());
+        for i in 0..5 {
+            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                .with_instructions([Mint::asset_numeric(5u32, asset.to_owned())])
+                .sign(ALICE_KEY.private_key());
+            let block = sandbox.create_block([tx], Some(&prev), PEER_KEY.private_key());
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
+            prev = block;
+        }
+
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            assert_eq!(guard.kura().blocks_count(), 6);
+
+            let view = guard.view();
+            let value = view.world().assets().get(&asset).unwrap();
+            assert_eq!(value.value, Numeric::from(25u32));
+        }
+
+        Ok(asset)
+    }
+
+    #[tokio::test]
+    async fn reinit_wipe() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        reinit_prep(&sandbox).await?;
+
+        // wipe!
+        timeout(
+            Duration::from_millis(500),
+            sandbox.state.confirm_local_height(0),
+        )
+        .await?;
+
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            assert_eq!(guard.kura().blocks_count(), 0);
+
+            let view = guard.view();
+            assert_eq!(view.world().domains().len(), 0);
+            assert_eq!(view.world().accounts().len(), 0);
+            assert_eq!(view.world().assets().len(), 0);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reinit_rewind() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+
+        let asset = reinit_prep(&sandbox).await?;
+
+        // rewind!
+        timeout(
+            Duration::from_millis(500),
+            sandbox.state.confirm_local_height(3),
+        )
+        .await??;
+
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            assert_eq!(guard.kura().blocks_count(), 3);
+
+            let view = guard.view();
+            let value = view.world().assets().get(&asset).unwrap();
+            assert_eq!(value.value, Numeric::from(10u32));
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn soft_fork() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+        let mut blocks = vec![];
+
+        let block = {
+            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
+                .with_instructions::<InstructionBox>([
+                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+                    Register::account(Account::new(ALICE.to_owned())).into(),
+                ])
+                .sign(GENESIS_KEY.private_key());
+            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
+        };
+        blocks.push(block.clone());
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+
+        // Create multiple blocks
+        for i in 1..=3 {
+            let block = {
+                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
+                        parse!(format!("rose_{i}#wonderland")),
+                    ))])
+                    .sign(ALICE_KEY.private_key());
+                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
+            };
+            blocks.push(block.clone());
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        }
+
+        // Verify assets
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            let assets: Vec<_> = guard
+                .view()
+                .world()
+                .asset_definitions_iter()
+                .map(|x| x.id().to_string())
+                .collect();
+
+            assert_eq!(
+                assets,
+                [
+                    "rose_1#wonderland",
+                    "rose_2#wonderland",
+                    "rose_3#wonderland",
+                ]
+            );
+        }
+
+        // Replace top block and insert some more
+        blocks.pop();
+        timeout(TICK, sandbox.state.confirm_local_height(blocks.len())).await??;
+        for i in 1..=3 {
+            let block = {
+                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
+                        parse!(format!("time_{i}#wonderland")),
+                    ))])
+                    .sign(ALICE_KEY.private_key());
+                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
+            };
+            blocks.push(block.clone());
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        }
+
+        // Verify assets
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            let assets: Vec<_> = guard
+                .view()
+                .world()
+                .asset_definitions_iter()
+                .map(|x| x.id().to_string())
+                .collect();
+
+            assert_eq!(
+                assets,
+                [
+                    "rose_1#wonderland",
+                    "rose_2#wonderland",
+                    "time_1#wonderland",
+                    "time_2#wonderland",
+                    "time_3#wonderland",
+                ]
+            );
+        }
+
+        Ok(())
+    }
+
+    /// We would confirm the height as being just one behind, and then immediately
+    /// confirm the previous height. This should cause no-op and normal
+    /// continuation of insertion.
+    ///
+    /// Just a corner case to cover to be sure it doesn't fail.
+    #[tokio::test]
+    async fn soft_fork_confirm_back() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let sandbox = Sandbox::new(store.path());
+        let mut blocks = vec![];
+
+        let block = {
+            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
+                .with_instructions::<InstructionBox>([
+                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+                    Register::account(Account::new(ALICE.to_owned())).into(),
+                ])
+                .sign(GENESIS_KEY.private_key());
+            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
+        };
+        blocks.push(block.clone());
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+
+        // Create multiple blocks
+        for i in 1..=3 {
+            let block = {
+                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
+                        parse!(format!("rose_{i}#wonderland")),
+                    ))])
+                    .sign(ALICE_KEY.private_key());
+                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
+            };
+            blocks.push(block.clone());
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        }
+
+        /// Confirm one behind (prepare state to replace top block)...
+        timeout(TICK, sandbox.state.confirm_local_height(blocks.len() - 1)).await??;
+        /// Confirm back (reset state preparation)
+        timeout(TICK, sandbox.state.confirm_local_height(blocks.len())).await??;
+
+        /// Continue insertion
+        for i in 4..=6 {
+            let block = {
+                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
+                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
+                        parse!(format!("rose_{i}#wonderland")),
+                    ))])
+                    .sign(ALICE_KEY.private_key());
+                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
+            };
+            blocks.push(block.clone());
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        }
+
+        // Verify assets
+        {
+            let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+            let assets: Vec<_> = guard
+                .view()
+                .world()
+                .asset_definitions_iter()
+                .map(|x| x.id().to_string())
+                .collect();
+
+            assert_eq!(
+                assets,
+                [
+                    "rose_1#wonderland",
+                    "rose_2#wonderland",
+                    "rose_3#wonderland",
+                    "rose_4#wonderland",
+                    "rose_5#wonderland",
+                    "rose_6#wonderland",
+                ]
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn restore_storage_and_confirm() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn does_not_shutdown_while_guard_exists() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn does_not_reinit_while_guard_exists() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rejects_block_bad_height() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rejects_block_bad_hash() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rejects_block_before_confirm_with_storage() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn sends_metrics() -> eyre::Result<()> {
+        todo!()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn telemetry_being_full_does_not_hang_state() -> eyre::Result<()> {
+        todo!()
+    }
 }

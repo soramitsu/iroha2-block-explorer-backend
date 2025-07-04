@@ -45,16 +45,19 @@ impl Client {
         todo!()
     }
 
-    pub async fn get_genesis_hash(&self) -> eyre::Result<HashOf<BlockHeader>> {
-        todo!()
-    }
-
     pub async fn lazy_block_stream(
         &self,
         from_block: NonZero<usize>,
     ) -> impl Stream<Item = Arc<SignedBlock>> {
         todo!();
         tokio_stream::iter(None)
+    }
+
+    pub async fn get_block_hash(
+        &self,
+        height: NonZero<usize>,
+    ) -> eyre::Result<Option<HashOf<BlockHeader>>> {
+        todo!()
     }
 
     pub fn blocks_info_from_end(
