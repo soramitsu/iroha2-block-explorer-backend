@@ -611,6 +611,7 @@ mod tests {
     use mv::storage::StorageReadOnly;
     use tempfile::TempDir;
     use tokio::{task::JoinHandle, time::timeout};
+    use tracing::debug;
 
     const TICK: Duration = Duration::from_millis(100);
     const BLOCK_TICK: Duration = Duration::from_millis(100);
@@ -629,6 +630,7 @@ mod tests {
         supervisor_task: JoinHandle<Result<(), supervisor::Error>>,
         time_handle: MockTimeHandle,
         time_source: TimeSource,
+        blocks: Vec<Arc<SignedBlock>>,
     }
 
     impl Sandbox {
@@ -649,27 +651,30 @@ mod tests {
                 supervisor_task: sup_join,
                 time_handle: handle,
                 time_source: source,
+                blocks: <_>::default(),
             }
         }
 
-        fn create_block(
-            &self,
-            transactions: impl IntoIterator<Item = SignedTransaction>,
-            chain: Option<&Arc<SignedBlock>>,
-            sign: &PrivateKey,
+        fn create_block<I: Instruction>(
+            &mut self,
+            isi: impl IntoIterator<Item = I>,
         ) -> Arc<SignedBlock> {
+            let tx = TransactionBuilder::new(self.chain_id.to_owned(), GENESIS.to_owned())
+                .with_instructions(isi)
+                .sign(GENESIS_KEY.private_key());
             let block: SignedBlock = BlockBuilder::new_with_time_source(
-                transactions
-                    .into_iter()
+                [tx].into_iter()
                     .map(AcceptedTransaction::new_unchecked)
                     .collect(),
                 self.time_source.to_owned(),
             )
-            .chain(0, chain.as_ref().map(|x| x.as_ref()))
-            .sign(sign)
+            .chain(0, self.blocks.last().as_ref().map(|x| x.as_ref()))
+            .sign(GENESIS_KEY.private_key())
             .unpack(|_| {})
             .into();
-            Arc::new(block)
+            let block = Arc::new(block);
+            self.blocks.push(block.clone());
+            block
         }
     }
 
@@ -712,15 +717,12 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
+        let mut sandbox = Sandbox::new(store.path());
 
-        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
-            .with_instructions::<InstructionBox>([
-                Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
-                Register::account(Account::new(ALICE.to_owned())).into(),
-            ])
-            .sign(GENESIS_KEY.private_key());
-        let block = sandbox.create_block([tx], None, GENESIS_KEY.private_key());
+        let block = sandbox.create_block::<InstructionBox>([
+            Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+            Register::account(Account::new(ALICE.to_owned())).into(),
+        ]);
         timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
 
         let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
@@ -733,14 +735,9 @@ mod tests {
         assert_eq!(domains, ["genesis", "wonderland"]);
 
         let rose = AssetDefinitionId::new(ALICE.domain().to_owned(), parse!("rose"));
-        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-            .with_instructions::<InstructionBox>([Register::asset_definition(
-                AssetDefinition::numeric(rose),
-            )
-            .into()])
-            .sign(ALICE_KEY.private_key());
-        let block2 = sandbox.create_block([tx], Some(&block), PEER_KEY.private_key());
-        timeout(BLOCK_TICK, sandbox.state.insert_block(block2.clone())).await??;
+        let block =
+            sandbox.create_block([Register::asset_definition(AssetDefinition::numeric(rose))]);
+        timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
 
         let guard2 = timeout(TICK, sandbox.state.acquire_guard()).await?;
         let view2 = guard.view();
@@ -763,28 +760,20 @@ mod tests {
         Ok(())
     }
 
-    async fn reinit_prep(sandbox: &Sandbox) -> eyre::Result<AssetId> {
+    async fn reinit_prep(sandbox: &mut Sandbox) -> eyre::Result<AssetId> {
         let asset_def = AssetDefinitionId::new(ALICE.domain().to_owned(), parse!("coin"));
-        let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
-            .with_instructions::<InstructionBox>([
-                Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
-                Register::account(Account::new(ALICE.to_owned())).into(),
-                Register::asset_definition(AssetDefinition::numeric(asset_def.to_owned())).into(),
-            ])
-            .sign(GENESIS_KEY.private_key());
-        let block = sandbox.create_block([tx], None, GENESIS_KEY.private_key());
+        let block = sandbox.create_block::<InstructionBox>([
+            Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+            Register::account(Account::new(ALICE.to_owned())).into(),
+            Register::asset_definition(AssetDefinition::numeric(asset_def.to_owned())).into(),
+        ]);
         timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
 
         // some more blocks
-        let mut prev = block;
         let asset = AssetId::new(asset_def.to_owned(), ALICE.to_owned());
         for i in 0..5 {
-            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                .with_instructions([Mint::asset_numeric(5u32, asset.to_owned())])
-                .sign(ALICE_KEY.private_key());
-            let block = sandbox.create_block([tx], Some(&prev), PEER_KEY.private_key());
-            timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
-            prev = block;
+            let block = sandbox.create_block([Mint::asset_numeric(5u32, asset.to_owned())]);
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
         }
 
         {
@@ -804,16 +793,12 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
+        let mut sandbox = Sandbox::new(store.path());
 
-        reinit_prep(&sandbox).await?;
+        reinit_prep(&mut sandbox).await?;
 
         // wipe!
-        timeout(
-            Duration::from_millis(500),
-            sandbox.state.confirm_local_height(0),
-        )
-        .await?;
+        timeout(BLOCK_TICK, sandbox.state.confirm_local_height(0)).await?;
 
         {
             let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
@@ -833,16 +818,12 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
+        let mut sandbox = Sandbox::new(store.path());
 
-        let asset = reinit_prep(&sandbox).await?;
+        let asset = reinit_prep(&mut sandbox).await?;
 
         // rewind!
-        timeout(
-            Duration::from_millis(500),
-            sandbox.state.confirm_local_height(3),
-        )
-        .await??;
+        timeout(BLOCK_TICK, sandbox.state.confirm_local_height(3)).await??;
 
         {
             let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
@@ -861,32 +842,19 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
-        let mut blocks = vec![];
+        let mut sandbox = Sandbox::new(store.path());
 
-        let block = {
-            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
-                .with_instructions::<InstructionBox>([
-                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
-                    Register::account(Account::new(ALICE.to_owned())).into(),
-                ])
-                .sign(GENESIS_KEY.private_key());
-            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
-        };
-        blocks.push(block.clone());
+        let block = sandbox.create_block::<InstructionBox>([
+            Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+            Register::account(Account::new(ALICE.to_owned())).into(),
+        ]);
         timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
 
         // Create multiple blocks
         for i in 1..=3 {
-            let block = {
-                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
-                        parse!(format!("rose_{i}#wonderland")),
-                    ))])
-                    .sign(ALICE_KEY.private_key());
-                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
-            };
-            blocks.push(block.clone());
+            let block = sandbox.create_block([Register::asset_definition(
+                AssetDefinition::numeric(parse!(format!("rose_{i}#wonderland"))),
+            )]);
             timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
         }
 
@@ -911,18 +879,16 @@ mod tests {
         }
 
         // Replace top block and insert some more
-        blocks.pop();
-        timeout(TICK, sandbox.state.confirm_local_height(blocks.len())).await??;
+        sandbox.blocks.pop();
+        timeout(
+            TICK,
+            sandbox.state.confirm_local_height(sandbox.blocks.len()),
+        )
+        .await??;
         for i in 1..=3 {
-            let block = {
-                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
-                        parse!(format!("time_{i}#wonderland")),
-                    ))])
-                    .sign(ALICE_KEY.private_key());
-                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
-            };
-            blocks.push(block.clone());
+            let block = sandbox.create_block([Register::asset_definition(
+                AssetDefinition::numeric(parse!(format!("time_{i}#wonderland"))),
+            )]);
             timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
         }
 
@@ -961,51 +927,40 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
-        let mut blocks = vec![];
+        let mut sandbox = Sandbox::new(store.path());
 
-        let block = {
-            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
-                .with_instructions::<InstructionBox>([
-                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
-                    Register::account(Account::new(ALICE.to_owned())).into(),
-                ])
-                .sign(GENESIS_KEY.private_key());
-            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
-        };
-        blocks.push(block.clone());
+        let block = sandbox.create_block::<InstructionBox>([
+            Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
+            Register::account(Account::new(ALICE.to_owned())).into(),
+        ]);
         timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
 
         // Create multiple blocks
         for i in 1..=3 {
-            let block = {
-                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
-                        parse!(format!("rose_{i}#wonderland")),
-                    ))])
-                    .sign(ALICE_KEY.private_key());
-                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
-            };
-            blocks.push(block.clone());
+            let block = sandbox.create_block([Register::asset_definition(
+                AssetDefinition::numeric(parse!(format!("rose_{i}#wonderland"))),
+            )]);
             timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
         }
 
         /// Confirm one behind (prepare state to replace top block)...
-        timeout(TICK, sandbox.state.confirm_local_height(blocks.len() - 1)).await??;
+        timeout(
+            TICK,
+            sandbox.state.confirm_local_height(sandbox.blocks.len() - 1),
+        )
+        .await??;
         /// Confirm back (reset state preparation)
-        timeout(TICK, sandbox.state.confirm_local_height(blocks.len())).await??;
+        timeout(
+            TICK,
+            sandbox.state.confirm_local_height(sandbox.blocks.len()),
+        )
+        .await??;
 
         /// Continue insertion
         for i in 4..=6 {
-            let block = {
-                let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                    .with_instructions([Register::asset_definition(AssetDefinition::numeric(
-                        parse!(format!("rose_{i}#wonderland")),
-                    ))])
-                    .sign(ALICE_KEY.private_key());
-                sandbox.create_block([tx], blocks.last(), ALICE_KEY.private_key())
-            };
-            blocks.push(block.clone());
+            let block = sandbox.create_block([Register::asset_definition(
+                AssetDefinition::numeric(parse!(format!("rose_{i}#wonderland"))),
+            )]);
             timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
         }
 
@@ -1078,25 +1033,15 @@ mod tests {
         init_test_logger();
 
         let store = tempfile::tempdir()?;
-        let sandbox = Sandbox::new(store.path());
+        let mut sandbox = Sandbox::new(store.path());
 
-        let block = {
-            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), GENESIS.to_owned())
-                .with_instructions::<InstructionBox>([
-                    Register::domain(Domain::new(ALICE.domain().to_owned())).into(),
-                    Register::account(Account::new(ALICE.to_owned())).into(),
-                ])
-                .sign(GENESIS_KEY.private_key());
-            sandbox.create_block([tx], None, GENESIS_KEY.private_key())
-        };
-        timeout(BLOCK_TICK, sandbox.state.insert_block(block.clone())).await??;
-        let block = {
-            let tx = TransactionBuilder::new(sandbox.chain_id.to_owned(), ALICE.to_owned())
-                .with_instructions([Register::domain(Domain::new(parse!("whichever")))])
-                .sign(ALICE_KEY.private_key());
-            sandbox.create_block([tx], Some(&block), ALICE_KEY.private_key())
-        };
-        timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        // otherwise, soft fork kicks in
+        const MIN_BLOCKS_TO_CAUSE_REINIT: usize = 2;
+
+        for _ in 0..MIN_BLOCKS_TO_CAUSE_REINIT {
+            let block = sandbox.create_block::<InstructionBox>([]);
+            timeout(BLOCK_TICK, sandbox.state.insert_block(block)).await??;
+        }
 
         let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
 
