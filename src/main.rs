@@ -198,9 +198,18 @@ async fn serve(args: ServeArgs) {
             do_serve(repo, tel, args.base).await;
         }
     });
-    set.spawn(async move {
-        DatabaseUpdateLoop::new(repo, client, telemetry).run().await;
+
+    // There are blocking client calls + chunking which
+    // is not convenient to Send
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    std::thread::spawn(move || {
+        let fut = DatabaseUpdateLoop::new(repo, client, telemetry).run();
+        rt.block_on(fut);
     });
+
     set.join_all().await;
 }
 
@@ -408,7 +417,7 @@ mod tests {
     }
 
     async fn wait_addr_bind(addr: SocketAddr) {
-        while let Err(_) = tokio::net::TcpStream::connect(addr).await {
+        while tokio::net::TcpStream::connect(addr).await.is_err() {
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
     }

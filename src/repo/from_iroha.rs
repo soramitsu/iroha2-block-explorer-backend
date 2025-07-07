@@ -1,31 +1,55 @@
+use std::num::NonZero;
+
 use crate::repo::{AsText, SignatureDisplay};
 use chrono::DateTime;
 use eyre::Result;
 use iroha::client::Client;
 use iroha::data_model::prelude::*;
+use itertools::Itertools as _;
+use sqlx::query_builder::Separated;
 use sqlx::types::Json;
-use sqlx::{query, QueryBuilder, SqliteConnection};
-use tokio::task::spawn_blocking;
+use sqlx::{query, QueryBuilder, Sqlite, SqliteConnection};
 use tracing::debug;
+
+async fn insert_in_batches<'args, const N: usize, I, F>(
+    conn: &mut SqliteConnection,
+    table: &str,
+    fields: [&str; N],
+    tuples: I,
+    mut push_tuple: F,
+) -> Result<(), sqlx::Error>
+where
+    I: ExactSizeIterator,
+    I::Item: 'args,
+    F: FnMut(Separated<'_, 'args, Sqlite, &'static str>, I::Item),
+{
+    // https://sqlite.org/limits.html
+    // NOTE: it could be 32k, depending on version
+    const SQLITE_LIMIT: usize = 999;
+
+    for chunk in &tuples.chunks(const { SQLITE_LIMIT / N }) {
+        let mut builder = QueryBuilder::new("insert into ");
+        builder.push(table).push("(");
+        let mut sep = builder.separated(", ");
+        for i in fields {
+            sep.push(i);
+        }
+        builder.push(") ");
+        builder.push_values(chunk, &mut push_tuple);
+        builder.build().execute(&mut *conn).await?;
+    }
+
+    Ok(())
+}
 
 /// Scan Iroha into an `SQLite` database.
 #[allow(clippy::too_many_lines)]
 pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<()> {
     debug!("Scanning Iroha into an in-memory SQLite database");
 
-    debug!("Fetching data from Iroha...");
-    let client = client.clone();
-    let (domains, accounts, blocks, assets_definitions, assets, nfts) = spawn_blocking(move || {
-        let domains = client.query(FindDomains).execute_all()?;
-        let accounts = client.query(FindAccounts).execute_all()?;
-        let blocks = client.query(FindBlocks).execute_all()?;
-        let assets_definitions = client.query(FindAssetsDefinitions).execute_all()?;
-        let assets = client.query(FindAssets).execute_all()?;
-        let nfts = client.query(FindNfts).execute_all()?;
-        Ok::<_, eyre::Report>((domains, accounts, blocks, assets_definitions, assets, nfts))
-    })
-    .await??;
-    debug!("Done fetching");
+    const CHUNK: usize = 100;
+    const BLOCKS_CHUNK: usize = 5;
+    let fetch_size = FetchSize::new(NonZero::new(CHUNK as u64));
 
     query(include_str!("./create_tables.sql"))
         .execute(&mut *conn)
@@ -33,90 +57,116 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
     query("PRAGMA foreign_keys=OFF").execute(&mut *conn).await?;
     query("BEGIN TRANSACTION").execute(&mut *conn).await?;
 
-    // todo: handle empty data
-    debug!("Inserting domains & accounts...");
-    QueryBuilder::new("insert into domains(name, logo, metadata) ")
-        .push_values(&domains, |mut b, value| {
-            b.push_bind(value.id().name().as_ref())
-                .push_bind(value.logo().as_ref().map(AsText))
-                .push_bind(Json(value.metadata()));
-        })
-        .build()
-        .execute(&mut *conn)
+    for chunk in &client
+        .query(FindDomains)
+        .with_fetch_size(fetch_size)
+        .execute()?
+        .chunks(CHUNK)
+    {
+        debug!("domains chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "domains",
+            ["name", "logo", "metadata"],
+            chunk.iter(),
+            |mut b, value| {
+                b.push_bind(value.id().name().as_ref())
+                    .push_bind(value.logo().as_ref().map(AsText))
+                    .push_bind(Json(value.metadata()));
+            },
+        )
         .await?;
-    QueryBuilder::new("insert into accounts(signatory, domain, metadata) ")
-        .push_values(&accounts, |mut b, value| {
-            b.push_bind(AsText(value.signatory()))
-                .push_bind(AsText(value.id().domain()))
-                .push_bind(Json(value.metadata()));
-        })
-        .build()
-        .execute(&mut *conn)
+        insert_in_batches(
+            conn,
+            "domain_owners",
+            ["account_signatory", "account_domain", "domain"],
+            chunk.iter(),
+            |mut b, value| {
+                b.push_bind(AsText(value.owned_by().signatory()))
+                    .push_bind(AsText(value.owned_by().domain()))
+                    .push_bind(AsText(value.id()));
+            },
+        )
         .await?;
-    QueryBuilder::new("insert into domain_owners(account_signatory, account_domain, domain) ")
-        .push_values(&domains, |mut b, value| {
-            b.push_bind(AsText(value.owned_by().signatory()))
-                .push_bind(AsText(value.owned_by().domain()))
-                .push_bind(AsText(value.id()));
-        })
-        .build()
-        .execute(&mut *conn)
-        .await?;
-
-    // TODO: handle empty blocks, txs, isis
-    debug!("Inserting blocks, transactions, instructions...");
-    let mut b = QueryBuilder::new("insert into blocks(");
-    let mut sep = b.separated(", ");
-    for i in [
-        "hash",
-        "height",
-        "created_at",
-        "prev_block_hash",
-        "transactions_hash",
-    ] {
-        sep.push(i);
     }
-    b.push(") ")
-        .push_values(&blocks, |mut b, value| {
-            b.push_bind(AsText(value.hash()))
-                .push_bind(value.header().height().get() as i32)
-                .push_bind(DateTime::from_timestamp_millis(
-                    value.header().creation_time().as_millis() as i64,
-                ))
-                .push_bind(value.header().prev_block_hash().map(AsText))
-                .push_bind(value.header().transactions_hash().map(AsText));
-        })
-        .build()
-        .execute(&mut *conn)
-        .await?;
 
-    let mut b = QueryBuilder::new("insert into transactions(");
-    let mut sep = b.separated(", ");
-    for i in &[
-        "hash",
-        "block",
-        "created_at",
-        "time_to_live_ms",
-        "authority_signatory",
-        "authority_domain",
-        "signature",
-        "nonce",
-        "metadata",
-        "error",
-        "executable",
-    ] {
-        sep.push(i);
+    for chunk in &client.query(FindAccounts).execute()?.chunks(CHUNK) {
+        debug!("accounts chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "accounts",
+            ["signatory", "domain", "metadata"],
+            chunk.iter(),
+            |mut b, value| {
+                b.push_bind(AsText(value.signatory()))
+                    .push_bind(AsText(value.id().domain()))
+                    .push_bind(Json(value.metadata()));
+            },
+        )
+        .await?;
     }
-    b.push(") ")
-        .push_values(
-            blocks.iter().flat_map(|block| {
-                block
-                    .transactions()
-                    .enumerate()
-                    .map(move |(i, tx)| (block, tx, i))
-            }),
+
+    for chunk in &client
+        .query(FindBlocks)
+        .with_fetch_size(FetchSize::new(NonZero::new(BLOCKS_CHUNK as u64)))
+        .execute()?
+        .chunks(BLOCKS_CHUNK)
+    {
+        debug!("blocks chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "blocks",
+            [
+                "hash",
+                "height",
+                "created_at",
+                "prev_block_hash",
+                "transactions_hash",
+            ],
+            chunk.iter(),
+            |mut b, value| {
+                b.push_bind(AsText(value.hash()))
+                    .push_bind(value.header().height().get() as i32)
+                    .push_bind(DateTime::from_timestamp_millis(
+                        value.header().creation_time().as_millis() as i64,
+                    ))
+                    .push_bind(value.header().prev_block_hash().map(AsText))
+                    .push_bind(value.header().transactions_hash().map(AsText));
+            },
+        )
+        .await?;
+        insert_in_batches(
+            conn,
+            "transactions",
+            [
+                "hash",
+                "block",
+                "created_at",
+                "time_to_live_ms",
+                "authority_signatory",
+                "authority_domain",
+                "signature",
+                "nonce",
+                "metadata",
+                "error",
+                "executable",
+            ],
+            chunk
+                .iter()
+                .flat_map(|block| {
+                    block
+                        .transactions()
+                        .enumerate()
+                        .map(move |(i, tx)| (block, tx, i))
+                })
+                // FIXME: have to collect to avoid type pain
+                .collect::<Vec<_>>()
+                .iter(),
             |mut b, (block, tx, tx_index)| {
-                let error = block.error(tx_index);
+                let error = block.error(*tx_index);
                 let height = block.header().height();
 
                 b.push_bind(AsText(tx.hash()))
@@ -137,44 +187,55 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     });
             },
         )
-        .build()
-        .execute(&mut *conn)
         .await?;
-
-    QueryBuilder::new("insert into instructions(transaction_hash, value) ")
-        .push_values(
-            blocks.iter().flat_map(|block| {
-                block
-                    .transactions()
-                    .filter_map(|tx| match tx.instructions() {
-                        Executable::Instructions(isi_vec) => {
-                            Some(isi_vec.iter().map(|isi| (tx.hash(), isi)))
-                        }
-                        Executable::Wasm(_) => None,
-                    })
-                    .flatten()
-            }),
+        insert_in_batches(
+            conn,
+            "instructions",
+            ["transaction_hash", "value"],
+            chunk
+                .iter()
+                .flat_map(|block| {
+                    block
+                        .transactions()
+                        .filter_map(|tx| match tx.instructions() {
+                            Executable::Instructions(isi_vec) => {
+                                Some(isi_vec.iter().map(|isi| (tx.hash(), isi)))
+                            }
+                            Executable::Wasm(_) => None,
+                        })
+                        .flatten()
+                })
+                .collect::<Vec<_>>()
+                .iter(),
             |mut b, (tx_hash, value)| {
                 b.push_bind(AsText(tx_hash)).push_bind(Json(value));
             },
         )
-        .build()
-        .execute(&mut *conn)
         .await?;
+    }
 
-    if !assets_definitions.is_empty() {
-        debug!("Inserting assets...");
-        let mut b = QueryBuilder::new("insert into asset_definitions(");
-        b.separated(", ")
-            .push("name")
-            .push("domain")
-            .push("metadata")
-            .push("mintable")
-            .push("owned_by_signatory")
-            .push("owned_by_domain")
-            .push("logo");
-        b.push(") ")
-            .push_values(&assets_definitions, |mut b, value| {
+    for chunk in &client
+        .query(FindAssetsDefinitions)
+        .with_fetch_size(fetch_size)
+        .execute()?
+        .chunks(CHUNK)
+    {
+        debug!("asset definitions chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "asset_definitions",
+            [
+                "name",
+                "domain",
+                "metadata",
+                "mintable",
+                "owned_by_signatory",
+                "owned_by_domain",
+                "logo",
+            ],
+            chunk.iter(),
+            |mut b, value| {
                 b.push_bind(AsText(value.id().name()))
                     .push_bind(AsText(value.id().domain()))
                     .push_bind(Json(value.metadata()))
@@ -186,49 +247,69 @@ pub async fn scan_into(client: &Client, conn: &mut SqliteConnection) -> Result<(
                     .push_bind(AsText(value.owned_by().signatory()))
                     .push_bind(AsText(value.owned_by().domain()))
                     .push_bind(value.logo().as_ref().map(AsText));
-            })
-            .build()
-            .execute(&mut *conn)
-            .await?;
-        let mut b = QueryBuilder::new("insert into assets(");
-        b.separated(", ")
-            .push("definition_name")
-            .push("definition_domain")
-            .push("owned_by_signatory")
-            .push("owned_by_domain")
-            .push("value");
-        b.push(") ")
-            .push_values(&assets, |mut b, value| {
+            },
+        )
+        .await?;
+    }
+
+    for chunk in &client
+        .query(FindAssets)
+        .with_fetch_size(fetch_size)
+        .execute()?
+        .chunks(CHUNK)
+    {
+        debug!("assets chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "assets",
+            [
+                "definition_name",
+                "definition_domain",
+                "owned_by_signatory",
+                "owned_by_domain",
+                "value",
+            ],
+            chunk.iter(),
+            |mut b, value| {
                 b.push_bind(AsText(value.id().definition().name()))
                     .push_bind(AsText(value.id().definition().domain()))
                     .push_bind(AsText(value.id().account().signatory()))
                     .push_bind(AsText(value.id().account().domain()))
                     .push_bind(Json(value.value()));
-            })
-            .build()
-            .execute(&mut *conn)
-            .await?;
+            },
+        )
+        .await?;
     }
-    if !nfts.is_empty() {
-        debug!("Inserting NFTs...");
-        let mut b = QueryBuilder::new("insert into nfts(");
-        b.separated(", ")
-            .push("name")
-            .push("domain")
-            .push("content")
-            .push("owned_by_signatory")
-            .push("owned_by_domain");
-        b.push(") ")
-            .push_values(&nfts, |mut b, value| {
+
+    for chunk in &client
+        .query(FindNfts)
+        .with_fetch_size(fetch_size)
+        .execute()?
+        .chunks(CHUNK)
+    {
+        debug!("nfts chunk");
+        let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+        insert_in_batches(
+            conn,
+            "nfts",
+            [
+                "name",
+                "domain",
+                "content",
+                "owned_by_signatory",
+                "owned_by_domain",
+            ],
+            chunk.iter(),
+            |mut b, value| {
                 b.push_bind(AsText(value.id().name()))
                     .push_bind(AsText(value.id().domain()))
                     .push_bind(Json(value.content()))
                     .push_bind(AsText(value.owned_by().signatory()))
                     .push_bind(AsText(value.owned_by().domain()));
-            })
-            .build()
-            .execute(&mut *conn)
-            .await?;
+            },
+        )
+        .await?;
     }
 
     query("COMMIT").execute(&mut *conn).await?;
@@ -267,7 +348,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn create_test_dump() -> Result<()> {
-        // Uncomment for troubleshooting
+        // NOTE: Uncomment for troubleshooting
         // crate::init_test_logger();
 
         let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_dump_db.sqlite");
@@ -293,7 +374,7 @@ mod tests {
         let client_wrap = ClientWrap::from(client.clone());
 
         debug!("Filling Iroha...");
-        spawn_blocking(move || fill_iroha(&client)).await??;
+        tokio::task::spawn_blocking(move || fill_iroha(&client)).await??;
 
         if db_path.exists() {
             debug!("Removing previous DB file");
