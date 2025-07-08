@@ -103,7 +103,7 @@ impl QueryExecutor {
             let iter: Box<dyn Iterator<Item = Arc<SignedBlock>>> = if let Some(height) = by_height {
                 Box::new(view.all_blocks(height).take(1))
             } else {
-                Box::new(view.all_blocks(nonzero!(1_usize)))
+                Box::new(view.all_blocks(nonzero!(1_usize)).rev())
             };
 
             iter.flat_map(BlockTransactionIter::new).filter(|tx_ref| {
@@ -1084,6 +1084,74 @@ mod tests {
         expect![[r#"
             [
               "BURN `25` FROM `rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland`"
+            ]"#]].assert_json_eq(&page.items);
+    }
+
+    #[tokio::test]
+    async fn transactions() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .transactions_index(
+                &schema::TransactionsIndexFilter {
+                    authority: None,
+                    status: None,
+                    block: None,
+                },
+                &pagination(None, 20),
+            )
+            .unwrap()
+            .map(|tx| format!("{:?} {:?} {:?}", tx.block, tx.created_at, tx.status));
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 20,
+                "total_pages": 1,
+                "total_items": 12
+              },
+              "items": [
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Rejected",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Rejected",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+                "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+                "BigInt(3) TimeStamp(1970-01-01T00:00:17.100Z) Committed",
+                "BigInt(2) TimeStamp(1970-01-01T00:00:14Z) Committed",
+                "BigInt(2) TimeStamp(1970-01-01T00:00:07Z) Committed",
+                "BigInt(2) TimeStamp(1970-01-01T00:00:05Z) Committed",
+                "BigInt(1) TimeStamp(1970-01-01T00:00:00Z) Committed"
+              ]
+            }"#]]
+        .assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn transactions_block_status() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .transactions_index(
+                &schema::TransactionsIndexFilter {
+                    authority: None,
+                    status: Some(schema::TransactionStatus::Committed),
+                    block: Some(5),
+                },
+                &pagination(None, 20),
+            )
+            .unwrap()
+            .map(|tx| format!("{:?} {:?} {:?}", tx.block, tx.created_at, tx.status));
+
+        expect![[r#"
+            [
+              "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+              "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+              "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+              "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
+              "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed"
             ]"#]].assert_json_eq(&page.items);
     }
 }
