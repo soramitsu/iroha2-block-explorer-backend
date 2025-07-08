@@ -41,19 +41,19 @@ mod iroha {
 )]
 pub struct Domain {
     /// Domain ID
-    id: DomainId,
+    pub id: DomainId,
     /// Domain logo path
-    logo: Option<IpfsPath>,
+    pub logo: Option<IpfsPath>,
     /// Domain metadata
-    metadata: Metadata,
+    pub metadata: Metadata,
     /// Domain's owner
-    owned_by: AccountId,
+    pub owned_by: AccountId,
     /// Total number of accounts in this domain
-    accounts: usize,
+    pub accounts: usize,
     /// Total number of assets _definitions_ in this domain
-    assets: usize,
+    pub assets: usize,
     /// Total number of NFTs in this domain
-    nfts: usize,
+    pub nfts: usize,
 }
 
 // impl<W: WorldReadOnly> From<query::DomainWorldRef<'_, W>> for Domain {
@@ -199,7 +199,7 @@ pub struct Metadata(pub iroha::Metadata);
 /// IPFS path
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = String)]
-pub struct IpfsPath(String);
+pub struct IpfsPath(pub String);
 
 pub struct ScaleBinary<T>(T);
 
@@ -757,19 +757,19 @@ impl InstructionKind {
 #[derive(Serialize, ToSchema)]
 pub struct Block {
     /// Number of blocks in the chain including this block
-    height: BigInt,
+    pub height: BigInt,
     /// Block hash
-    hash: Hash,
+    pub hash: Hash,
     /// Hash of the previous block in the chain
-    prev_block_hash: Option<Hash>,
+    pub prev_block_hash: Option<Hash>,
     /// Hash of merkle tree root of transactions' hashes.
     ///
     /// The block is _empty_ if this is `null`.
-    transactions_hash: Option<Hash>,
+    pub transactions_hash: Option<Hash>,
     /// Timestamp of creation
-    created_at: TimeStamp,
-    transactions_total: u32,
-    transactions_rejected: u32,
+    pub created_at: TimeStamp,
+    pub transactions_total: u32,
+    pub transactions_rejected: u32,
 }
 
 impl From<&iroha_data_model::block::SignedBlock> for Block {

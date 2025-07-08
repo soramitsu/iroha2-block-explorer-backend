@@ -133,7 +133,7 @@ impl State {
 
         main_sup.monitor(Child::new(
             tokio::spawn(spawn_os_thread_as_future(
-                std::thread::Builder::new().name("kura".to_owned()),
+                std::thread::Builder::new().name("state_actor".to_owned()),
                 move || {
                     rt.block_on(async move {
                         tokio::spawn(wrap_supervisor("kura", kura_sup, shutdown_kura_complete.0));
@@ -323,7 +323,7 @@ impl Actor {
             // at this point, concurrent reads are OK
             core::mem::drop(write_guard);
 
-            play_all_blocks(&kura, &state, &mut self.state_extras);
+            replay_all_blocks(&kura, &state, &mut self.state_extras);
             self.send_metrics().await;
         }
 
@@ -399,15 +399,10 @@ impl Actor {
         if block_height.get() == 1 {
             // genesis - recreate State
 
-            // store immediately
-            let block = Arc::new(block);
-            kura.store_block(block.clone());
-
             drop(read_guard);
             let mut write_guard = self.lock.write().await;
 
-            let (state, mut sup) =
-                init_state(kura.clone(), infer_genesis_account(&*block).unwrap());
+            let (state, mut sup) = init_state(kura.clone(), infer_genesis_account(&block).unwrap());
             sup.shutdown_on_external_signal(self.shutdown_internal.clone());
             let state = Arc::new(state);
             // NOTE: no need to wait for previous state "shutdown" - it is a dummy
@@ -421,7 +416,13 @@ impl Actor {
             // at this point, concurrent reads (i.e. queries) are OK
             drop(write_guard);
 
-            play_all_blocks(&kura, &state, &mut self.state_extras);
+            replay_all_blocks(&kura, &state, &mut self.state_extras);
+
+            let state_block = state.block(block.header());
+            let block: SignedBlock = play_block(block, state_block).into();
+            kura.store_block(Arc::new(block));
+            self.state_extras.metrics.reflect_state(&state.view());
+            // TODO: update block time
             self.send_metrics().await;
         } else {
             // add block to Kura & State
@@ -440,9 +441,13 @@ impl Actor {
             }
 
             // OK: block is valid, apply
-            let block = Arc::new(block);
-            kura.store_block(block.clone());
-            play_all_blocks(&kura, &read_guard.state, &mut self.state_extras);
+            let state_block = read_guard.state.block(block.header());
+            let block: SignedBlock = play_block(block, state_block).into();
+            kura.store_block(Arc::new(block));
+            self.state_extras
+                .metrics
+                .reflect_state(&read_guard.state.view());
+            // TODO: update block time
             self.send_metrics().await;
         }
 
@@ -478,7 +483,13 @@ impl IncrementalMetrics {
     }
 }
 
-fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras) {
+fn errors_equal(block1: &SignedBlock, block2: &SignedBlock) -> bool {
+    let errs1 = block1.errors();
+    let errs2 = block2.errors();
+    errs1.len() == errs2.len() && errs1.zip(errs2).all(|(a, b)| a == b)
+}
+
+fn replay_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras) {
     let state_height = state.view().height();
     let kura_height = kura.blocks_count();
     let mut prev_creation_time = NonZero::new(state_height)
@@ -491,7 +502,14 @@ fn play_all_blocks(kura: &Arc<Kura>, state: &CoreState, extras: &mut StateExtras
     }) {
         let state_block = state.block(block.header());
         // FIXME: avoid ownership in play?
-        let _committed = play_block((*block).clone(), state_block);
+        let committed: SignedBlock = play_block((*block).clone(), state_block).into();
+
+        if !errors_equal(&*block, &committed) {
+            #[cfg(debug_assertions)]
+            panic!("Bug: errors differ");
+            #[cfg(not(debug_assertions))]
+            tracing::warn!("Committed block errors differ from stored block errors");
+        }
 
         let creation_time = block.header().creation_time();
         if let Some(prev) = prev_creation_time {
@@ -616,7 +634,8 @@ mod tests {
     use iroha_futures::supervisor;
     use iroha_primitives::time::{MockTimeHandle, TimeSource};
     use iroha_test_samples::{
-        gen_account_in, ALICE_ID as ALICE, ALICE_KEYPAIR as ALICE_KEY, PEER_KEYPAIR as PEER_KEY,
+        gen_account_in, ALICE_ID as ALICE, ALICE_KEYPAIR as ALICE_KEY, CARPENTER_ID as CARPENTER,
+        CARPENTER_KEYPAIR as CARPENTER_KEY, PEER_KEYPAIR as PEER_KEY,
         SAMPLE_GENESIS_ACCOUNT_ID as GENESIS, SAMPLE_GENESIS_ACCOUNT_KEYPAIR as GENESIS_KEY,
     };
     use mv::storage::StorageReadOnly;
@@ -1145,5 +1164,26 @@ mod tests {
     #[ignore]
     async fn telemetry_being_full_does_not_hang_state() -> eyre::Result<()> {
         todo!()
+    }
+
+    #[tokio::test]
+    async fn block_errors_are_written() -> eyre::Result<()> {
+        init_test_logger();
+
+        let store = tempfile::tempdir()?;
+        let mut sandbox = Sandbox::new(store.path());
+
+        let block = sandbox.create_block([
+            // non-existent asset
+            Mint::asset_numeric(3u32, parse!(format!("time##{}", *ALICE))),
+        ]);
+        timeout(TICK, sandbox.state.insert_block(block)).await??;
+
+        let guard = timeout(TICK, sandbox.state.acquire_guard()).await?;
+        let block = guard.kura().get_block(nonzero!(1usize)).unwrap();
+
+        assert_eq!(block.errors().len(), 1);
+
+        Ok(())
     }
 }

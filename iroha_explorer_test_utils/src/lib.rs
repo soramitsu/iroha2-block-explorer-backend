@@ -1,3 +1,5 @@
+pub mod blockchain;
+
 use serde::Serialize;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 

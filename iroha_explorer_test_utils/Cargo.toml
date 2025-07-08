@@ -6,6 +6,10 @@ description = "Common test utils"
 
 [dependencies]
 expect-test = { workspace = true }
+iroha_core = { workspace = true }
+iroha_data_model = { workspace = true }
+iroha_primitives = { workspace = true }
+iroha_test_samples = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }

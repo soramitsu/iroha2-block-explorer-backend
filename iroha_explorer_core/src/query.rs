@@ -583,18 +583,328 @@ impl From<BlockTransactionRef> for schema::TransactionDetailed {
 
 impl<W: WorldReadOnly> From<DomainWorldRef<'_, W>> for schema::Domain {
     fn from(value: DomainWorldRef<'_, W>) -> Self {
-        todo!()
-        // Self {
-        //     id: DomainId(value.id().clone()),
-        //     logo: value.logo().as_ref().map(|x| IpfsPath(x.to_string())),
-        //     metadata: Metadata(value.metadata().clone()),
-        //     owned_by: AccountId(value.owned_by().clone()),
-        //     accounts: value.accounts(),
-        //     assets: value.assets(),
-        //     nfts: value.nfts(),
-        // }
+        Self {
+            id: schema::DomainId(value.id().to_owned()),
+            logo: value
+                .logo()
+                .as_ref()
+                .map(|x| schema::IpfsPath(x.to_string())),
+            metadata: schema::Metadata(value.metadata.to_owned()),
+            owned_by: schema::AccountId(value.owned_by().to_owned()),
+            accounts: value.accounts(),
+            assets: value.assets(),
+            nfts: value.nfts(),
+        }
     }
 }
 
 // TODO: test condition: state is re-initialising (kura is shut down and started again) while query
 // is holding state view.
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::state::State;
+
+    use super::*;
+    use expect_test::expect;
+    use eyre::Result;
+    use iroha_explorer_telemetry::Telemetry;
+    use iroha_explorer_test_utils::blockchain::{ALICE, CARPENTER, GENESIS};
+    use iroha_explorer_test_utils::{init_test_logger, ExpectExt as _};
+    use iroha_futures::supervisor::ShutdownSignal;
+    use iroha_primitives::time::TimeSource;
+    use iroha_test_samples::{ALICE_ID, SAMPLE_GENESIS_ACCOUNT_ID};
+    use tempfile::TempDir;
+    use tokio::sync::mpsc;
+
+    struct Sandbox {
+        dir: TempDir,
+        state: State,
+    }
+
+    impl Sandbox {
+        async fn new() -> Self {
+            // TODO: use in-memory storage
+            let dir = TempDir::new().unwrap();
+
+            let (state, sup_fut) = State::new(
+                dir.path().to_path_buf(),
+                Telemetry::new_dummy(mpsc::channel(1).0),
+                ShutdownSignal::new(),
+            );
+            let sup_join = tokio::spawn(sup_fut);
+
+            for block in iroha_explorer_test_utils::blockchain::sample() {
+                state.insert_block(block.clone()).await.unwrap();
+            }
+
+            Self { dir, state }
+        }
+
+        async fn query(&self) -> QueryExecutor {
+            QueryExecutor::new(self.state.acquire_guard().await)
+        }
+    }
+
+    fn pagination(page: Option<usize>, per_page: usize) -> schema::PaginationQueryParams {
+        schema::PaginationQueryParams {
+            page: page.map(|x| schema::PositiveInteger(NonZero::new(x).unwrap())),
+            per_page: schema::PositiveInteger(NonZero::new(per_page).unwrap()),
+        }
+    }
+
+    #[tokio::test]
+    async fn all_blocks() {
+        let sandbox = Sandbox::new().await;
+
+        let page = sandbox
+            .query()
+            .await
+            .blocks_index(&pagination(None, 10))
+            .unwrap();
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_pages": 1,
+                "total_items": 5
+              },
+              "items": [
+                {
+                  "height": 5,
+                  "hash": "75657FE498E07AABD589B0D92EE4E1A5D4B89ACED673A43FD3C76EFF87C3C6F7",
+                  "prev_block_hash": "50EA8FFF8C75C7393B3E38E0591883EC53EE5E4424615EE707CF7343216635C9",
+                  "transactions_hash": "7C5455612C0C6BA29BDAA50FF1F35B26785B6653AEEE3BA1B9AF23473234CB69",
+                  "created_at": "1970-01-01T00:00:39.101Z",
+                  "transactions_total": 7,
+                  "transactions_rejected": 2
+                },
+                {
+                  "height": 4,
+                  "hash": "50EA8FFF8C75C7393B3E38E0591883EC53EE5E4424615EE707CF7343216635C9",
+                  "prev_block_hash": "B3B8ABCE1A2F040AA243881B582AFF205CD2BECAFAE42A4867F2795DE6ED1ABB",
+                  "transactions_hash": null,
+                  "created_at": "1970-01-01T00:00:19.100Z",
+                  "transactions_total": 0,
+                  "transactions_rejected": 0
+                },
+                {
+                  "height": 3,
+                  "hash": "B3B8ABCE1A2F040AA243881B582AFF205CD2BECAFAE42A4867F2795DE6ED1ABB",
+                  "prev_block_hash": "D2CCDFB950818B8529900468B947C46D2603A8BD90B6FEE370A5476E5098E8C5",
+                  "transactions_hash": "C313C434B5637C054F4014CC77B1793F03B5C977E52CA1015036EF66ED112B41",
+                  "created_at": "1970-01-01T00:00:17.101Z",
+                  "transactions_total": 1,
+                  "transactions_rejected": 0
+                },
+                {
+                  "height": 2,
+                  "hash": "D2CCDFB950818B8529900468B947C46D2603A8BD90B6FEE370A5476E5098E8C5",
+                  "prev_block_hash": "7D6BA357E8F55A27AFF9B47D67D93BBAE006D9EA5CDBC102A147BF446DAF3D41",
+                  "transactions_hash": "E7E1248B19EB6FFD7ABCACBAE6EAF8D76295807F5697758515EEDEAB71CEA36B",
+                  "created_at": "1970-01-01T00:00:14.100Z",
+                  "transactions_total": 3,
+                  "transactions_rejected": 0
+                },
+                {
+                  "height": 1,
+                  "hash": "7D6BA357E8F55A27AFF9B47D67D93BBAE006D9EA5CDBC102A147BF446DAF3D41",
+                  "prev_block_hash": null,
+                  "transactions_hash": "F6AC949C6F976E4409511F84B8625C053C5728A0B15A34426318F748E2E10FBF",
+                  "created_at": "1970-01-01T00:00:00.001Z",
+                  "transactions_total": 1,
+                  "transactions_rejected": 0
+                }
+              ]
+            }"#]].assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn blocks_pages() {
+        let sandbox = Sandbox::new().await;
+
+        let page = sandbox
+            .query()
+            .await
+            .blocks_index(&pagination(None, 2))
+            .unwrap()
+            .map(|x| x.height);
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 3,
+                "per_page": 2,
+                "total_pages": 3,
+                "total_items": 5
+              },
+              "items": [
+                5,
+                4,
+                3
+              ]
+            }"#]]
+        .assert_json_eq(&page);
+
+        let page = sandbox
+            .query()
+            .await
+            .blocks_index(&pagination(Some(3), 2))
+            .unwrap()
+            .map(|x| x.height);
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 3,
+                "per_page": 2,
+                "total_pages": 3,
+                "total_items": 5
+              },
+              "items": [
+                5
+              ]
+            }"#]]
+        .assert_json_eq(&page);
+
+        let page = sandbox
+            .query()
+            .await
+            .blocks_index(&pagination(Some(2), 2))
+            .unwrap()
+            .map(|x| x.height);
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 2,
+                "per_page": 2,
+                "total_pages": 3,
+                "total_items": 5
+              },
+              "items": [
+                4,
+                3
+              ]
+            }"#]]
+        .assert_json_eq(&page);
+
+        let page = sandbox
+            .query()
+            .await
+            .blocks_index(&pagination(Some(1), 2))
+            .unwrap()
+            .map(|x| x.height);
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 2,
+                "total_pages": 3,
+                "total_items": 5
+              },
+              "items": [
+                2,
+                1
+              ]
+            }"#]]
+        .assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn domains() {
+        let sandbox = Sandbox::new().await;
+
+        let page = sandbox
+            .query()
+            .await
+            .domains_index(None, &pagination(None, 10));
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_pages": 1,
+                "total_items": 3
+              },
+              "items": [
+                {
+                  "id": "garden_of_live_flowers",
+                  "logo": "/ipns/QmSrPmbaUKA3ZodhzPWZnpFgcPMFWF4QsxXbkWfEptTBJd",
+                  "metadata": {
+                    "important_data": [
+                      "secret-code",
+                      1,
+                      2,
+                      3
+                    ],
+                    "very_important_data": {
+                      "very": {
+                        "important": {
+                          "data": {
+                            "is": {
+                              "deep": {
+                                "inside": 42
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "owned_by": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+                  "accounts": 1,
+                  "assets": 0,
+                  "nfts": 1
+                },
+                {
+                  "id": "genesis",
+                  "logo": null,
+                  "metadata": {},
+                  "owned_by": "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
+                  "accounts": 1,
+                  "assets": 0,
+                  "nfts": 0
+                },
+                {
+                  "id": "wonderland",
+                  "logo": null,
+                  "metadata": {},
+                  "owned_by": "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
+                  "accounts": 1,
+                  "assets": 4,
+                  "nfts": 0
+                }
+              ]
+            }"#]].assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn domains_by_owner() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query.domains_index(
+            Some(&schema::AccountId(GENESIS.to_owned())),
+            &pagination(None, 10),
+        );
+        assert_eq!(page.pagination.total_items, 2);
+
+        let page = query.domains_index(
+            Some(&schema::AccountId(ALICE.to_owned())),
+            &pagination(None, 10),
+        );
+        assert_eq!(page.pagination.total_items, 1);
+
+        let page = query.domains_index(
+            Some(&schema::AccountId(CARPENTER.to_owned())),
+            &pagination(None, 10),
+        );
+        assert_eq!(page.pagination.total_items, 0);
+    }
+}

@@ -3033,6 +3033,10 @@ name = "iroha_explorer_test_utils"
 version = "0.2.1"
 dependencies = [
  "expect-test",
+ "iroha_core",
+ "iroha_data_model",
+ "iroha_primitives",
+ "iroha_test_samples",
  "serde",
  "serde_json",
  "tracing-subscriber",
