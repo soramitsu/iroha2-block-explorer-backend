@@ -86,7 +86,7 @@ pub struct Account {
 }
 
 /// Account ID. Represented as `signatory@domain`.
-#[derive(ToSchema, Serialize, Deserialize)]
+#[derive(ToSchema, Serialize, Deserialize, Debug)]
 #[schema(
     example = "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
     value_type = String
@@ -237,6 +237,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct ReprScaleJson<T>(pub T);
 
 impl<T> PartialSchema for ReprScaleJson<T> {
@@ -317,6 +318,12 @@ impl From<u32> for BigInt {
 impl From<u64> for BigInt {
     fn from(value: u64) -> Self {
         Self(value as u128)
+    }
+}
+
+impl From<NonZero<u64>> for BigInt {
+    fn from(value: NonZero<u64>) -> Self {
+        Self::from(value.get())
     }
 }
 
@@ -534,7 +541,15 @@ impl From<DateTime<Utc>> for TimeStamp {
 
 impl TimeStamp {
     pub fn from_duration_timestamp(value: std::time::Duration) -> Self {
-        todo!()
+        let datetime = DateTime::from_timestamp(
+            value
+                .as_secs()
+                .try_into()
+                .expect("not handling invalid timestamps"),
+            value.subsec_nanos(),
+        )
+        .expect("not handling invalid timestamps");
+        Self(datetime)
     }
 }
 
@@ -676,18 +691,18 @@ impl From<&iroha::Executable> for Executable {
 }
 
 /// Iroha Special Instruction (ISI)
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Debug)]
 #[schema(bound = "")]
 pub struct Instruction {
     /// Kind of instruction.
-    kind: InstructionKind,
+    pub kind: InstructionKind,
     #[schema(schema_with = isi_box_schema)]
-    r#box: ReprScaleJson<iroha::InstructionBox>,
-    transaction_hash: Hash,
-    transaction_status: TransactionStatus,
-    block: BigInt,
-    authority: AccountId,
-    created_at: TimeStamp,
+    pub r#box: ReprScaleJson<iroha::InstructionBox>,
+    pub transaction_hash: Hash,
+    pub transaction_status: TransactionStatus,
+    pub block: BigInt,
+    pub authority: AccountId,
+    pub created_at: TimeStamp,
 }
 
 fn isi_box_schema() -> impl Into<RefOr<Schema>> {
@@ -753,6 +768,27 @@ impl InstructionKind {
     }
 }
 
+impl From<&iroha::InstructionBox> for InstructionKind {
+    fn from(value: &iroha::InstructionBox) -> Self {
+        match value {
+            iroha::InstructionBox::Register(_) => Self::Register,
+            iroha::InstructionBox::Unregister(_) => Self::Unregister,
+            iroha::InstructionBox::Mint(_) => Self::Mint,
+            iroha::InstructionBox::Burn(_) => Self::Burn,
+            iroha::InstructionBox::Transfer(_) => Self::Transfer,
+            iroha::InstructionBox::SetKeyValue(_) => Self::SetKeyValue,
+            iroha::InstructionBox::RemoveKeyValue(_) => Self::RemoveKeyValue,
+            iroha::InstructionBox::Grant(_) => Self::Grant,
+            iroha::InstructionBox::Revoke(_) => Self::Revoke,
+            iroha::InstructionBox::ExecuteTrigger(_) => Self::ExecuteTrigger,
+            iroha::InstructionBox::SetParameter(_) => Self::SetParameter,
+            iroha::InstructionBox::Upgrade(_) => Self::Upgrade,
+            iroha::InstructionBox::Log(_) => Self::Log,
+            iroha::InstructionBox::Custom(_) => Self::Custom,
+        }
+    }
+}
+
 /// Block
 #[derive(Serialize, ToSchema)]
 pub struct Block {
@@ -792,7 +828,7 @@ impl From<&iroha_data_model::block::SignedBlock> for Block {
 }
 
 /// Hex-encoded hash
-#[derive(Deserialize, Serialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
 #[schema(value_type = String, example = "1B0A52DBDC11EAE39DD0524AD5146122351527CE00D161EA8263EA7ADE4164AF")]
 pub struct Hash(pub iroha::Hash);
 
@@ -803,7 +839,7 @@ impl<T> From<iroha::HashOf<T>> for Hash {
 }
 
 /// Hex-encoded signature
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Debug)]
 #[schema(
     value_type = Object,
     example = json!({

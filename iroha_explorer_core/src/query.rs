@@ -193,7 +193,7 @@ impl QueryExecutor {
                     if let Some(height) = filter.block {
                         Box::new(view.all_blocks(*height).take(1))
                     } else {
-                        Box::new(view.all_blocks(nonzero!(1usize)))
+                        Box::new(view.all_blocks(nonzero!(1usize)).rev())
                     };
 
                 let iter = iter_blocks
@@ -434,12 +434,18 @@ where
 }
 
 /// Iterates transactions of a block in reverse order
-struct BlockTransactionIter(Arc<SignedBlock>, usize);
+struct BlockTransactionIter {
+    block: Arc<SignedBlock>,
+    pointer: usize,
+}
 
 impl BlockTransactionIter {
     fn new(block: Arc<SignedBlock>) -> Self {
         let n_transactions = block.transactions_vec().len();
-        Self(block, n_transactions)
+        Self {
+            block,
+            pointer: n_transactions,
+        }
     }
 }
 
@@ -447,9 +453,12 @@ impl Iterator for BlockTransactionIter {
     type Item = BlockTransactionRef;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.1 != 0 {
-            self.1 -= 1;
-            return Some(BlockTransactionRef(Arc::clone(&self.0), self.1));
+        if self.pointer != 0 {
+            self.pointer -= 1;
+            return Some(BlockTransactionRef {
+                block: Arc::clone(&self.block),
+                index: self.pointer,
+            });
         }
 
         None
@@ -457,7 +466,10 @@ impl Iterator for BlockTransactionIter {
 }
 
 #[derive(Clone)]
-pub struct BlockTransactionRef(Arc<SignedBlock>, usize);
+pub struct BlockTransactionRef {
+    block: Arc<SignedBlock>,
+    index: usize,
+}
 
 impl Deref for BlockTransactionRef {
     type Target = SignedTransaction;
@@ -469,11 +481,11 @@ impl Deref for BlockTransactionRef {
 
 impl BlockTransactionRef {
     pub fn block(&self) -> &SignedBlock {
-        &self.0
+        &self.block
     }
 
     pub fn error(&self) -> Option<&TransactionRejectionReason> {
-        self.0.error(self.1)
+        self.block.error(self.index)
     }
 
     pub fn status(&self) -> schema::TransactionStatus {
@@ -485,17 +497,14 @@ impl BlockTransactionRef {
     }
 
     pub fn transaction(&self) -> &SignedTransaction {
-        &self.0.transactions_vec()[self.1]
+        &self.block.transactions_vec()[self.index]
     }
 
     pub fn instructions_iter(&self) -> Option<BlockTransactionInstructionIter> {
-        if matches!(
-            self.transaction().instructions(),
-            Executable::Instructions(_)
-        ) {
+        if let Executable::Instructions(isi) = self.transaction().instructions() {
             Some(BlockTransactionInstructionIter {
                 tx_ref: self.clone(),
-                index: 0,
+                pointer: isi.len(),
             })
         } else {
             None
@@ -503,37 +512,58 @@ impl BlockTransactionRef {
     }
 }
 
-struct BlockTransactionInstructionIter {
+pub struct BlockTransactionInstructionIter {
     tx_ref: BlockTransactionRef,
-    index: usize,
+    pointer: usize,
 }
 
 impl Iterator for BlockTransactionInstructionIter {
     type Item = BlockTransactionInstructionRef;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        if self.pointer == 0 {
+            None
+        } else {
+            self.pointer -= 1;
+            Some(BlockTransactionInstructionRef {
+                tx_ref: self.tx_ref.clone(),
+                index: self.pointer,
+            })
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct BlockTransactionInstructionRef {
-    block: Arc<SignedBlock>,
-    tx: usize,
-    isi: usize,
+    tx_ref: BlockTransactionRef,
+    index: usize,
 }
 
 impl Deref for BlockTransactionInstructionRef {
     type Target = InstructionBox;
 
     fn deref(&self) -> &Self::Target {
-        todo!()
+        let Executable::Instructions(isis) = self.tx_ref.transaction().instructions() else {
+            unreachable!()
+        };
+        &isis[self.index]
     }
 }
 
 impl From<BlockTransactionInstructionRef> for schema::Instruction {
     fn from(value: BlockTransactionInstructionRef) -> Self {
-        todo!()
+        let tx = value.tx_ref.transaction();
+        let isi = value.deref();
+
+        iroha_explorer_schema::Instruction {
+            kind: schema::InstructionKind::from(isi),
+            r#box: schema::ReprScaleJson(isi.to_owned()),
+            transaction_hash: schema::Hash(value.tx_ref.hash().into()),
+            transaction_status: value.tx_ref.status(),
+            block: value.tx_ref.block().header().height().into(),
+            authority: schema::AccountId(value.tx_ref.authority().to_owned()),
+            created_at: schema::TimeStamp::from_duration_timestamp(value.tx_ref.creation_time()),
+        }
     }
 }
 
@@ -906,5 +936,154 @@ mod tests {
             &pagination(None, 10),
         );
         assert_eq!(page.pagination.total_items, 0);
+    }
+
+    #[tokio::test]
+    async fn instructions() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .instructions_index(
+                &schema::InstructionsIndexFilter {
+                    transaction_hash: None,
+                    transaction_status: None,
+                    block: None,
+                    kind: None,
+                    authority: None,
+                },
+                &pagination(None, 50),
+            )
+            .unwrap()
+            .map(|x| format!("{} ({})", x.r#box.0, x.transaction_status));
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 50,
+                "total_pages": 1,
+                "total_items": 21
+              },
+              "items": [
+                "EXECUTE `ping` (rejected)",
+                "LOG(ERROR): A disrupting message of sorts (committed)",
+                "REMOVE `keys_from_all_secrets` from `wonderland` (rejected)",
+                "TRANSFER `125` FROM `rose#wonderland#ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers` TO `ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland` (committed)",
+                "BURN `25` FROM `rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland` (committed)",
+                "MINT `200` TO `rose#wonderland#ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers` (committed)",
+                "MINT `100` TO `rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland` (committed)",
+                "REGISTER `time-schedule` (committed)",
+                "REGISTER `pre-commit` (committed)",
+                "REGISTER `time-schedule#wonderland +Numeric` (committed)",
+                "REGISTER `pre-commit#wonderland +Numeric` (committed)",
+                "SET `another-rather-unique-metadata-set-later` = `[5,1,2,3,4]` IN `snowflake$garden_of_live_flowers` (committed)",
+                "SET `alias` = `\"Genesis\"` IN `ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis` (committed)",
+                "SET `alias` = `\"Alice (mutated)\"` IN `ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland` (committed)",
+                "REGISTER `snowflake$garden_of_live_flowers` (committed)",
+                "REGISTER `[ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers]` (committed)",
+                "REGISTER `[garden_of_live_flowers]` (committed)",
+                "REGISTER `tulip#wonderland +Numeric(0)` (committed)",
+                "REGISTER `rose#wonderland +Numeric` (committed)",
+                "REGISTER `[ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland]` (committed)",
+                "REGISTER `[wonderland]` (committed)"
+              ]
+            }"#]].assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn instructions_tx_not_found() {
+        let query = Sandbox::new().await.query().await;
+
+        let err = query
+            .instructions_index(
+                &schema::InstructionsIndexFilter {
+                    transaction_hash: Some(schema::Hash(Hash::prehashed([0; 32]))),
+                    transaction_status: None,
+                    block: None,
+                    kind: None,
+                    authority: None,
+                },
+                &pagination(None, 50),
+            )
+            .unwrap_err();
+        expect![[r#"Entity not found: transaction with hash "0000000000000000000000000000000000000000000000000000000000000001""#]].assert_eq(&format!("{err}"));
+    }
+
+    #[tokio::test]
+    async fn instructions_rejected() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .instructions_index(
+                &schema::InstructionsIndexFilter {
+                    transaction_hash: None,
+                    transaction_status: Some(schema::TransactionStatus::Rejected),
+                    block: None,
+                    kind: None,
+                    authority: None,
+                },
+                &pagination(None, 50),
+            )
+            .unwrap()
+            .map(|x| format!("{}", x.r#box.0));
+        expect![[r#"
+            [
+              "EXECUTE `ping`",
+              "REMOVE `keys_from_all_secrets` from `wonderland`"
+            ]"#]]
+        .assert_json_eq(&page.items);
+    }
+
+    #[tokio::test]
+    async fn instructions_by_tx_hash() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .instructions_index(
+                &schema::InstructionsIndexFilter {
+                    transaction_hash: Some(schema::Hash(
+                        "730A906F4D57452AEA712934A14CD4D66B0696B869BCA99CFEF1FCFA5014A97F"
+                            .parse()
+                            .unwrap(),
+                    )),
+                    transaction_status: None,
+                    block: None,
+                    kind: None,
+                    authority: None,
+                },
+                &pagination(None, 50),
+            )
+            .unwrap()
+            .map(|x| format!("{}", x.r#box.0));
+        expect![[r#"
+            [
+              "SET `another-rather-unique-metadata-set-later` = `[5,1,2,3,4]` IN `snowflake$garden_of_live_flowers`",
+              "SET `alias` = `\"Genesis\"` IN `ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis`",
+              "SET `alias` = `\"Alice (mutated)\"` IN `ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland`"
+            ]"#]].assert_json_eq(&page.items);
+    }
+
+    #[tokio::test]
+    async fn instructions_by_kind() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .instructions_index(
+                &schema::InstructionsIndexFilter {
+                    transaction_hash: None,
+                    transaction_status: None,
+                    block: None,
+                    kind: Some(schema::InstructionKind::Burn),
+                    authority: None,
+                },
+                &pagination(None, 50),
+            )
+            .unwrap()
+            .map(|x| format!("{}", x.r#box.0));
+
+        expect![[r#"
+            [
+              "BURN `25` FROM `rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland`"
+            ]"#]].assert_json_eq(&page.items);
     }
 }
