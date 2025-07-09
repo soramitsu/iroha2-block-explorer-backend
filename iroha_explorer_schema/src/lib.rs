@@ -78,11 +78,11 @@ pub struct DomainId(pub iroha::DomainId);
 /// Account
 #[derive(Serialize, ToSchema)]
 pub struct Account {
-    id: AccountId,
-    metadata: Metadata,
-    owned_domains: u32,
-    owned_assets: u32,
-    owned_nfts: u32,
+    pub id: AccountId,
+    pub metadata: Metadata,
+    pub owned_domains: usize,
+    pub owned_assets: usize,
+    pub owned_nfts: usize,
 }
 
 /// Account ID. Represented as `signatory@domain`.

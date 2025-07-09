@@ -1,17 +1,11 @@
 use std::{num::NonZero, ops::Deref, sync::Arc};
 
 use eyre::eyre;
-use iroha_core::{
-    state::{
-        StateReadOnly, StateReadOnlyWithTransactions, StateView, TransactionsReadOnly as _,
-        WorldReadOnly,
-    },
-    tx::{
-        AssetDefinition, Domain, Executable, InstructionBox, SignedTransaction,
-        TransactionRejectionReason,
-    },
+use iroha_core::state::{
+    StateReadOnly, StateReadOnlyWithTransactions, StateView, TransactionsReadOnly as _,
+    WorldReadOnly,
 };
-use iroha_data_model::prelude::{Hash, HashOf, Identifiable as _, SignedBlock};
+use iroha_data_model::{account::AccountEntry, prelude::*};
 use iroha_explorer_schema::{
     self as schema,
     pagination::{OffsetLimitIteratorExt as _, ReversePaginationError},
@@ -350,7 +344,45 @@ impl QueryExecutor {
         filter: &schema::AccountsIndexFilter,
         pagination: &schema::PaginationQueryParams,
     ) -> Result<schema::Page<schema::Account>> {
-        todo!()
+        let view = self.view();
+
+        let produce_iter = || {
+            let accounts: Box<dyn Iterator<Item = AccountEntry>> =
+                if let Some(domain) = &filter.domain {
+                    Box::new(view.world().accounts_in_domain_iter(&domain.0))
+                } else {
+                    Box::new(view.world().accounts_iter())
+                };
+
+            accounts.filter(|x| {
+                if let Some(def_id) = &filter.with_asset {
+                    let id = AssetId::new(def_id.0.to_owned(), x.id().to_owned());
+                    let exists = view.world().assets().get(&id).is_some();
+                    if !exists {
+                        return false;
+                    }
+                }
+
+                true
+            })
+        };
+
+        let total = produce_iter().count();
+        let pagination = match pagination.parse_into_direct(total) {
+            PaginationOrEmpty::Empty(x) => return Ok(x),
+            PaginationOrEmpty::Some(p) => p,
+        };
+
+        let items = produce_iter()
+            .offset_limit(pagination.to_limit_offset())
+            .map(|account| AccountWorldRef {
+                account,
+                world: view.world(),
+            })
+            .map(schema::Account::from)
+            .collect();
+
+        Ok(schema::Page::new(items, pagination.into()))
     }
 
     pub fn accounts_show(&self, id: &schema::AccountId) -> Result<schema::Account> {
@@ -395,6 +427,52 @@ fn try_retrieve_transaction_ref(
         .find(|tx_ref| tx_ref.transaction().hash() == *hash)
         .expect("Bug: transaction must be in the block");
     Some(tx_ref)
+}
+
+struct AccountWorldRef<'a, W> {
+    world: &'a W,
+    account: AccountEntry<'a>,
+}
+
+impl<'a, W> AccountWorldRef<'a, W>
+where
+    W: WorldReadOnly,
+{
+    fn domains(&self) -> usize {
+        self.world
+            .domains_iter()
+            .filter(|x| x.owned_by() == self.account.id())
+            .count()
+    }
+
+    fn assets(&self) -> usize {
+        self.world
+            .assets_iter()
+            .filter(|x| x.id().account() == self.account.id())
+            .count()
+    }
+
+    fn nfts(&self) -> usize {
+        self.world
+            .nfts_iter()
+            .filter(|x| x.owned_by() == self.account.id())
+            .count()
+    }
+}
+
+impl<W> From<AccountWorldRef<'_, W>> for schema::Account
+where
+    W: WorldReadOnly,
+{
+    fn from(value: AccountWorldRef<'_, W>) -> Self {
+        Self {
+            id: schema::AccountId(value.account.id().to_owned()),
+            metadata: schema::Metadata(value.account.metadata().to_owned()),
+            owned_domains: value.domains(),
+            owned_assets: value.assets(),
+            owned_nfts: value.nfts(),
+        }
+    }
 }
 
 pub struct DomainWorldRef<'a, W> {
@@ -1152,6 +1230,84 @@ mod tests {
               "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
               "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed",
               "BigInt(5) TimeStamp(1970-01-01T00:00:39.100Z) Committed"
-            ]"#]].assert_json_eq(&page.items);
+            ]"#]]
+        .assert_json_eq(&page.items);
+    }
+
+    #[tokio::test]
+    async fn accounts() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .accounts_index(
+                &schema::AccountsIndexFilter {
+                    with_asset: None,
+                    domain: None,
+                },
+                &pagination(None, 10),
+            )
+            .unwrap();
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_pages": 1,
+                "total_items": 3
+              },
+              "items": [
+                {
+                  "id": "ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers",
+                  "metadata": {
+                    "alias": "Carpenter"
+                  },
+                  "owned_domains": 0,
+                  "owned_assets": 1,
+                  "owned_nfts": 1
+                },
+                {
+                  "id": "ed01204164BF554923ECE1FD412D241036D863A6AE430476C898248B8237D77534CFC4@genesis",
+                  "metadata": {
+                    "alias": "Genesis"
+                  },
+                  "owned_domains": 2,
+                  "owned_assets": 0,
+                  "owned_nfts": 0
+                },
+                {
+                  "id": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+                  "metadata": {
+                    "alias": "Alice (mutated)"
+                  },
+                  "owned_domains": 1,
+                  "owned_assets": 3,
+                  "owned_nfts": 0
+                }
+              ]
+            }"#]].assert_json_eq(&page);
+    }
+
+    #[tokio::test]
+    async fn accounts_in_domain() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .accounts_index(
+                &schema::AccountsIndexFilter {
+                    with_asset: None,
+                    domain: Some(schema::DomainId("genesis".parse().unwrap())),
+                },
+                &pagination(None, 10),
+            )
+            .unwrap()
+            .map(|x| x.metadata);
+
+        expect![[r#"
+            [
+              {
+                "alias": "Genesis"
+              }
+            ]"#]].assert_json_eq(page.items);
     }
 }
