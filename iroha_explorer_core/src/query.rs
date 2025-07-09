@@ -375,8 +375,8 @@ impl QueryExecutor {
 
         let items = produce_iter()
             .offset_limit(pagination.to_limit_offset())
-            .map(|account| AccountWorldRef {
-                account,
+            .map(|entry| AccountWorldRef {
+                entry,
                 world: view.world(),
             })
             .map(schema::Account::from)
@@ -386,7 +386,20 @@ impl QueryExecutor {
     }
 
     pub fn accounts_show(&self, id: &schema::AccountId) -> Result<schema::Account> {
-        todo!()
+        let view = self.view();
+
+        view.world()
+            .accounts()
+            .get(&id.0)
+            .map(|value| AccountEntry::new(&id.0, value))
+            .map(|entry| AccountWorldRef {
+                entry,
+                world: view.world(),
+            })
+            .map(schema::Account::from)
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("account with id \"{}\"", id.0),
+            })
     }
 
     pub fn assets_index(
@@ -431,7 +444,7 @@ fn try_retrieve_transaction_ref(
 
 struct AccountWorldRef<'a, W> {
     world: &'a W,
-    account: AccountEntry<'a>,
+    entry: AccountEntry<'a>,
 }
 
 impl<'a, W> AccountWorldRef<'a, W>
@@ -441,21 +454,21 @@ where
     fn domains(&self) -> usize {
         self.world
             .domains_iter()
-            .filter(|x| x.owned_by() == self.account.id())
+            .filter(|x| x.owned_by() == self.entry.id())
             .count()
     }
 
     fn assets(&self) -> usize {
         self.world
             .assets_iter()
-            .filter(|x| x.id().account() == self.account.id())
+            .filter(|x| x.id().account() == self.entry.id())
             .count()
     }
 
     fn nfts(&self) -> usize {
         self.world
             .nfts_iter()
-            .filter(|x| x.owned_by() == self.account.id())
+            .filter(|x| x.owned_by() == self.entry.id())
             .count()
     }
 }
@@ -466,8 +479,8 @@ where
 {
     fn from(value: AccountWorldRef<'_, W>) -> Self {
         Self {
-            id: schema::AccountId(value.account.id().to_owned()),
-            metadata: schema::Metadata(value.account.metadata().to_owned()),
+            id: schema::AccountId(value.entry.id().to_owned()),
+            metadata: schema::Metadata(value.entry.metadata().to_owned()),
             owned_domains: value.domains(),
             owned_assets: value.assets(),
             owned_nfts: value.nfts(),
@@ -1308,6 +1321,27 @@ mod tests {
               {
                 "alias": "Genesis"
               }
-            ]"#]].assert_json_eq(page.items);
+            ]"#]]
+        .assert_json_eq(page.items);
+    }
+
+    #[tokio::test]
+    async fn account_by_id() {
+        let query = Sandbox::new().await.query().await;
+
+        let item = query
+            .accounts_show(&schema::AccountId(ALICE.to_owned()))
+            .unwrap();
+
+        expect![[r#"
+            {
+              "id": "ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+              "metadata": {
+                "alias": "Alice (mutated)"
+              },
+              "owned_domains": 1,
+              "owned_assets": 3,
+              "owned_nfts": 0
+            }"#]].assert_json_eq(item);
     }
 }
