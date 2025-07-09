@@ -44,4 +44,6 @@ tokio = { version = "1", features = ["process"] }
 
 [build-dependencies]
 vergen = { version = "8.3.1", default-features = false, features = ["cargo"] }
+serde = "1.0"
+serde_json = "1.0"
 
