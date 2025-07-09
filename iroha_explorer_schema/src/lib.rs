@@ -26,8 +26,8 @@ use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
     pub use iroha_config::client_api::ConfigGetDTO;
-    pub use iroha_data_model::asset::AssetEntry;
     pub use iroha_data_model::prelude::*;
+    pub use iroha_data_model::{asset::AssetEntry, nft::NftEntry};
 }
 
 /// Domain
@@ -139,6 +139,16 @@ pub struct Nft {
     id: NftId,
     owned_by: AccountId,
     content: Metadata,
+}
+
+impl From<iroha::NftEntry<'_>> for Nft {
+    fn from(value: iroha::NftEntry<'_>) -> Self {
+        Self {
+            id: NftId(value.id().to_owned()),
+            owned_by: AccountId(value.owned_by().to_owned()),
+            content: Metadata(value.content().to_owned()),
+        }
+    }
 }
 
 /// Asset Definition ID. Represented in a form of `asset#domain`.

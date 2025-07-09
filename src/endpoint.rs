@@ -300,7 +300,7 @@ async fn nfts_index(
     Query(pagination): Query<schema::PaginationQueryParams>,
     Query(filter): Query<schema::AssetDefinitionsIndexFilter>,
 ) -> Result<Json<Page<schema::Nft>>, AppError> {
-    let page = state.query().await?.nfts_index(&filter, &pagination)?;
+    let page = state.query().await?.nfts_index(&filter, &pagination);
     Ok(Json(page))
 }
 

@@ -5,7 +5,7 @@ use iroha_core::state::{
     StateReadOnly, StateReadOnlyWithTransactions, StateView, TransactionsReadOnly as _,
     WorldReadOnly,
 };
-use iroha_data_model::{account::AccountEntry, asset::AssetEntry, prelude::*};
+use iroha_data_model::{account::AccountEntry, asset::AssetEntry, nft::NftEntry, prelude::*};
 use iroha_explorer_schema::{
     self as schema,
     pagination::{OffsetLimitIteratorExt as _, ReversePaginationError},
@@ -458,12 +458,51 @@ impl QueryExecutor {
         &self,
         filter: &schema::AssetDefinitionsIndexFilter,
         pagination: &schema::PaginationQueryParams,
-    ) -> Result<schema::Page<schema::Nft>> {
-        todo!()
+    ) -> schema::Page<schema::Nft> {
+        let view = self.view();
+        let produce_iter = || {
+            let iter: Box<dyn Iterator<Item = NftEntry>> = if let Some(domain) = &filter.domain {
+                // TODO: error if domain not found?
+                Box::new(view.world().nfts_in_domain_iter(&domain.0))
+            } else {
+                Box::new(view.world().nfts_iter())
+            };
+
+            iter.filter(|item| {
+                if let Some(account) = &filter.owned_by {
+                    if item.owned_by() != &account.0 {
+                        return false;
+                    }
+                }
+                true
+            })
+        };
+
+        let total = produce_iter().count();
+        let pagination = match pagination.parse_into_direct(total) {
+            PaginationOrEmpty::Empty(x) => return x,
+            PaginationOrEmpty::Some(p) => p,
+        };
+
+        let items = produce_iter()
+            .offset_limit(pagination.to_limit_offset())
+            .map(schema::Nft::from)
+            .collect();
+
+        schema::Page::new(items, pagination.into())
     }
 
     pub fn nfts_show(&self, id: &schema::NftId) -> Result<schema::Nft> {
-        todo!()
+        let view = self.view();
+
+        view.world()
+            .nfts()
+            .get(&id.0)
+            .map(|value| NftEntry::new(&id.0, value))
+            .map(schema::Nft::from)
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("nft with id \"{}\"", id.0),
+            })
     }
 }
 
@@ -1420,6 +1459,45 @@ mod tests {
                 {
                   "id": "time-schedule##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
                   "value": "1"
+                }
+              ]
+            }"#]].assert_json_eq(page);
+    }
+
+    #[tokio::test]
+    async fn nfts() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query.nfts_index(
+            &schema::AssetDefinitionsIndexFilter {
+                owned_by: None,
+                domain: None,
+            },
+            &pagination(None, 10),
+        );
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_pages": 1,
+                "total_items": 1
+              },
+              "items": [
+                {
+                  "id": "snowflake$garden_of_live_flowers",
+                  "owned_by": "ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers",
+                  "content": {
+                    "another-rather-unique-metadata-set-later": [
+                      5,
+                      1,
+                      2,
+                      3,
+                      4
+                    ],
+                    "what-am-i": "An NFT, unique as a snowflake"
+                  }
                 }
               ]
             }"#]].assert_json_eq(page);
