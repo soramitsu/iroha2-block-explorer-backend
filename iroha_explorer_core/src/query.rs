@@ -442,7 +442,16 @@ impl QueryExecutor {
     }
 
     pub fn assets_show(&self, id: &schema::AssetId) -> Result<schema::Asset> {
-        todo!()
+        let view = self.view();
+
+        view.world()
+            .assets()
+            .get(&id.0)
+            .map(|value| AssetEntry::new(&id.0, value))
+            .map(schema::Asset::from)
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("asset with id \"{}\"", id.0),
+            })
     }
 
     pub fn nfts_index(
