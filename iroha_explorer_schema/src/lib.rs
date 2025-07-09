@@ -7,6 +7,7 @@ pub mod pagination;
 
 use crate::pagination::{DirectPagination, ReversePagination, ReversePaginationError};
 use base64::Engine;
+use chrono::naive::serde::ts_microseconds_option::serialize;
 use chrono::{DateTime, Utc};
 use nonzero_ext::nonzero;
 use serde::ser::SerializeMap;
@@ -1130,18 +1131,10 @@ pub struct GeoLocation {
     derive_more::Display,
     derive_more::FromStr,
     ToSchema,
+    Serialize,
 )]
 #[schema(value_type = String)]
 pub struct ToriiUrl(pub Url);
-
-impl Serialize for ToriiUrl {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        todo!()
-    }
-}
 
 #[derive(IntoParams, Deserialize)]
 pub struct AccountsIndexFilter {

@@ -638,7 +638,41 @@ mod state_tests {
 
         assert!(state.network_status().is_none());
         let info: Vec<_> = state.peers_info().collect();
-        expect![].assert_json_eq(info);
+        expect![[r#"
+            [
+              {
+                "url": "http://iroha.tech/0",
+                "connected": false,
+                "telemetry_unsupported": false,
+                "config": null,
+                "location": null,
+                "connected_peers": null
+              },
+              {
+                "url": "http://iroha.tech/1",
+                "connected": false,
+                "telemetry_unsupported": false,
+                "config": null,
+                "location": null,
+                "connected_peers": null
+              },
+              {
+                "url": "http://iroha.tech/2",
+                "connected": false,
+                "telemetry_unsupported": false,
+                "config": null,
+                "location": null,
+                "connected_peers": null
+              },
+              {
+                "url": "http://iroha.tech/3",
+                "connected": false,
+                "telemetry_unsupported": false,
+                "config": null,
+                "location": null,
+                "connected_peers": null
+              }
+            ]"#]].assert_json_eq(info);
         let peers: Vec<_> = state.peers_status().collect();
         assert!(peers.is_empty())
     }
@@ -802,8 +836,49 @@ mod state_tests {
 
         let info = state.peers_info().find(|x| x.url == url).unwrap();
         let status = state.single_peer_status(&url).expect("must be");
-        expect![].assert_json_eq(info);
-        expect![].assert_json_eq(status);
+        expect![[r#"
+            {
+              "url": "http://iroha.tech/test",
+              "connected": true,
+              "telemetry_unsupported": false,
+              "config": {
+                "public_key": "ed0120F6E4EF7509559C05F361B36CEB3473BE8A2D5A6A1903BC887261746FDBA36728",
+                "queue_capacity": 65536,
+                "network_block_gossip_size": 4,
+                "network_block_gossip_period": {
+                  "ms": 10000
+                },
+                "network_tx_gossip_size": 500,
+                "network_tx_gossip_period": {
+                  "ms": 1000
+                }
+              },
+              "location": {
+                "lat": 55.0,
+                "lon": 32.0,
+                "country": "Wonderland",
+                "city": "Makondo"
+              },
+              "connected_peers": [
+                "ed0120C9B1EA0502ABE3B25F6A6C9687E22C1665D1AC5BBD98B02006FEFFE259820D44",
+                "ed0120F9C065A8E1A37AF6C4A6CDEE715DFD2E02D29BEE7B8AA9FF1AAE4D19F67A56E5"
+              ]
+            }"#]].assert_json_eq(info);
+        expect![[r#"
+            {
+              "url": "http://iroha.tech/test",
+              "block": 0,
+              "commit_time": {
+                "ms": 0
+              },
+              "avg_commit_time": {
+                "ms": 122
+              },
+              "queue_size": 0,
+              "uptime": {
+                "ms": 0
+              }
+            }"#]].assert_json_eq(status);
 
         let _ = state.update_peer(&url, Update::Disconnected);
 
