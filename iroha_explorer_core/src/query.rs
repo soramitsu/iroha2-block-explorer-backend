@@ -5,7 +5,7 @@ use iroha_core::state::{
     StateReadOnly, StateReadOnlyWithTransactions, StateView, TransactionsReadOnly as _,
     WorldReadOnly,
 };
-use iroha_data_model::{account::AccountEntry, prelude::*};
+use iroha_data_model::{account::AccountEntry, asset::AssetEntry, prelude::*};
 use iroha_explorer_schema::{
     self as schema,
     pagination::{OffsetLimitIteratorExt as _, ReversePaginationError},
@@ -407,7 +407,38 @@ impl QueryExecutor {
         filter: &schema::AssetsIndexFilter,
         pagination: &schema::PaginationQueryParams,
     ) -> Result<schema::Page<schema::Asset>> {
-        todo!()
+        let view = self.view();
+
+        let produce_iter = || {
+            let iter: Box<dyn Iterator<Item = AssetEntry>> = if let Some(account) = &filter.owned_by
+            {
+                Box::new(view.world().assets_in_account_iter(&account.0))
+            } else {
+                Box::new(view.world().assets_iter())
+            };
+
+            iter.filter(|entry| {
+                if let Some(id) = &filter.definition {
+                    if entry.id().definition() != &id.0 {
+                        return false;
+                    }
+                }
+                true
+            })
+        };
+
+        let total = produce_iter().count();
+        let pagination = match pagination.parse_into_direct(total) {
+            PaginationOrEmpty::Empty(x) => return Ok(x),
+            PaginationOrEmpty::Some(p) => p,
+        };
+
+        let items = produce_iter()
+            .offset_limit(pagination.to_limit_offset())
+            .map(schema::Asset::from)
+            .collect();
+
+        Ok(schema::Page::new(items, pagination.into()))
     }
 
     pub fn assets_show(&self, id: &schema::AssetId) -> Result<schema::Asset> {
@@ -459,10 +490,7 @@ where
     }
 
     fn assets(&self) -> usize {
-        self.world
-            .assets_iter()
-            .filter(|x| x.id().account() == self.entry.id())
-            .count()
+        self.world.assets_in_account_iter(self.entry.id()).count()
     }
 
     fn nfts(&self) -> usize {
@@ -1343,5 +1371,48 @@ mod tests {
               "owned_assets": 3,
               "owned_nfts": 0
             }"#]].assert_json_eq(item);
+    }
+
+    #[tokio::test]
+    async fn assets() {
+        let query = Sandbox::new().await.query().await;
+
+        let page = query
+            .assets_index(
+                &schema::AssetsIndexFilter {
+                    owned_by: None,
+                    definition: None,
+                },
+                &pagination(None, 10),
+            )
+            .unwrap();
+
+        expect![[r#"
+            {
+              "pagination": {
+                "page": 1,
+                "per_page": 10,
+                "total_pages": 1,
+                "total_items": 4
+              },
+              "items": [
+                {
+                  "id": "rose#wonderland#ed0120E9F632D3034BAB6BB26D92AC8FD93EF878D9C5E69E01B61B4C47101884EE2F99@garden_of_live_flowers",
+                  "value": "75"
+                },
+                {
+                  "id": "pre-commit##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+                  "value": "3"
+                },
+                {
+                  "id": "rose##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+                  "value": "200"
+                },
+                {
+                  "id": "time-schedule##ed0120CE7FA46C9DCE7EA4B125E2E36BDB63EA33073E7590AC92816AE1E861B7048B03@wonderland",
+                  "value": "1"
+                }
+              ]
+            }"#]].assert_json_eq(page);
     }
 }

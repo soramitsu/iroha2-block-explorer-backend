@@ -26,6 +26,7 @@ use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 
 mod iroha {
     pub use iroha_config::client_api::ConfigGetDTO;
+    pub use iroha_data_model::asset::AssetEntry;
     pub use iroha_data_model::prelude::*;
 }
 
@@ -161,6 +162,15 @@ pub enum Mintable {
 pub struct Asset {
     id: AssetId,
     value: Decimal,
+}
+
+impl From<iroha::AssetEntry<'_>> for Asset {
+    fn from(value: iroha::AssetEntry<'_>) -> Self {
+        Self {
+            id: AssetId(value.id().to_owned()),
+            value: value.value().into(),
+        }
+    }
 }
 
 /// Asset ID. Union of [`AssetDefinitionId`] (`name#domain`) and [`AccountId`] (`signatory@domain`).
