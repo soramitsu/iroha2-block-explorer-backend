@@ -376,23 +376,18 @@ mod tests {
         ensure_status(&client, path("/api/v1/nfts"), StatusCode::OK).await;
         ensure_status(
             &client,
-            path("/api/v1/nfts/snowflake$wonderland"),
+            path("/api/v1/nfts/snowflake$garden_of_live_flowers"),
             StatusCode::OK,
         )
         .await;
         ensure_status(&client, path("/api/v1/assets-definitions"), StatusCode::OK).await;
         ensure_status(
             &client,
-            path("/api/v1/assets-definitions/cabbage%23garden_of_live_flowers"),
+            path("/api/v1/assets-definitions/tulip%23wonderland"),
             StatusCode::OK,
         )
         .await;
-        ensure_status(
-            &client,
-            path("/api/v1/telemetry/network"),
-            StatusCode::SERVICE_UNAVAILABLE,
-        )
-        .await;
+        ensure_status(&client, path("/api/v1/telemetry/network"), StatusCode::OK).await;
         ensure_status(&client, path("/api/v1/telemetry/peers"), StatusCode::OK).await;
         ensure_status(
             &client,

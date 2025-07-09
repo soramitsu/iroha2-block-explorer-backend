@@ -21,7 +21,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    // TODO: remove result?
+    // TODO: remove result? or use timeout inside?
     async fn query(&self) -> Result<query::QueryExecutor, AppError> {
         let guard = self.state.acquire_guard().await;
         Ok(query::QueryExecutor::new(guard))

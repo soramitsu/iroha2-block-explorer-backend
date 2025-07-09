@@ -27,7 +27,7 @@ use utoipa::{schema, IntoParams, PartialSchema, ToSchema};
 mod iroha {
     pub use iroha_config::client_api::ConfigGetDTO;
     pub use iroha_data_model::prelude::*;
-    pub use iroha_data_model::{asset::AssetEntry, nft::NftEntry};
+    pub use iroha_data_model::{asset::AssetEntry, ipfs::IpfsPath, nft::NftEntry};
 }
 
 /// Domain
@@ -113,24 +113,19 @@ pub struct AssetDefinition {
     logo: Option<IpfsPath>,
     metadata: Metadata,
     owned_by: AccountId,
-    assets: u32,
+    total_quantity: Decimal,
 }
 
 impl From<&iroha::AssetDefinition> for AssetDefinition {
     fn from(value: &iroha::AssetDefinition) -> Self {
-        todo!()
-        // Self {
-        //     id: AssetDefinitionId(value.id.0 .0),
-        //     mintable: match value.mintable {
-        //         repo::Mintable::Infinitely => Mintable::Infinitely,
-        //         repo::Mintable::Once => Mintable::Once,
-        //         repo::Mintable::Not => Mintable::Not,
-        //     },
-        //     logo: value.logo.map(|x| IpfsPath(x.0)),
-        //     metadata: Metadata(value.metadata.into()),
-        //     owned_by: AccountId(value.owned_by.0 .0),
-        //     assets: value.assets,
-        // }
+        Self {
+            id: AssetDefinitionId(value.id.to_owned()),
+            mintable: value.mintable.into(),
+            logo: value.logo.clone().map(Into::into),
+            metadata: Metadata(value.metadata.to_owned()),
+            owned_by: AccountId(value.owned_by.to_owned()),
+            total_quantity: Decimal::from(&value.total_quantity()),
+        }
     }
 }
 
@@ -166,6 +161,16 @@ pub enum Mintable {
     Infinitely,
     Once,
     Not,
+}
+
+impl From<iroha::Mintable> for Mintable {
+    fn from(value: iroha::Mintable) -> Self {
+        match value {
+            iroha::Mintable::Infinitely => Self::Infinitely,
+            iroha::Mintable::Once => Self::Once,
+            iroha::Mintable::Not => Self::Not,
+        }
+    }
 }
 
 #[derive(ToSchema, Serialize)]
@@ -220,6 +225,12 @@ pub struct Metadata(pub iroha::Metadata);
 #[derive(Serialize, ToSchema)]
 #[schema(value_type = String)]
 pub struct IpfsPath(pub String);
+
+impl From<iroha::IpfsPath> for IpfsPath {
+    fn from(value: iroha::IpfsPath) -> Self {
+        Self(value.to_string())
+    }
+}
 
 pub struct ScaleBinary<T>(T);
 
