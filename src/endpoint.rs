@@ -17,12 +17,14 @@ use iroha_explorer_telemetry::Telemetry;
 #[derive(Clone)]
 pub struct AppState {
     telemetry: Telemetry,
-    core_state: state::State,
+    state: state::State,
 }
 
 impl AppState {
+    // TODO: remove result?
     async fn query(&self) -> Result<query::QueryExecutor, AppError> {
-        todo!()
+        let guard = self.state.acquire_guard().await;
+        Ok(query::QueryExecutor::new(guard))
     }
 }
 
@@ -438,10 +440,7 @@ pub fn router(state: state::State, telemetry: Telemetry) -> Router {
         .route("/telemetry/peers", get(telemetry_peers))
         .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))
-        .with_state(AppState {
-            core_state: state,
-            telemetry,
-        })
+        .with_state(AppState { state, telemetry })
 }
 
 // TODO: add new paths

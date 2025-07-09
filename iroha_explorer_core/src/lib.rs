@@ -121,3 +121,25 @@ pub fn start(
 
     (state, sup.start())
 }
+
+#[cfg(feature = "sample")]
+pub async fn start_sample(
+    telemetry: Telemetry,
+    signal: ShutdownSignal,
+) -> (
+    state::State,
+    impl Future<Output = Result<(), iroha_futures::supervisor::Error>> + Sized + Send + Sync,
+) {
+    let dir = tempfile::TempDir::new().unwrap().keep();
+    tracing::debug!(
+        dir = %dir.display(),
+        "Created temporary directory for sample blocks"
+    );
+    let (state, state_fut) = state::State::new(dir, telemetry, signal.clone());
+
+    for block in iroha_explorer_test_utils::blockchain::sample() {
+        state.insert_block(block.clone()).await.unwrap();
+    }
+
+    (state, state_fut)
+}

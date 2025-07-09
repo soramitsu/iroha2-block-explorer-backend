@@ -79,17 +79,17 @@ RUST_LOG=iroha_explorer=debug,sqlx=debug
 test "$(curl -fsSL localhost:4000/api/health)" = "healthy" && echo OK || echo FAIL
 ```
 
-### Serve with test data
+### Serve with sample data
 
-_Only available in `debug` builds._
+_Only available with `sample` feature enabled._
 
-Serve test data without connecting to Iroha:
+Serve sample data without connecting to Iroha:
 
 ```shell
-cargo run -- serve-test
+cargo run --features sample -- serve-sample
 ```
 
-> Note: telemetry data will be unavailable in this case.
+> Note: peers telemetry data will be unavailable in this case.
 
 ## Compatibility and Versioning
 

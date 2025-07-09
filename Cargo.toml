@@ -53,6 +53,9 @@ tracing-subscriber = { version = "0.3.10", features = ["env-filter"] }
 url = "2.4.0"
 utoipa = { version = "5.3.1", features = ["axum_extras", "chrono", "preserve_order", "preserve_path_order"] }
 
+[features]
+sample = ["iroha_explorer_core/sample"]
+
 [dependencies]
 iroha_explorer_core = { path = "./iroha_explorer_core/" }
 iroha_explorer_iroha_client = { path = "./iroha_explorer_iroha_client/" }
@@ -78,3 +81,6 @@ axum = { version = "0.8.3", features = ["http2", "macros"] }
 clap = { version = "4", features = ["derive", "env"] }
 const-str = { version = "0.6", features = ["proc"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
+
+[dev-dependencies]
+iroha_explorer_core = { path = "./iroha_explorer_core/", features = ["sample"] }

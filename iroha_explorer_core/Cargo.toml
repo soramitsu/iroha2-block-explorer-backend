@@ -4,6 +4,9 @@ version = "0.2.1"
 edition = "2021"
 description = "Explorer's wrap around Iroha Core"
 
+[features]
+sample = ["dep:tempfile", "dep:iroha_explorer_test_utils"]
+
 [dependencies]
 iroha_explorer_iroha_client = { path = "../iroha_explorer_iroha_client/" }
 iroha_explorer_schema = { path = "../iroha_explorer_schema/" }
@@ -22,6 +25,9 @@ nonzero_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+iroha_explorer_test_utils = { path = "../iroha_explorer_test_utils/", optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 expect-test = { workspace = true }

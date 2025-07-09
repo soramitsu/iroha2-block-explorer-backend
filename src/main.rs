@@ -22,7 +22,6 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
-use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use utoipa::OpenApi;
@@ -39,10 +38,6 @@ const VERSION: &str = const_str::format!(
 #[derive(Debug, Parser)]
 #[clap(about = "Iroha 2 Explorer Backend", version = VERSION, long_about = None)]
 pub struct Args {
-    /// Path to store blocks in
-    #[clap(long, short, env = "IROHA_EXPLORER_STORE_DIR")]
-    pub store_dir: PathBuf,
-
     #[command(subcommand)]
     pub command: Subcommand,
 }
@@ -51,9 +46,9 @@ pub struct Args {
 pub enum Subcommand {
     /// Run the server
     Serve(ServeArgs),
-    // #[cfg(debug_assertions)]
-    // /// DEBUG-ONLY: run server with test data
-    // ServeTest(ServeBaseArgs),
+    #[cfg(any(feature = "sample", test))]
+    /// Run the server with sample data
+    ServeSample(ServeBaseArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -126,6 +121,9 @@ pub struct ServeBaseArgs {
 
 #[derive(Parser, Debug)]
 pub struct ServeArgs {
+    /// Path to store blocks in
+    #[clap(long, short, env = "IROHA_EXPLORER_STORE_DIR")]
+    pub store_dir: PathBuf,
     #[command(flatten)]
     base: ServeBaseArgs,
     #[command(flatten)]
@@ -162,13 +160,13 @@ async fn main() {
         .init();
 
     match args.command {
-        Subcommand::Serve(serve_args) => serve(serve_args, args.store_dir).await,
-        // #[cfg(debug_assertions)]
-        // Subcommand::ServeTest(args) => serve_test(args).await,
+        Subcommand::Serve(serve_args) => serve(serve_args).await,
+        #[cfg(any(feature = "sample", test))]
+        Subcommand::ServeSample(args) => serve_sample(args).await,
     }
 }
 
-async fn serve(args: ServeArgs, store_dir: PathBuf) {
+async fn serve(args: ServeArgs) {
     let client = args.iroha.client();
 
     let mut sup = Supervisor::new();
@@ -183,7 +181,7 @@ async fn serve(args: ServeArgs, store_dir: PathBuf) {
 
     let state = {
         let (state, fut) = iroha_explorer_core::start(
-            store_dir,
+            args.store_dir,
             telemetry.clone(),
             client.clone(),
             sup.shutdown_signal(),
@@ -192,7 +190,7 @@ async fn serve(args: ServeArgs, store_dir: PathBuf) {
             tokio::spawn(async move {
                 if let Err(error) = fut.await {
                     tracing::error!(%error, "Core supervisor exited with error");
-                    // FIXME: communicate error to top-level properly
+                    // FIXME: pass error to top-level properly
                     panic!("not okay")
                 }
             }),
@@ -259,9 +257,42 @@ async fn do_serve(
         .unwrap()
 }
 
-#[cfg(test)]
-async fn serve_test(args: ServeBaseArgs) {
-    todo!()
+#[cfg(any(feature = "sample", test))]
+async fn serve_sample(args: ServeBaseArgs) {
+    let mut sup = Supervisor::new();
+
+    let telemetry = {
+        let (tel, fut) = Telemetry::new(TelemetryConfig {
+            urls: <_>::default(),
+        });
+        sup.monitor(Child::new(tokio::spawn(fut), OnShutdown::Abort));
+        tel
+    };
+
+    let state = {
+        let telemetry = telemetry.clone();
+        let (state, fut) =
+            iroha_explorer_core::start_sample(telemetry, sup.shutdown_signal()).await;
+        sup.monitor(Child::new(
+            tokio::spawn(async move { fut.await.unwrap() }),
+            OnShutdown::Wait(Duration::from_secs(7)),
+        ));
+        state
+    };
+
+    sup.monitor(Child::new(
+        tokio::spawn({
+            let state = state.clone();
+            let signal = sup.shutdown_signal();
+            async move {
+                do_serve(state, telemetry, signal, args).await;
+            }
+        }),
+        OnShutdown::Wait(Duration::from_secs(10)),
+    ));
+
+    sup.setup_shutdown_on_os_signals().unwrap();
+    sup.start().await.unwrap()
 }
 
 /// Health check
@@ -270,17 +301,6 @@ async fn serve_test(args: ServeBaseArgs) {
 ))]
 async fn health_check() -> &'static str {
     "healthy"
-}
-
-#[cfg(test)]
-fn init_test_logger() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| DEFAULT_LOG.into()),
-        )
-        .with(tracing_subscriber::fmt::layer().pretty())
-        .init();
 }
 
 #[cfg(test)]
@@ -320,7 +340,7 @@ mod tests {
         // Uncomment for troubleshooting
         // init_test_logger();
 
-        spawn(serve_test(ServeBaseArgs {
+        spawn(serve_sample(ServeBaseArgs {
             ip: "127.0.0.1".parse()?,
             port: 9928,
         }));
