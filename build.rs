@@ -1,13 +1,13 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Metadata {
-    #[serde(rename(serialize = "versions"))]
+    #[serde(rename(deserialize = "packages"))]
     #[serde(deserialize_with = "deserialize_data")]
-    packages: Vec<Data>,
+    versions: Vec<Data>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Data {
     name: String,
     version: String,
@@ -20,7 +20,7 @@ where
     let metadata = Vec::<Data>::deserialize(deserializer)?;
     Ok(metadata
         .into_iter()
-        .filter(|data| data.name.starts_with("iroha"))
+        .filter(|data| matches!(data.name.as_str(), "iroha_data_model" | "iroha_explorer"))
         .collect::<Vec<_>>())
 }
 
@@ -37,10 +37,13 @@ fn main() {
         .unwrap();
 
     let cargo_metadata = std::str::from_utf8(&output.stdout).unwrap();
-    let version_metadata = serde_json::from_str::<Metadata>(cargo_metadata).unwrap();
-    let version_metadata = serde_json::to_string(&version_metadata).unwrap(); 
+    let metadata = serde_json::from_str::<Metadata>(cargo_metadata).unwrap();
 
-    println!("cargo:rustc-env=VERSION_METADATA={version_metadata}");
-
-    // panic!("{}", version_metadata);
+    for Data { version, name } in &metadata.versions {
+        if name == "iroha_explorer" {
+            println!("cargo:rustc-env=VERGEN_EXPLORER_VERSION={version}");
+        } else if name == "iroha_data_model" {
+            println!("cargo:rustc-env=VERGEN_IROHA_COMPAT=v{version}");
+        }
+    }
 }
