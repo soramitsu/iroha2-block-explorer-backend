@@ -403,6 +403,7 @@ mod tests {
         )
         .await;
         ensure_status(&client, path("/api/v1/telemetry/live"), StatusCode::OK).await;
+        ensure_status(&client, path("/api/v1/info"), StatusCode::OK).await;
 
         Ok(())
     }
