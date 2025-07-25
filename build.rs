@@ -1,13 +1,5 @@
+use serde::Deserialize;
 use std::str::FromStr;
-
-use serde::{Deserialize, Deserializer};
-
-#[derive(Deserialize)]
-struct VersionMetadata {
-    #[serde(rename(deserialize = "packages"))]
-    #[serde(deserialize_with = "deserialize_data")]
-    versions: Vec<Data>,
-}
 
 #[derive(Deserialize)]
 struct Data {
@@ -15,11 +7,10 @@ struct Data {
     version: String,
 }
 
-#[derive(PartialEq, Debug)]
 enum ExplorerMetadata {
     ExplorerVersion,
     IrohaCompatibility,
-    Unknown,
+    Other,
 }
 
 impl FromStr for ExplorerMetadata {
@@ -28,20 +19,9 @@ impl FromStr for ExplorerMetadata {
         match s {
             "iroha_explorer" => Ok(Self::ExplorerVersion),
             "iroha_data_model" => Ok(Self::IrohaCompatibility),
-            _ => Ok(Self::Unknown),
+            _ => Ok(Self::Other),
         }
     }
-}
-
-fn deserialize_data<'de, D>(deserializer: D) -> Result<Vec<Data>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let metadata = Vec::<Data>::deserialize(deserializer)?;
-    Ok(metadata
-        .into_iter()
-        .filter(|data| data.name.starts_with("iroha"))
-        .collect::<Vec<_>>())
 }
 
 fn main() {
@@ -50,15 +30,17 @@ fn main() {
         .cargo_features()
         .emit()
         .unwrap();
+
     let output = std::process::Command::new("cargo")
         .arg("metadata")
         .output()
         .unwrap();
 
     let metadata = std::str::from_utf8(&output.stdout).unwrap();
-    let metadata = serde_json::from_str::<VersionMetadata>(metadata).unwrap();
+    let metadata = serde_json::from_str::<serde_json::Value>(metadata).unwrap();
+    let versions = serde_json::from_value::<Vec<Data>>(metadata["packages"].clone()).unwrap();
 
-    for Data { version, name } in &metadata.versions {
+    for Data { version, name } in &versions {
         match name.parse::<ExplorerMetadata>() {
             Ok(ExplorerMetadata::ExplorerVersion) => {
                 println!("cargo:rustc-env=VERGEN_EXPLORER_VERSION={version}")
@@ -66,10 +48,9 @@ fn main() {
             Ok(ExplorerMetadata::IrohaCompatibility) => {
                 println!("cargo:rustc-env=VERGEN_IROHA_COMPAT=v{version}")
             }
-            Ok(ExplorerMetadata::Unknown) => {
-                // skip everthing else
+            _ => {
+                // ignore everything else...
             }
-            Err(_) => unreachable!(),
         }
     }
 }

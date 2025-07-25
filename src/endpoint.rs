@@ -551,10 +551,11 @@ pub async fn telemetry_peers_info(
     Ok(Json(data))
 }
 
+/// Get information about the explorer
 #[derive(Serialize, ToSchema)]
 pub struct ExplorerInfo {
-    explorer_version: &'static str,
-    iroha_compatibility: &'static str,
+    version: &'static str,
+    iroha_compatible_version: &'static str,
 }
 
 #[utoipa::path(
@@ -566,11 +567,11 @@ pub struct ExplorerInfo {
     )
 )]
 pub async fn explorer_info() -> Json<ExplorerInfo> {
-    let explorer_version = env!("VERGEN_EXPLORER_VERSION");
-    let iroha_compatibility = env!("VERGEN_IROHA_COMPAT");
+    let version = env!("VERGEN_EXPLORER_VERSION");
+    let iroha_compatible_version = env!("VERGEN_IROHA_COMPAT");
     Json(ExplorerInfo {
-        explorer_version,
-        iroha_compatibility,
+        version,
+        iroha_compatible_version,
     })
 }
 
