@@ -7,8 +7,8 @@ use axum::{
 };
 use futures_util::Stream;
 use futures_util::StreamExt;
-use serde::Deserialize;
-use utoipa::{IntoParams, OpenApi};
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::schema::{Page, PaginationQueryParams, TelemetryStreamMessage, TransactionStatus};
 use crate::telemetry::Telemetry;
@@ -551,6 +551,30 @@ pub async fn telemetry_peers_info(
     Ok(Json(data))
 }
 
+/// Get information about the explorer
+#[derive(Serialize, ToSchema)]
+pub struct ExplorerInfo {
+    version: &'static str,
+    iroha_compatible_version: &'static str,
+}
+
+#[utoipa::path(
+    get,
+    path = "/info",
+    tags = ["Explorer information"],
+    responses(
+        (status = 200, description = "OK", body = ExplorerInfo)
+    )
+)]
+pub async fn explorer_info() -> Json<ExplorerInfo> {
+    let version = env!("VERGEN_EXPLORER_VERSION");
+    let iroha_compatible_version = env!("VERGEN_IROHA_COMPAT");
+    Json(ExplorerInfo {
+        version,
+        iroha_compatible_version,
+    })
+}
+
 pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
     Router::new()
         .route("/domains", get(domains_index))
@@ -576,6 +600,7 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
         .route("/telemetry/peers", get(telemetry_peers))
         .route("/telemetry/peers-info", get(telemetry_peers_info))
         .route("/telemetry/live", get(telemetry_live))
+        .route("/info", get(explorer_info))
         .with_state(AppState { repo, telemetry })
 }
 
@@ -598,6 +623,7 @@ pub fn router(repo: Repo, telemetry: Telemetry) -> Router {
         transactions_index,
         transactions_show,
         instructions_index,
+        explorer_info,
     ),
     nest((path = "/telemetry", api = TelemetryApi)),
     tags(
@@ -612,6 +638,7 @@ pub struct Api;
     telemetry_network,
     telemetry_peers,
     telemetry_peers_info,
-    telemetry_live
+    telemetry_live,
+    telemetry_network_status_live
 ))]
 struct TelemetryApi;
